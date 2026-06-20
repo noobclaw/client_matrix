@@ -13,7 +13,7 @@ import { ExclamationTriangleIcon } from '@heroicons/react/24/outline';
 interface SidebarProps {
   onShowSettings: () => void;
   onShowLogin?: () => void;
-  activeView: 'cowork' | 'skills' | 'scheduledTasks' | 'mcp' | 'wallet' | 'invite' | 'quickuse' | 'scenarioCreate' | 'scenarioRuns' | 'web3news' | 'hotsearch' | 'partners' | 'personality';
+  activeView: 'cowork' | 'skills' | 'scheduledTasks' | 'mcp' | 'wallet' | 'invite' | 'quickuse' | 'scenarioCreate' | 'scenarioRuns' | 'web3news' | 'hotsearch' | 'partners' | 'personality' | 'matrix';
   onShowSkills: () => void;
   onShowCowork: () => void;
   onShowScheduledTasks: () => void;
@@ -27,6 +27,7 @@ interface SidebarProps {
   onShowHotSearch: () => void;
   onShowPersonality: () => void;
   onShowPartners: () => void;
+  onShowMatrix: () => void;
   onNewChat: () => void;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
@@ -49,6 +50,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   onShowHotSearch,
   onShowPersonality,
   onShowPartners,
+  onShowMatrix,
   onNewChat,
   isCollapsed,
   onToggleCollapse,
@@ -228,6 +230,20 @@ const Sidebar: React.FC<SidebarProps> = ({
               {i18nService.t('globalHotSearch')}
             </button>
           )}
+
+          {/* 矩阵号 — 多账号同平台铺内容 */}
+          <button
+            type="button"
+            onClick={() => { setIsSearchOpen(false); onShowMatrix(); }}
+            className={`w-full inline-flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors ${
+              activeView === 'matrix'
+                ? 'bg-claude-accent/10 text-claude-accent hover:bg-claude-accent/20'
+                : 'dark:text-claude-darkTextSecondary text-claude-textSecondary hover:text-claude-text dark:hover:text-claude-darkText hover:bg-claude-surfaceHover dark:hover:bg-claude-darkSurfaceHover'
+            }`}
+          >
+            <span className="text-sm">{'🧬'}</span>
+            矩阵号
+          </button>
 
           {/* 4. AI对话 — 折叠二级菜单：新建对话 / web3连接 / 行业热点 */}
           <button
