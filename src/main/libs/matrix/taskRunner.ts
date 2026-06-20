@@ -110,6 +110,11 @@ async function runOne(
     }
 
     const input = await opts.getInput(accountId, index);
+    // 无内容(差异化产片失败 / inputs 映射缺该号)→ 跳过,不计失败、不计费。
+    if (!input || !input.videoPath) {
+      setAccountStatus(accountId, 'idle');
+      return { accountId, state: 'skipped', reason: 'no_content' };
+    }
     const r = await runMatrixDriver(accountId, opts.platform, input, log);
 
     if (r.ok) {
@@ -171,7 +176,7 @@ async function chargeSuccess(
 }
 
 export async function runMatrixTask(opts: MatrixTaskOptions): Promise<MatrixTaskReport> {
-  const k = opts.concurrency ?? 3;
+  const k = Math.max(1, Math.min(opts.concurrency ?? 3, 10)); // 夹紧上限,防一次开几十个内核打爆内存
   coworkLog('INFO', 'matrixTask', `start ${opts.platform} x${opts.accountIds.length} (concurrency ${k})`);
 
   const items = await runPool(opts.accountIds, k, (id, i) => runOne(opts, id, i), opts.onItem);

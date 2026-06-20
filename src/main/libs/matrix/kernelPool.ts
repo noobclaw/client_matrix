@@ -9,16 +9,19 @@
  * 与单实例的 cdpBrowser.ts 区别:这里是 Map<accountId, session> 的池,且每个
  * 会话有【独立的消息 id 空间与 pending 表】,避免多实例间 CDP 响应串话。
  *
+ * 并发安全(2026-06-20 审计修复):
+ *   · launchKernel / getPage 都用 in-flight Promise 去重,杜绝同 accountId 并发
+ *     双开进程 / 建多条 WS 泄漏(TOCTOU)。
+ *   · WS close/error / 进程 exit → failSession 立即 reject 所有挂起命令,不再干等 30s。
+ *
  * 内核选型:adryfish/fingerprint-chromium(BSD-3,引擎级指纹)。MVP 阶段内核
- * 二进制还没 bundle 时,可传普通 Chrome 路径先验证连接池+driver 链路(指纹 flag
- * 会被普通 Chrome 忽略,不影响管线验证)。
+ * 二进制还没 bundle 时,可传普通 Chrome 路径先验证连接池+driver 链路。
  */
 
 import { spawn, type ChildProcess } from 'child_process';
 import WebSocket from 'ws';
 import path from 'path';
 import fs from 'fs';
-import os from 'os';
 import { coworkLog } from '../coworkLogger';
 import type { Fingerprint, Proxy } from './types';
 
@@ -29,10 +32,11 @@ export interface KernelSession {
   userDataDir: string;
   pageWs: WebSocket | null;       // 当前操作的 page 连接
   pageTargetId: string | null;
+  pageInit: Promise<KernelSession> | null; // getPage 去重(并发共享同一次初始化)
   msgId: number;                  // 本会话独立 id 空间
   pending: Map<number, { resolve: (d: any) => void; reject: (e: Error) => void }>;
   proxyAuth?: { username: string; password: string }; // 带 auth 代理:经 CDP 提供凭据
-  fetchEnabled?: boolean;         // 是否已开 Fetch 域(代理认证拦截)
+  fetchEnabled?: boolean;         // 是否正在 Fetch 拦截(拿到代理凭据后即关)
 }
 
 export interface LaunchKernelOptions {
@@ -45,6 +49,7 @@ export interface LaunchKernelOptions {
 }
 
 const sessions = new Map<string, KernelSession>();
+const launching = new Map<string, Promise<KernelSession>>(); // 启动去重
 let nextDebugPort = 9300;        // 每号一个端口,递增分配
 
 // ── 内核/浏览器路径探测(MVP 回落用) ──
@@ -82,7 +87,6 @@ function buildKernelArgs(opts: LaunchKernelOptions, debugPort: number): string[]
     `--user-data-dir=${opts.userDataDir}`,
     '--no-first-run',
     '--no-default-browser-check',
-    // 引擎级指纹(fingerprint-chromium;普通 Chrome 会忽略这些 flag)
     `--fingerprint=${fp.seed}`,
   ];
   if (fp.platformOs) args.push(`--fingerprint-platform=${fp.platformOs}`);
@@ -94,39 +98,47 @@ function buildKernelArgs(opts: LaunchKernelOptions, debugPort: number): string[]
   if (proxy) {
     // socks5h 在 chromium 里用 socks5(socks5 默认远程 DNS,防 DNS 泄漏)。
     // 带 auth 的代理【不内联账密】(Chromium 不支持)→ 经 CDP Fetch.authRequired
-    // 在 getPage 里提供凭据,无需本地中转进程。
+    // 在 getPage 里提供凭据。
     const scheme = proxy.protocol === 'socks5h' ? 'socks5' : proxy.protocol;
     args.push(`--proxy-server=${scheme}://${proxy.host}:${proxy.port}`);
-    // 防 WebRTC 漏真实 IP(fingerprint-chromium flag)
-    args.push('--disable-non-proxied-udp');
+    args.push('--disable-non-proxied-udp'); // 防 WebRTC 漏真实 IP
   }
 
   if (opts.headless) args.push('--headless=new');
   return args;
 }
 
-// ── 启动一个号的内核实例 ──
+// ── 启动一个号的内核实例(in-flight 去重,杜绝同号双开) ──
 
 export async function launchKernel(opts: LaunchKernelOptions): Promise<KernelSession> {
   const existing = sessions.get(opts.accountId);
   if (existing && existing.process && !existing.process.killed) {
-    coworkLog('INFO', 'kernelPool', `reuse kernel for ${opts.accountId}`);
     return existing;
   }
+  const inflight = launching.get(opts.accountId);
+  if (inflight) return inflight;
 
+  const p = doLaunch(opts).finally(() => {
+    if (launching.get(opts.accountId) === p) launching.delete(opts.accountId);
+  });
+  launching.set(opts.accountId, p);
+  return p;
+}
+
+async function doLaunch(opts: LaunchKernelOptions): Promise<KernelSession> {
   const kernelPath = opts.kernelPath || detectChromePath();
   if (!kernelPath) throw new Error('fingerprint-chromium / Chrome not found');
 
   if (!fs.existsSync(opts.userDataDir)) fs.mkdirSync(opts.userDataDir, { recursive: true });
 
-  const debugPort = existing?.debugPort ?? nextDebugPort++;
+  const prev = sessions.get(opts.accountId);
+  const debugPort = prev?.debugPort ?? nextDebugPort++;
   const args = buildKernelArgs(opts, debugPort);
 
   coworkLog('INFO', 'kernelPool', `launch kernel ${opts.accountId}`, { debugPort, seed: opts.fingerprint.seed });
   const proc = spawn(kernelPath, args, { detached: false, stdio: 'ignore' });
   proc.on('error', (err) => coworkLog('ERROR', 'kernelPool', `kernel ${opts.accountId} error: ${err.message}`));
 
-  // 等调试端口起来
   let ready = false;
   for (let i = 0; i < 40; i++) {
     await sleep(500);
@@ -147,24 +159,37 @@ export async function launchKernel(opts: LaunchKernelOptions): Promise<KernelSes
     userDataDir: opts.userDataDir,
     pageWs: null,
     pageTargetId: null,
+    pageInit: null,
     msgId: 1,
     pending: new Map(),
     proxyAuth: (opts.proxy?.username && opts.proxy?.password)
       ? { username: opts.proxy.username, password: opts.proxy.password }
       : undefined,
   };
+  // 进程崩溃/退出 → 清 session + reject 挂起命令,避免后续复用死 session 卡满超时。
+  proc.on('exit', () => {
+    failSession(session, 'kernel process exited');
+    if (sessions.get(opts.accountId) === session) sessions.delete(opts.accountId);
+  });
   sessions.set(opts.accountId, session);
   coworkLog('INFO', 'kernelPool', `kernel ${opts.accountId} ready on ${debugPort}`);
   return session;
 }
 
-// ── 单会话 CDP 通信(每会话独立 id 空间) ──
+// ── 单会话 CDP 通信(每会话独立 id 空间;getPage 去重) ──
 
 async function getPage(accountId: string): Promise<KernelSession> {
   const s = sessions.get(accountId);
   if (!s) throw new Error(`no kernel session for ${accountId}`);
   if (s.pageWs && s.pageWs.readyState === WebSocket.OPEN) return s;
+  if (s.pageInit) return s.pageInit;
 
+  const p = doGetPage(s).finally(() => { if (s.pageInit === p) s.pageInit = null; });
+  s.pageInit = p;
+  return p;
+}
+
+async function doGetPage(s: KernelSession): Promise<KernelSession> {
   const list: any[] = await (await fetch(`http://127.0.0.1:${s.debugPort}/json/list`)).json();
   let target = list.find((t) => t.type === 'page');
   if (!target) {
@@ -176,38 +201,60 @@ async function getPage(accountId: string): Promise<KernelSession> {
     const sock = new WebSocket(`ws://127.0.0.1:${s.debugPort}/devtools/page/${target.id}`);
     sock.on('open', () => resolve(sock));
     sock.on('error', (e) => reject(e));
-    sock.on('message', (data) => {
-      try {
-        const msg = JSON.parse(data.toString());
-        if (msg.id && s.pending.has(msg.id)) {
-          const h = s.pending.get(msg.id)!;
-          s.pending.delete(msg.id);
-          msg.error ? h.reject(new Error(msg.error.message)) : h.resolve(msg.result);
-          return;
-        }
-        // 代理认证拦截(Fetch 域事件):有 auth 凭据则应答,否则放行。
-        if (msg.method === 'Fetch.authRequired') {
-          const resp = s.proxyAuth
-            ? { response: 'ProvideCredentials', username: s.proxyAuth.username, password: s.proxyAuth.password }
-            : { response: 'Default' };
-          sendNoWait(s, 'Fetch.continueWithAuth', { requestId: msg.params?.requestId, authChallengeResponse: resp });
-        } else if (msg.method === 'Fetch.requestPaused') {
-          sendNoWait(s, 'Fetch.continueRequest', { requestId: msg.params?.requestId });
-        }
-      } catch { /* ignore */ }
-    });
+    sock.on('message', (data) => onMessage(s, data));
   });
   s.pageWs = ws;
+  // 连上后:WS 断开 → reject 所有挂起命令并标记 session 需重连(不再干等 30s)。
+  ws.on('close', () => failSession(s, 'page websocket closed'));
+  ws.on('error', () => failSession(s, 'page websocket error'));
+
   await send(s, 'Page.enable');
-  // 带 auth 代理:开 Fetch 域拦截认证挑战(patterns:* 会暂停请求,故必须 continueRequest 放行)。
-  if (s.proxyAuth && !s.fetchEnabled) {
+  // 带 auth 代理:开 Fetch 拦截以应答代理认证挑战;拿到凭据后立即 Fetch.disable
+  // 止损(代理会缓存凭据),避免长期暂停全量请求拖慢/卡死页面。
+  if (s.proxyAuth) {
     await send(s, 'Fetch.enable', { handleAuthRequests: true, patterns: [{ urlPattern: '*' }] });
     s.fetchEnabled = true;
   }
   return s;
 }
 
-/** 发命令不等响应(用于 Fetch.continueWithAuth / continueRequest 这类拦截应答)。 */
+function onMessage(s: KernelSession, data: WebSocket.RawData): void {
+  let msg: any;
+  try { msg = JSON.parse(data.toString()); } catch { return; }
+  // 命令响应
+  if (msg.id && s.pending.has(msg.id)) {
+    const h = s.pending.get(msg.id)!;
+    s.pending.delete(msg.id);
+    if (msg.error) h.reject(new Error(msg.error.message)); else h.resolve(msg.result);
+    return;
+  }
+  // 代理认证拦截(Fetch 域事件)
+  if (msg.method === 'Fetch.authRequired') {
+    const resp = s.proxyAuth
+      ? { response: 'ProvideCredentials', username: s.proxyAuth.username, password: s.proxyAuth.password }
+      : { response: 'Default' };
+    sendNoWait(s, 'Fetch.continueWithAuth', { requestId: msg.params?.requestId, authChallengeResponse: resp });
+    // 代理凭据已给 → 关 Fetch,停止暂停后续全量请求(止损 #审计高1)。
+    if (s.proxyAuth && s.fetchEnabled) {
+      s.fetchEnabled = false;
+      sendNoWait(s, 'Fetch.disable');
+    }
+  } else if (msg.method === 'Fetch.requestPaused') {
+    sendNoWait(s, 'Fetch.continueRequest', { requestId: msg.params?.requestId });
+  }
+}
+
+/** WS 断开/进程退出:reject 所有挂起命令并清理,使后续 getPage 重建连接。 */
+function failSession(s: KernelSession, reason: string): void {
+  for (const [, h] of s.pending) { try { h.reject(new Error(reason)); } catch { /* ignore */ } }
+  s.pending.clear();
+  try { s.pageWs?.close(); } catch { /* ignore */ }
+  s.pageWs = null;
+  s.pageInit = null;
+  s.fetchEnabled = false;
+}
+
+/** 发命令不等响应(用于 Fetch 拦截应答)。 */
 function sendNoWait(s: KernelSession, method: string, params: Record<string, unknown> = {}): void {
   try { s.pageWs?.send(JSON.stringify({ id: s.msgId++, method, params })); } catch { /* ignore */ }
 }
@@ -215,12 +262,16 @@ function sendNoWait(s: KernelSession, method: string, params: Record<string, unk
 function send(s: KernelSession, method: string, params: Record<string, unknown> = {}): Promise<any> {
   const id = s.msgId++;
   return new Promise((resolve, reject) => {
+    if (!s.pageWs || s.pageWs.readyState !== WebSocket.OPEN) {
+      reject(new Error(`CDP not connected: ${method}`));
+      return;
+    }
     const timer = setTimeout(() => { s.pending.delete(id); reject(new Error(`CDP timeout: ${method}`)); }, 30000);
     s.pending.set(id, {
       resolve: (d) => { clearTimeout(timer); resolve(d); },
       reject: (e) => { clearTimeout(timer); reject(e); },
     });
-    s.pageWs!.send(JSON.stringify({ id, method, params }));
+    s.pageWs.send(JSON.stringify({ id, method, params }));
   });
 }
 
@@ -246,8 +297,7 @@ export async function kernelClick(accountId: string, x: number, y: number): Prom
 
 /**
  * 原生文件注入 —— 把本地文件直接灌进 file input(CDP DOM.setFileInputFiles)。
- * 比扩展的 upload_file_from_url(注册本地 HTTP + fetch blob)干净:CDP 直接给
- * 元素 objectId + 本地路径,内核侧零网络。返回是否成功。
+ * 比扩展的 upload_file_from_url 干净:CDP 直接给元素 objectId + 本地路径,内核侧零网络。
  */
 export async function kernelSetFileInput(accountId: string, selector: string, filePaths: string[]): Promise<boolean> {
   const s = await getPage(accountId);
@@ -274,7 +324,7 @@ export function listSessions(): string[] {
 export function closeKernel(accountId: string): void {
   const s = sessions.get(accountId);
   if (!s) return;
-  try { s.pageWs?.close(); } catch { /* ignore */ }
+  failSession(s, 'kernel closed');
   try { if (s.process && !s.process.killed) s.process.kill(); } catch { /* ignore */ }
   sessions.delete(accountId);
   coworkLog('INFO', 'kernelPool', `closed kernel ${accountId}`);

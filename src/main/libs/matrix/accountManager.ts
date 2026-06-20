@@ -8,6 +8,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { coworkLog } from '../coworkLogger';
 import type { MatrixAccount, AccountStatus, Fingerprint, Proxy } from './types';
 
 function baseDir(): string {
@@ -26,11 +27,16 @@ function ensureDirs(): void {
 
 export function loadAccounts(): MatrixAccount[] {
   if (cache) return cache;
+  const f = storeFile();
+  if (!fs.existsSync(f)) { cache = []; return cache; }
   try {
-    const raw = fs.readFileSync(storeFile(), 'utf8');
-    const arr = JSON.parse(raw);
+    const arr = JSON.parse(fs.readFileSync(f, 'utf8'));
     cache = Array.isArray(arr) ? arr : [];
-  } catch {
+  } catch (e) {
+    // 解析失败【绝不静默清空】(否则丢光账号 + 永久固定指纹种子,不可恢复)。
+    // 先把坏文件备份留证,再以空集起步,让用户知道并可从备份/profile 目录抢救。
+    try { fs.copyFileSync(f, `${f}.corrupt.${Date.now()}`); } catch { /* ignore */ }
+    coworkLog('ERROR', 'accountManager', `accounts.json parse failed, backed up; starting empty: ${String(e)}`);
     cache = [];
   }
   return cache;
@@ -38,7 +44,11 @@ export function loadAccounts(): MatrixAccount[] {
 
 function persist(): void {
   ensureDirs();
-  fs.writeFileSync(storeFile(), JSON.stringify(cache || [], null, 2), 'utf8');
+  // 原子写:先写临时文件再 rename,避免写到一半被 kill 导致 JSON 截断损坏。
+  const f = storeFile();
+  const tmp = `${f}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(cache || [], null, 2), 'utf8');
+  fs.renameSync(tmp, f);
 }
 
 export function listAccounts(): MatrixAccount[] {

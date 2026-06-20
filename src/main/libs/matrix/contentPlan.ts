@@ -31,7 +31,8 @@ function hashStr(s: string): number {
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
   return Math.abs(h);
 }
-function pick<T>(pool: T[], n: number): T { return pool[n % pool.length]; }
+// 安全取模(n 可能为负,如 hashStr 命中 INT_MIN)→ 永不返回 undefined。
+function pick<T>(pool: T[], n: number): T { return pool[((n % pool.length) + pool.length) % pool.length]; }
 
 /** 给某号派生一份差异化的成片配置(确定性:由 index + accountId 决定,可复现)。 */
 export function differentiateInput(
