@@ -22,6 +22,17 @@ const PLATFORM_LABEL: Record<string, string> = {
   douyin: '抖音', xhs: '小红书', bilibili: 'B站', shipinhao: '视频号',
   kuaishou: '快手', toutiao: '头条', tiktok: 'TikTok', x: 'X',
 };
+// 各平台登录入口(扫码登录时导航到这里,而不是空白页)
+const LOGIN_URL: Record<string, string> = {
+  douyin: 'https://www.douyin.com/',
+  xhs: 'https://www.xiaohongshu.com/',
+  bilibili: 'https://passport.bilibili.com/login',
+  shipinhao: 'https://channels.weixin.qq.com/',
+  kuaishou: 'https://www.kuaishou.com/',
+  toutiao: 'https://mp.toutiao.com/',
+  tiktok: 'https://www.tiktok.com/login',
+  x: 'https://x.com/login',
+};
 const STATUS_DOT: Record<AccountStatus, string> = {
   idle: 'bg-green-500', running: 'bg-blue-500', login_required: 'bg-amber-500',
   limited: 'bg-gray-400', banned: 'bg-red-500',
@@ -104,7 +115,7 @@ const MatrixView: React.FC<Props> = () => {
       await reload();
       setNotice(thenLogin ? '已建号,正在打开指纹浏览器扫码…' : `已建号:${name}`);
       if (thenLogin && r.account) {
-        await m.openLogin({ accountId: r.account.id, kernelPath, loginUrl: '' });
+        await m.openLogin({ accountId: r.account.id, kernelPath, loginUrl: LOGIN_URL[platform] || '' });
       }
     } else {
       setNotice('创建失败:' + (r?.error || 'IPC 未响应'));
@@ -178,7 +189,7 @@ const MatrixView: React.FC<Props> = () => {
                   </span>
                   <span className="text-xs px-2 py-0.5 rounded bg-black/5 dark:bg-white/10">{STATUS_LABEL[a.status]}</span>
                   {a.status === 'login_required' && (
-                    <button onClick={() => M()?.openLogin({ accountId: a.id, kernelPath, loginUrl: '' })} className="text-xs px-2 py-1 rounded border dark:border-white/15 border-black/15">扫码登录</button>
+                    <button onClick={() => M()?.openLogin({ accountId: a.id, kernelPath, loginUrl: LOGIN_URL[a.platform] || '' })} className="text-xs px-2 py-1 rounded border dark:border-white/15 border-black/15">扫码登录</button>
                   )}
                 </div>
               ))}
