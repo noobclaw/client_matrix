@@ -14,6 +14,11 @@ interface MatrixAccount {
   group?: string;
   status: AccountStatus;
   proxy?: { host: string; port: number; geo?: string; health?: string };
+  keywords?: string[];
+}
+
+function parseKeywords(s: string): string[] {
+  return s.split(/[\s,，、\n]+/).map((x) => x.trim()).filter(Boolean);
 }
 interface ItemResult { accountId: string; state: 'success' | 'failed' | 'skipped'; reason?: string }
 
@@ -69,7 +74,9 @@ const MatrixView: React.FC<Props> = () => {
 
   // 添加账号弹窗 + 通知(Tauri webview 不支持原生 prompt/alert/confirm,全走 app 内 UI)
   const [showAdd, setShowAdd] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null); // null=新建,否则编辑该号关键词
   const [newName, setNewName] = useState('');
+  const [newKeywords, setNewKeywords] = useState('');
   const [notice, setNotice] = useState('');
 
   const reload = useCallback(async () => {
@@ -102,14 +109,25 @@ const MatrixView: React.FC<Props> = () => {
     setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   };
 
-  const openAdd = () => { setNewName(''); setNotice(''); setShowAdd(true); };
+  const openAdd = () => { setEditId(null); setNewName(''); setNewKeywords(''); setNotice(''); setShowAdd(true); };
+  const openEditKeywords = (a: MatrixAccount) => {
+    setEditId(a.id); setNewName(a.displayName); setNewKeywords((a.keywords || []).join(' ')); setNotice(''); setShowAdd(true);
+  };
 
   const confirmAdd = async (thenLogin: boolean) => {
-    const name = newName.trim();
-    if (!name) { setNotice('请填账号备注名'); return; }
     const m = M();
     if (!m) { setNotice('matrix 接口未就绪(请确认运行的是矩阵版)'); return; }
-    const r = await m.createAccount({ platform, displayName: name });
+    const keywords = parseKeywords(newKeywords);
+
+    // 编辑模式:只改关键词
+    if (editId) {
+      await m.setAccountKeywords({ id: editId, keywords });
+      setShowAdd(false); await reload(); setNotice('已更新关键词'); return;
+    }
+
+    const name = newName.trim();
+    if (!name) { setNotice('请填账号备注名'); return; }
+    const r = await m.createAccount({ platform, displayName: name, keywords });
     setShowAdd(false);
     if (r?.ok) {
       await reload();
@@ -182,12 +200,17 @@ const MatrixView: React.FC<Props> = () => {
                   <span className={`w-2.5 h-2.5 rounded-full ${STATUS_DOT[a.status]}`} />
                   <div className="flex-1 min-w-0">
                     <div className="text-sm">{a.displayName}{a.group ? ` · ${a.group}` : ''}</div>
-                    <div className="text-xs opacity-50">{a.id}</div>
+                    <div className="text-xs opacity-50 truncate">
+                      {a.keywords && a.keywords.length
+                        ? `赛道词: ${a.keywords.join(' / ')}`
+                        : <span className="text-amber-500">未配赛道关键词(互动需要)</span>}
+                    </div>
                   </div>
                   <span className="text-xs px-2 py-0.5 rounded bg-black/5 dark:bg-white/10">
                     {a.proxy ? `IP ${a.proxy.geo || a.proxy.host}` : 'IP 未配'}
                   </span>
                   <span className="text-xs px-2 py-0.5 rounded bg-black/5 dark:bg-white/10">{STATUS_LABEL[a.status]}</span>
+                  <button onClick={() => openEditKeywords(a)} className="text-xs px-2 py-1 rounded border dark:border-white/15 border-black/15">改词</button>
                   {a.status === 'login_required' && (
                     <button onClick={() => M()?.openLogin({ accountId: a.id, kernelPath, loginUrl: LOGIN_URL[a.platform] || '' })} className="text-xs px-2 py-1 rounded border dark:border-white/15 border-black/15">扫码登录</button>
                   )}
@@ -270,18 +293,29 @@ const MatrixView: React.FC<Props> = () => {
 
       {showAdd && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="w-80 rounded-xl p-5 dark:bg-claude-darkBg bg-white border dark:border-white/10 border-black/10">
-            <div className="text-sm font-medium mb-3">添加 {PLATFORM_LABEL[platform]} 账号</div>
-            <input
-              autoFocus value={newName} onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') confirmAdd(true); }}
-              placeholder="账号备注名(如:美食1号)"
+          <div className="w-96 rounded-xl p-5 dark:bg-claude-darkBg bg-white border dark:border-white/10 border-black/10">
+            <div className="text-sm font-medium mb-3">{editId ? '编辑赛道关键词' : `添加 ${PLATFORM_LABEL[platform]} 账号`}</div>
+            {!editId && (
+              <input
+                autoFocus value={newName} onChange={(e) => setNewName(e.target.value)}
+                placeholder="账号备注名(如:美食1号)"
+                className="w-full text-sm px-3 py-2 rounded border dark:border-white/15 border-black/15 bg-transparent mb-3"
+              />
+            )}
+            <textarea
+              value={newKeywords} onChange={(e) => setNewKeywords(e.target.value)}
+              placeholder="赛道关键词,空格/逗号分隔(如:美食 探店 家常菜)—— 自动互动时按这些词搜内容去点赞/评论/关注"
+              rows={3}
               className="w-full text-sm px-3 py-2 rounded border dark:border-white/15 border-black/15 bg-transparent mb-4"
             />
             <div className="flex justify-end gap-2">
               <button onClick={() => setShowAdd(false)} className="px-3 py-1.5 text-sm rounded-lg border dark:border-white/15 border-black/15">取消</button>
-              <button onClick={() => confirmAdd(false)} className="px-3 py-1.5 text-sm rounded-lg border dark:border-white/15 border-black/15">仅创建</button>
-              <button onClick={() => confirmAdd(true)} className="px-3 py-1.5 text-sm rounded-lg bg-claude-accent text-white">创建并扫码登录</button>
+              {editId ? (
+                <button onClick={() => confirmAdd(false)} className="px-3 py-1.5 text-sm rounded-lg bg-claude-accent text-white">保存</button>
+              ) : (<>
+                <button onClick={() => confirmAdd(false)} className="px-3 py-1.5 text-sm rounded-lg border dark:border-white/15 border-black/15">仅创建</button>
+                <button onClick={() => confirmAdd(true)} className="px-3 py-1.5 text-sm rounded-lg bg-claude-accent text-white">创建并扫码登录</button>
+              </>)}
             </div>
           </div>
         </div>

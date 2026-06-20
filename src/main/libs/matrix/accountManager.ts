@@ -71,6 +71,8 @@ export function createAccount(args: {
   group?: string;
   fingerprint?: Partial<Fingerprint>;
   proxy?: Proxy;
+  keywords?: string[];
+  track?: string;
 }): MatrixAccount {
   ensureDirs();
   const accounts = loadAccounts();
@@ -92,6 +94,8 @@ export function createAccount(args: {
       timezone: args.fingerprint?.timezone ?? 'Asia/Shanghai',
     },
     proxy: args.proxy,
+    keywords: Array.isArray(args.keywords) ? args.keywords.filter(Boolean) : [],
+    track: args.track || `${args.platform}_default`,
   };
   accounts.push(account);
   cache = accounts;
@@ -118,6 +122,14 @@ export function setAccountProxy(id: string, proxy: Proxy): void {
   const a = getAccount(id);
   if (!a) return;
   a.proxy = proxy;                       // 绑定后视为固定,不应再换 host/port
+  persist();
+}
+
+export function setAccountKeywords(id: string, keywords: string[], track?: string): void {
+  const a = getAccount(id);
+  if (!a) return;
+  a.keywords = (keywords || []).filter(Boolean);
+  if (track !== undefined) a.track = track;
   persist();
 }
 

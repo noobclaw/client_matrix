@@ -48,4 +48,7 @@ export interface MatrixAccount {
   proxy?: Proxy;
   debugPort?: number;              // 运行时分配的 CDP 调试端口
   lastPostAt?: number;
+  // 互动配置:赛道关键词(自动点赞/评论/关注时按这些词搜内容)+ 赛道 id(engageHistory 去重维度)
+  keywords?: string[];
+  track?: string;
 }

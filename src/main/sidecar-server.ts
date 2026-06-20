@@ -1125,6 +1125,11 @@ const server = http.createServer(async (req, res) => {
             setAccountStatus(args[0]?.id, args[0]?.status);
             return writeJSON(res, 200, { ok: true });
           }
+          case 'matrix:setAccountKeywords': {
+            const { setAccountKeywords } = await import('./libs/matrix/accountManager');
+            setAccountKeywords(args[0]?.id, args[0]?.keywords || [], args[0]?.track);
+            return writeJSON(res, 200, { ok: true });
+          }
           case 'matrix:removeAccount': {
             const { removeAccount } = await import('./libs/matrix/accountManager');
             removeAccount(args[0]?.id);
