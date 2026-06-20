@@ -10,7 +10,7 @@
  * 用法(本机,先准备好 fingerprint-chromium 二进制):
  *   在 sidecar/主进程里 import { runKernelSelfTest } 调用,或临时挂一个 IPC/脚本:
  *     await runKernelSelfTest({ kernelPath: 'C:/path/to/fingerprint-chrome.exe' })
- *   不传 kernelPath 会回落系统 Chrome(只验连接池管线,指纹 flag 被忽略)。
+ *   不传 kernelPath 时用已下载的指纹内核;都没有则抛 NO_KERNEL(不再回落系统 Chrome)。
  */
 
 import { launchKernel, kernelEval, kernelNavigate, closeKernel } from './kernelPool';

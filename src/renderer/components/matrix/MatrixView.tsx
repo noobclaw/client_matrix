@@ -85,6 +85,8 @@ const MatrixView: React.FC<Props> = () => {
   const [kernel, setKernel] = useState<{ installed?: boolean; installedVersion?: string; configuredVersion?: string; needsUpdate?: boolean }>({});
   const [kernelMsg, setKernelMsg] = useState('');
   const [kernelBusy, setKernelBusy] = useState(false);
+  const [kernelPct, setKernelPct] = useState(0);
+  const [showKernelModal, setShowKernelModal] = useState(false);
 
   const reload = useCallback(async () => {
     const r = await M()?.listAccounts();
@@ -118,21 +120,34 @@ const MatrixView: React.FC<Props> = () => {
   useEffect(() => {
     loadKernel();
     const off = M()?.onKernel?.((p: any) => {
+      if (typeof p?.pct === 'number') setKernelPct(p.pct);
       setKernelMsg(p?.msg || '');
       if (p?.done) { setKernelBusy(false); loadKernel(); }
     });
     return () => { if (typeof off === 'function') off(); };
   }, [loadKernel]);
 
-  const downloadKernel = async () => { setKernelBusy(true); setKernelMsg('准备下载…'); await M()?.ensureKernel(); };
+  const downloadKernel = async () => {
+    setShowKernelModal(true); setKernelBusy(true); setKernelPct(0); setKernelMsg('准备下载…');
+    await M()?.ensureKernel();
+  };
 
   const platformAccounts = accounts.filter((a) => a.platform === platform);
+
+  // 没有指纹内核就不让跑(账号添加/登录/互动/发布)——弹下载引导。
+  // 手动指定 kernelPath 视为有内核(调试逃生口)。
+  const kernelReady = !!kernel.installed || !!kernelPath.trim();
+  const requireKernel = (): boolean => {
+    if (kernelReady) return true;
+    setShowKernelModal(true);
+    return false;
+  };
 
   const toggleSel = (id: string) => {
     setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   };
 
-  const openAdd = () => { setEditId(null); setNewName(''); setNewKeywords(''); setNotice(''); setShowAdd(true); };
+  const openAdd = () => { if (!requireKernel()) return; setEditId(null); setNewName(''); setNewKeywords(''); setNotice(''); setShowAdd(true); };
   const openEditKeywords = (a: MatrixAccount) => {
     setEditId(a.id); setNewName(a.displayName); setNewKeywords((a.keywords || []).join(' ')); setNotice(''); setShowAdd(true);
   };
@@ -164,6 +179,7 @@ const MatrixView: React.FC<Props> = () => {
   };
 
   const startEngage = async () => {
+    if (!requireKernel()) return;
     const ids = [...selected].filter((id) => {
       const a = accounts.find((x) => x.id === id);
       return a && a.keywords && a.keywords.length > 0;
@@ -175,6 +191,7 @@ const MatrixView: React.FC<Props> = () => {
   };
 
   const startTask = async () => {
+    if (!requireKernel()) return;
     const ids = [...selected];
     if (!ids.length) { setNotice('请先勾选账号'); setTab('publish'); return; }
     if (!videoPath) { setNotice('请填视频文件路径'); setTab('publish'); return; }
@@ -257,7 +274,7 @@ const MatrixView: React.FC<Props> = () => {
                   <span className="text-xs px-2 py-0.5 rounded bg-black/5 dark:bg-white/10">{STATUS_LABEL[a.status]}</span>
                   <button onClick={() => openEditKeywords(a)} className="text-xs px-2 py-1 rounded border dark:border-white/15 border-black/15">改词</button>
                   {a.status === 'login_required' && (
-                    <button onClick={() => M()?.openLogin({ accountId: a.id, kernelPath, loginUrl: LOGIN_URL[a.platform] || '' })} className="text-xs px-2 py-1 rounded border dark:border-white/15 border-black/15">扫码登录</button>
+                    <button onClick={() => { if (!requireKernel()) return; M()?.openLogin({ accountId: a.id, kernelPath, loginUrl: LOGIN_URL[a.platform] || '' }); }} className="text-xs px-2 py-1 rounded border dark:border-white/15 border-black/15">扫码登录</button>
                   )}
                 </div>
               ))}
@@ -415,6 +432,42 @@ const MatrixView: React.FC<Props> = () => {
                 <button onClick={() => confirmAdd(false)} className="px-3 py-1.5 text-sm rounded-lg border dark:border-white/15 border-black/15">仅创建</button>
                 <button onClick={() => confirmAdd(true)} className="px-3 py-1.5 text-sm rounded-lg bg-claude-accent text-white">创建并扫码登录</button>
               </>)}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showKernelModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-[26rem] rounded-xl p-5 dark:bg-claude-darkBg bg-white border dark:border-white/10 border-black/10">
+            <div className="text-sm font-medium mb-1">指纹浏览器内核</div>
+            {kernel.installed && !kernelBusy ? (
+              <div className="text-sm text-green-500 my-3">✓ 内核已就绪{kernel.installedVersion ? `(v${kernel.installedVersion})` : ''},现在可以添加账号 / 扫码登录 / 跑任务了。</div>
+            ) : (
+              <>
+                <div className="text-sm opacity-70 my-3">
+                  矩阵号需要专属指纹浏览器内核才能运行(独立指纹隔离,普通 Chrome 无法替代)。内核约 130MB,只需下载一次。
+                </div>
+                {(kernelBusy || kernelPct > 0) && (
+                  <div className="mb-3">
+                    <div className="h-2 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
+                      <div className="h-full bg-claude-accent transition-all duration-200" style={{ width: `${Math.max(2, kernelPct)}%` }} />
+                    </div>
+                    <div className="text-xs opacity-60 mt-1">{kernelMsg || '准备中…'}{kernelBusy ? ` · ${kernelPct}%` : ''}</div>
+                  </div>
+                )}
+                {!kernelBusy && kernelMsg && !kernel.installed && (
+                  <div className="text-xs text-red-500 mb-2">{kernelMsg}</div>
+                )}
+              </>
+            )}
+            <div className="flex justify-end gap-2 mt-2">
+              <button onClick={() => setShowKernelModal(false)} className="px-3 py-1.5 text-sm rounded-lg border dark:border-white/15 border-black/15">关闭</button>
+              {!kernel.installed && (
+                <button onClick={downloadKernel} disabled={kernelBusy} className="px-3 py-1.5 text-sm rounded-lg bg-claude-accent text-white disabled:opacity-50">
+                  {kernelBusy ? '下载中…' : (kernelPct > 0 ? '重试下载' : '开始下载')}
+                </button>
+              )}
             </div>
           </div>
         </div>

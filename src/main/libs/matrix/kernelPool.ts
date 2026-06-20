@@ -14,13 +14,14 @@
  *     双开进程 / 建多条 WS 泄漏(TOCTOU)。
  *   · WS close/error / 进程 exit → failSession 立即 reject 所有挂起命令,不再干等 30s。
  *
- * 内核选型:adryfish/fingerprint-chromium(BSD-3,引擎级指纹)。MVP 阶段内核
- * 二进制还没 bundle 时,可传普通 Chrome 路径先验证连接池+driver 链路。
+ * 内核选型:adryfish/fingerprint-chromium(BSD-3,引擎级指纹)。内核按需从自家
+ * OSS 下载(见 kernelInstaller)。不再回退系统 Chrome:没有指纹内核就不启动
+ * (无指纹隔离的矩阵号没有意义),抛 NO_KERNEL 让 UI 引导用户先下载。
+ * 仍保留显式 kernelPath(手动指定),供调试。
  */
 
 import { spawn, type ChildProcess } from 'child_process';
 import WebSocket from 'ws';
-import path from 'path';
 import fs from 'fs';
 import { coworkLog } from '../coworkLogger';
 import { installedKernelPath } from './kernelInstaller';
@@ -54,31 +55,8 @@ const sessions = new Map<string, KernelSession>();
 const launching = new Map<string, Promise<KernelSession>>(); // 启动去重
 let nextDebugPort = 9300;        // 每号一个端口,递增分配
 
-// ── 内核/浏览器路径探测(MVP 回落用) ──
-
-function detectChromePath(): string | null {
-  const c: string[] = [];
-  if (process.platform === 'win32') {
-    const pf = process.env['PROGRAMFILES'] || 'C:\\Program Files';
-    const pfx = process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)';
-    const lad = process.env['LOCALAPPDATA'] || '';
-    c.push(
-      path.join(pf, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-      path.join(pfx, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-      path.join(lad, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-      path.join(pf, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-    );
-  } else if (process.platform === 'darwin') {
-    c.push(
-      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-      '/Applications/Chromium.app/Contents/MacOS/Chromium',
-    );
-  } else {
-    c.push('/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium');
-  }
-  for (const p of c) if (fs.existsSync(p)) return p;
-  return null;
-}
+// 内核缺失的统一错误标记:UI 据此弹「去下载内核」引导,不再回退系统 Chrome。
+export const NO_KERNEL_ERROR = 'NO_KERNEL';
 
 // ── 启动参数:指纹 + 代理 + 防泄漏 ──
 
@@ -128,9 +106,11 @@ export async function launchKernel(opts: LaunchKernelOptions): Promise<KernelSes
 }
 
 async function doLaunch(opts: LaunchKernelOptions): Promise<KernelSession> {
-  // 优先级:显式路径 > 该号绑定版本 > 任意已装版本 > 系统 Chrome(回落,无真指纹隔离)
-  const kernelPath = opts.kernelPath || installedKernelPath(opts.kernelVersion) || installedKernelPath() || detectChromePath();
-  if (!kernelPath) throw new Error('fingerprint-chromium / Chrome not found');
+  // 优先级:显式路径(手动指定)> 该号绑定版本 > 任意已装版本。
+  // 不再回退系统 Chrome:没有我们的指纹内核就不跑(无指纹隔离=矩阵号无意义),
+  // 抛 NO_KERNEL 让上层弹「去下载内核」。
+  const kernelPath = opts.kernelPath || installedKernelPath(opts.kernelVersion) || installedKernelPath();
+  if (!kernelPath) throw new Error(`${NO_KERNEL_ERROR}: 指纹浏览器内核未安装,请先在矩阵号界面下载内核`);
   coworkLog('INFO', 'kernelPool', `using kernel: ${kernelPath}`);
 
   if (!fs.existsSync(opts.userDataDir)) fs.mkdirSync(opts.userDataDir, { recursive: true });

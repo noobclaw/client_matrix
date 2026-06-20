@@ -30,7 +30,7 @@ export interface MatrixTaskOptions {
   concurrency?: number;        // 同时开几窗,默认 3
   jitterMinMs?: number;        // 每号启动前错峰下限,默认 3s
   jitterMaxMs?: number;        // 上限,默认 15s
-  kernelPath?: string;         // fingerprint-chromium 路径(缺省回落系统 Chrome)
+  kernelPath?: string;         // 手动指定内核路径;缺省用已下载的指纹内核,没有则抛 NO_KERNEL
   headless?: boolean;
   authToken?: string;          // 计费 Bearer token;缺省则跳过计费(只发不收)
   onLog?: (accountId: string, msg: string) => void;
