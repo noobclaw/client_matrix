@@ -44,6 +44,7 @@ import { noobClawAuth } from './services/noobclawAuth';
 import { noobClawApi } from './services/noobclawApi';
 import { writeCachedPaymentInfo, writeCachedRedeemInfo } from './services/paymentInfoCache';
 import { noobClawSSE } from './services/noobclawSSE';
+import { MATRIX_EDITION } from './matrixEdition';
 
 const App: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
@@ -51,7 +52,7 @@ const App: React.FC = () => {
   // 启动默认落到「一键涨粉」(scenarioCreate),而不是 AI 对话(cowork)。副作用:Sidebar 的
   // 「AI对话」二级折叠组只在其子项(cowork/mcp/web3news/scheduledTasks)激活时才强制展开,
   // 默认页非该组子项 → 该组保持收起(aiChatOpen 初始 false),正好满足「AI对话菜单默认收起」。
-  const [mainView, setMainView] = useState<'cowork' | 'skills' | 'scheduledTasks' | 'mcp' | 'wallet' | 'invite' | 'quickuse' | 'scenarioCreate' | 'scenarioRuns' | 'web3news' | 'hotsearch' | 'partners' | 'personality' | 'matrix'>('scenarioCreate');
+  const [mainView, setMainView] = useState<'cowork' | 'skills' | 'scheduledTasks' | 'mcp' | 'wallet' | 'invite' | 'quickuse' | 'scenarioCreate' | 'scenarioRuns' | 'web3news' | 'hotsearch' | 'partners' | 'personality' | 'matrix'>(MATRIX_EDITION ? 'matrix' : 'scenarioCreate');
   // v4.31.44: 主页 6 个涨粉标签可以指定打开"一键使用"时初选哪个平台
   const [quickUseInitialPlatform, setQuickUseInitialPlatform] = useState<'xhs' | 'x' | 'binance' | 'youtube' | 'tiktok' | 'douyin' | 'kuaishou' | 'bilibili' | 'shipinhao' | 'toutiao' | 'video' | undefined>(undefined);
   // ScenarioView 下钻到任务/运行记录详情时为 true:任务详情逻辑上属于「我的涨粉任务」,
@@ -166,8 +167,11 @@ const App: React.FC = () => {
           dispatch(setSelectedModel(preferredModel));
         }
         
-        // Initialize scheduled task service
-        await scheduledTaskService.init();
+        // Initialize scheduled task service —— 矩阵 edition 不跑旧的 AI 定时任务调度
+        // (避免与矩阵任务争抢资源/浏览器;矩阵的调度走自己的 taskRunner)。
+        if (!MATRIX_EDITION) {
+          await scheduledTaskService.init();
+        }
 
         // Initialize cowork service early so SSE listeners (including
         // noobclaw:sse-payload for lucky bag / balance update) are registered

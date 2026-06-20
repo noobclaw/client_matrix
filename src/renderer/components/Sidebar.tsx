@@ -9,6 +9,7 @@ import ComposeIcon from './icons/ComposeIcon';
 import SidebarToggleIcon from './icons/SidebarToggleIcon';
 import TrashIcon from './icons/TrashIcon';
 import { ExclamationTriangleIcon } from '@heroicons/react/24/outline';
+import { MATRIX_EDITION } from '../matrixEdition';
 
 interface SidebarProps {
   onShowSettings: () => void;
@@ -173,6 +174,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           </button>
         </div>
         <div className="mt-3 space-y-1 px-3">
+          {!MATRIX_EDITION && (<>
           {/* 1. 新建涨粉任务 — 新建页提升为一级菜单 (create 模式) */}
           <button
             type="button"
@@ -230,6 +232,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               {i18nService.t('globalHotSearch')}
             </button>
           )}
+          </>)}
 
           {/* 矩阵号 — 多账号同平台铺内容 */}
           <button
@@ -245,6 +248,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             矩阵号
           </button>
 
+          {!MATRIX_EDITION && (<>
           {/* 4. AI对话 — 折叠二级菜单：新建对话 / web3连接 / 行业热点 */}
           <button
             type="button"
@@ -338,6 +342,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             <span className="text-sm">🧩</span>
             {i18nService.t('skills')}
           </button>
+          </>)}
 
           {/* My Wallet */}
           <button
@@ -367,6 +372,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             {i18nService.t('inviteRebateMenu')}
           </button>
 
+          {!MATRIX_EDITION && (<>
           {/* Personality Tests */}
           <button
             type="button"
@@ -394,8 +400,10 @@ const Sidebar: React.FC<SidebarProps> = ({
             <span className="text-sm">🤝</span>
             {i18nService.t('eventsPartners')}
           </button>
+          </>)}
         </div>
       </div>
+      {!MATRIX_EDITION && (
       <div className="flex-1 overflow-y-auto px-2.5 pb-4">
         <div className="px-3 pb-2 text-sm font-medium dark:text-claude-darkTextSecondary text-claude-textSecondary">
           {i18nService.t('coworkHistory')}
@@ -413,6 +421,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           onEnterBatchMode={handleEnterBatchMode}
         />
       </div>
+      )}
       <CoworkSearchModal
         isOpen={isSearchOpen}
         onClose={() => setIsSearchOpen(false)}
