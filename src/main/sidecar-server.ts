@@ -1218,8 +1218,9 @@ const server = http.createServer(async (req, res) => {
             try {
               const { ensureKernel } = await import('./libs/matrix/kernelInstaller');
               const version = (args[0] as any)?.version;
-              ensureKernel(version, (pct, msg) => broadcastSSE('matrix:kernel', { pct, msg }))
-                .then((p) => broadcastSSE('matrix:kernel', { pct: 100, msg: p ? '内核就绪' : '内核安装失败', done: true, path: p || '', version }))
+              let lastMsg = ''; // 记住最后一条进度消息,失败时回传具体原因(而非笼统「内核安装失败」)
+              ensureKernel(version, (pct, msg) => { lastMsg = msg; broadcastSSE('matrix:kernel', { pct, msg }); })
+                .then((p) => broadcastSSE('matrix:kernel', { pct: p ? 100 : 0, msg: p ? '内核就绪' : (lastMsg || '内核安装失败'), done: true, path: p || '', version }))
                 .catch((e: any) => broadcastSSE('matrix:kernel', { pct: 0, msg: '失败:' + (e?.message || e), done: true }));
               return writeJSON(res, 200, { ok: true, status: 'started' });
             } catch (e: any) {

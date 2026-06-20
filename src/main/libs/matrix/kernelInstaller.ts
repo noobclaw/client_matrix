@@ -102,18 +102,14 @@ function findDirEndingWith(dir: string, suffix: string): string | null {
 }
 
 const mb = (n: number) => Math.round(n / 1048576);
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-async function download(url: string, dest: string, onProgress?: ProgressFn): Promise<boolean> {
-  let res: Response;
-  try { res = await fetch(url); }
-  catch (e: any) { onProgress?.(0, '网络错误:' + String(e?.message || e).slice(0, 80)); return false; }
-  if (!res.ok || !res.body) { onProgress?.(0, `下载失败 HTTP ${res.status}`); return false; }
-
-  const total = Number(res.headers.get('content-length') || 0); // CDN/chunked 可能为 0
-  const out = fs.createWriteStream(dest);
+/** 把一个 Response body 落盘(可追加);带背压;返回累计落盘字节;网络/写错误时抛。 */
+async function streamToFile(res: Response, dest: string, append: boolean, total: number, baseGot: number, onProgress?: ProgressFn): Promise<number> {
+  const out = fs.createWriteStream(dest, { flags: append ? 'a' : 'w' });
   let writeErr: Error | null = null;
   out.on('error', (e) => { writeErr = e; }); // 磁盘满/无权限:捕获,避免 uncaught 崩 sidecar
-  let got = 0, lastTick = 0;
+  let got = baseGot, lastTick = 0;
   try {
     const reader = (res.body as any).getReader();
     for (;;) {
@@ -121,12 +117,8 @@ async function download(url: string, dest: string, onProgress?: ProgressFn): Pro
       const { done, value } = await reader.read();
       if (done) break;
       const buf = Buffer.from(value);
-      // 背压:write 返回 false 时等 drain(否则大文件内存堆积)
-      if (!out.write(buf)) {
-        await new Promise<void>((resolve, reject) => {
-          out.once('drain', resolve);
-          out.once('error', reject);
-        });
+      if (!out.write(buf)) { // 背压:write 返回 false 等 drain(否则大文件内存堆积)
+        await new Promise<void>((resolve, reject) => { out.once('drain', resolve); out.once('error', reject); });
       }
       got += buf.length;
       const now = Date.now();
@@ -138,14 +130,54 @@ async function download(url: string, dest: string, onProgress?: ProgressFn): Pro
     }
     if (writeErr) throw writeErr;
     await new Promise<void>((resolve, reject) => { out.end(() => resolve()); out.once('error', reject); });
-    if (total && got < total) { onProgress?.(0, `下载不完整 ${mb(got)}/${mb(total)}MB`); return false; }
-    return true;
-  } catch (e: any) {
+    return got;
+  } catch (e) {
     try { out.destroy(); } catch { /* ignore */ }
-    try { fs.rmSync(dest, { force: true }); } catch { /* ignore */ }
-    onProgress?.(0, '下载中断:' + String(e?.message || e).slice(0, 80));
-    return false;
+    throw e;
   }
+}
+
+/**
+ * 下载到 dest,带【重试 + 断点续传】。日本→阿里云香港 OSS 这种跨境链路对大文件
+ * (内核 ~125MB)很容易中途断(undici 抛 TypeError: fetch failed)。OSS 支持
+ * Range(Accept-Ranges: bytes),断了就从已落盘字节续传,而不是整包重来或直接失败。
+ */
+async function download(url: string, dest: string, onProgress?: ProgressFn): Promise<boolean> {
+  const MAX_ATTEMPTS = 5;
+  let total = 0, got = 0;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    let resume = got > 0;
+    try {
+      const headers: Record<string, string> = resume ? { Range: `bytes=${got}-` } : {};
+      const res = await fetch(url, { headers });
+      if (resume && res.status !== 206) { resume = false; got = 0; } // 服务端没给续传 → 从头来
+      if (!res.ok || !res.body) {
+        if (attempt === MAX_ATTEMPTS) { onProgress?.(0, `下载失败 HTTP ${res.status}`); return false; }
+        await sleep(1500 * attempt); continue;
+      }
+      if (!total) { // 首次确定总大小:206 从 Content-Range 末段,200 从 Content-Length
+        if (res.status === 206) { const m = (res.headers.get('content-range') || '').match(/\/(\d+)\s*$/); if (m) total = Number(m[1]); }
+        else total = Number(res.headers.get('content-length') || 0);
+      }
+      got = await streamToFile(res, dest, resume, total, got, onProgress);
+      if (total && got < total) { // 流提前结束(连接被掐)→ 续传重试
+        if (attempt === MAX_ATTEMPTS) { onProgress?.(0, `下载不完整 ${mb(got)}/${mb(total)}MB`); return false; }
+        onProgress?.(Math.round((got / total) * 100), `网络中断,续传重试 ${attempt}/${MAX_ATTEMPTS}…`);
+        await sleep(1500 * attempt); continue;
+      }
+      return true; // 完整(或无 total 时流正常结束)
+    } catch (e: any) {
+      try { got = fs.existsSync(dest) ? fs.statSync(dest).size : got; } catch { /* keep got */ } // 以实际落盘为准续传
+      if (attempt === MAX_ATTEMPTS) {
+        try { fs.rmSync(dest, { force: true }); } catch { /* ignore */ }
+        onProgress?.(0, '下载失败(网络多次中断):' + String(e?.message || e).slice(0, 60));
+        return false;
+      }
+      onProgress?.(total ? Math.round((got / total) * 100) : 0, `网络中断,续传重试 ${attempt}/${MAX_ATTEMPTS}…`);
+      await sleep(1500 * attempt);
+    }
+  }
+  return false;
 }
 
 /**
@@ -192,12 +224,24 @@ export async function ensureKernel(version?: string, onProgress?: ProgressFn): P
       const mnt = path.join(runtimesDir(), `_mnt-${entry.version}`);
       try { spawnSync('hdiutil', ['detach', mnt, '-force'], { stdio: 'ignore' }); } catch { /* 清上次残留挂载 */ }
       fs.mkdirSync(mnt, { recursive: true });
-      const att = spawnSync('hdiutil', ['attach', tmp, '-nobrowse', '-readonly', '-mountpoint', mnt], { stdio: 'ignore' });
-      if (att.status !== 0) coworkLog('ERROR', 'kernelInstaller', 'hdiutil attach failed', { status: att.status, err: String(att.error || '') });
+      // -noverify/-noautoopen:跳过校验+不弹访达;部分 dmg 不加会卡/失败。捕获 stderr 以便报准原因。
+      const att = spawnSync('hdiutil', ['attach', tmp, '-nobrowse', '-readonly', '-noverify', '-noautoopen', '-mountpoint', mnt], { encoding: 'utf8' });
+      if (att.status !== 0) {
+        const why = (att.stderr || String(att.error || '')).trim().slice(0, 140);
+        onProgress?.(0, '挂载 dmg 失败:' + (why || `status ${att.status}`));
+        coworkLog('ERROR', 'kernelInstaller', 'hdiutil attach failed', { status: att.status, stderr: att.stderr, err: String(att.error || '') });
+      }
       try {
         const app = findDirEndingWith(mnt, '.app');
-        if (app) {
-          spawnSync('cp', ['-R', app, path.join(d, 'Chromium.app')], { stdio: 'ignore' });
+        if (!app) {
+          onProgress?.(0, 'dmg 内未找到 .app(可能不是浏览器内核包)');
+          coworkLog('ERROR', 'kernelInstaller', 'no .app inside dmg', { mnt });
+        } else {
+          const cpr = spawnSync('cp', ['-R', app, path.join(d, 'Chromium.app')], { encoding: 'utf8' });
+          if (cpr.status !== 0) {
+            onProgress?.(0, '拷贝内核失败:' + ((cpr.stderr || '').trim().slice(0, 120) || `status ${cpr.status}`));
+            coworkLog('ERROR', 'kernelInstaller', 'cp app failed', { status: cpr.status, stderr: cpr.stderr });
+          }
           const macos = path.join(d, 'Chromium.app', 'Contents', 'MacOS');
           if (fs.existsSync(macos) && !fs.existsSync(path.join(macos, 'Chromium'))) {
             const first = fs.readdirSync(macos)[0];
