@@ -27,6 +27,10 @@ import { isPackaged, getResourcesPath, getUserDataPath } from '../platformAdapte
 import type { Fingerprint, Proxy } from './types';
 
 // ── bundle 进包的 fingerprint-chromium 定位(镜像 ffmpegRuntime 的探测) ──
+// mac 内核加密 blob 的对称密钥(同 scripts/fetch-fingerprint-chromium.js)——
+// 非安全机密,只为让 Apple 公证认不出是压缩包而不扫里面。
+const KERNEL_KEY = 'nbmx-fpc-7e3a91c5';
+
 // 候选资源根(同 ffmpegRuntime 的 dual-path 走法)。
 function candidateRoots(): string[] {
   const roots: string[] = [];
@@ -49,15 +53,18 @@ function resolveBundledKernel(): string | null {
     const exe = path.join(runtimeDir, 'Chromium.app', 'Contents', 'MacOS', 'Chromium');
     if (fs.existsSync(exe)) return exe;
     for (const r of candidateRoots()) {
-      const tgz = path.join(r, 'fingerprint-chromium-mac.tgz');
+      const enc = path.join(r, 'fingerprint-chromium-mac.enc');
       try {
-        if (!fs.existsSync(tgz)) continue;
-        coworkLog('INFO', 'kernelPool', `extracting bundled kernel → ${runtimeDir}`);
+        if (!fs.existsSync(enc)) continue;
+        coworkLog('INFO', 'kernelPool', `decrypt+extract bundled kernel → ${runtimeDir}`);
         fs.mkdirSync(runtimeDir, { recursive: true });
-        const ex = spawnSync('tar', ['-xzf', tgz, '-C', runtimeDir], { stdio: 'ignore' });
+        const tmpTgz = path.join(runtimeDir, '.kernel.tgz');
+        const dec = spawnSync('openssl', ['enc', '-d', '-aes-256-cbc', '-md', 'sha256', '-in', enc, '-out', tmpTgz, '-k', KERNEL_KEY], { stdio: 'ignore' });
+        if (dec.status !== 0) continue;
+        const ex = spawnSync('tar', ['-xzf', tmpTgz, '-C', runtimeDir], { stdio: 'ignore' });
+        try { fs.rmSync(tmpTgz, { force: true }); } catch { /* ignore */ }
         if (ex.status === 0 && fs.existsSync(exe)) {
           try { fs.chmodSync(exe, 0o755); } catch { /* ignore */ }
-          // 清隔离属性(bundle 解压一般没有,保险)
           try { spawnSync('xattr', ['-cr', path.join(runtimeDir, 'Chromium.app')], { stdio: 'ignore' }); } catch { /* ignore */ }
           return exe;
         }

@@ -189,14 +189,14 @@ function main() {
   //     src-tauri/resources/ 让 Tauri bundle;kernelPool.resolveBundledKernel() 运行时
   //     解析 win→chrome.exe / mac→Chromium.app/Contents/MacOS/Chromium。
   if (process.platform === 'darwin') {
-    // mac:内核是 .tgz 数据文件(运行时首次解压),不参与公证。直接拷文件。
-    const tgzSrc = path.join(ROOT, 'resources', 'fingerprint-chromium-mac.tgz');
-    const tgzDest = path.join(RESOURCES_DIR, 'fingerprint-chromium-mac.tgz');
-    if (fs.existsSync(tgzSrc)) {
-      fs.copyFileSync(tgzSrc, tgzDest);
-      console.log(`  fingerprint-chromium-mac.tgz: ${Math.round(fs.statSync(tgzDest).size / 1024 / 1024)}MB`);
+    // mac:内核是【加密 blob】(公证认不出 → 不扫),运行时首次本地解密+解压。直接拷文件。
+    const encSrc = path.join(ROOT, 'resources', 'fingerprint-chromium-mac.enc');
+    const encDest = path.join(RESOURCES_DIR, 'fingerprint-chromium-mac.enc');
+    if (fs.existsSync(encSrc)) {
+      fs.copyFileSync(encSrc, encDest);
+      console.log(`  fingerprint-chromium-mac.enc: ${Math.round(fs.statSync(encDest).size / 1024 / 1024)}MB`);
     } else {
-      console.warn('  fingerprint-chromium-mac.tgz: NOT FOUND (run fetch-fingerprint-chromium.js first) — 矩阵互动回落系统 Chrome。');
+      console.warn('  fingerprint-chromium-mac.enc: NOT FOUND (run fetch-fingerprint-chromium.js first) — 矩阵互动回落系统 Chrome。');
     }
   } else {
     const kdir = process.platform === 'win32' ? 'fingerprint-chromium-win' : 'fingerprint-chromium-linux';

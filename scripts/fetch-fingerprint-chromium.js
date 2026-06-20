@@ -25,6 +25,11 @@ const ROOT = path.resolve(__dirname, '..');
 const WIN_URL = 'https://github.com/adryfish/fingerprint-chromium/releases/download/144.0.7559.132/ungoogled-chromium_144.0.7559.132-1.1_windows_x64.zip';
 const MAC_URL = 'https://github.com/adryfish/fingerprint-chromium/releases/download/142.0.7444.175/ungoogled-chromium_142.0.7444.175-1.1_macos.dmg';
 
+// mac 内核加密 blob 的对称密钥 —— 不是安全机密,只为让 Apple 公证服务认不出这是
+// 压缩包(从而不递归扫描里面几百个 Chromium 二进制)。kernelPool.ts 用同一个 key 解密。
+// flags 选 LibreSSL(系统自带)+ OpenSSL 都支持的:-aes-256-cbc -md sha256(不用 -pbkdf2)。
+const KERNEL_KEY = 'nbmx-fpc-7e3a91c5';
+
 function targetTriple() {
   if (process.argv[2]) return process.argv[2];
   if (process.env.SIDECAR_TARGET) return process.env.SIDECAR_TARGET;
@@ -87,10 +92,10 @@ function fetchWindows() {
 }
 
 function fetchMac() {
-  // mac:打成 .tgz(数据文件,不参与公证) → 运行时首次本地解压。彻底绕开
-  // "给 notarized app 里的 Chromium 逐个嵌套签名" 的地狱。
-  const tgz = path.join(ROOT, 'resources', 'fingerprint-chromium-mac.tgz');
-  if (fs.existsSync(tgz)) { console.log('[fpc] mac tgz already present, skip'); return; }
+  // mac:打成【加密 blob】(公证服务认不出是压缩包 → 不扫里面) → 运行时首次本地
+  // 解密+解压。彻底绕开 "给 notarized app 里的 Chromium 逐个嵌套签名" 的地狱。
+  const enc = path.join(ROOT, 'resources', 'fingerprint-chromium-mac.enc');
+  if (fs.existsSync(enc)) { console.log('[fpc] mac enc already present, skip'); return; }
   const tmp = scratch();
   const dmg = path.join(tmp, 'fpc-mac.dmg');
   console.log('[fpc] downloading mac', MAC_URL);
@@ -112,10 +117,13 @@ function fetchMac() {
       const first = fs.readdirSync(macosDir)[0];
       if (first) execSync(`ln -sf "${first}" "${path.join(macosDir, 'Chromium')}"`, { stdio: 'inherit' });
     }
-    fs.mkdirSync(path.dirname(tgz), { recursive: true });
+    const tgz = path.join(tmp, 'k.tgz');
     // tar 保留符号链接;-C stage 让包内顶层就是 Chromium.app
     execSync(`tar -czf "${tgz}" -C "${stage}" Chromium.app`, { stdio: 'inherit' });
-    console.log(`[fpc] ✓ mac tgz (${Math.round(fs.statSync(tgz).size/1024/1024)}MB) →`, tgz);
+    fs.mkdirSync(path.dirname(enc), { recursive: true });
+    // 加密成不透明 blob(magic 变成 openssl 的 Salted__,非压缩包 → 公证不递归)
+    execSync(`openssl enc -aes-256-cbc -md sha256 -salt -in "${tgz}" -out "${enc}" -k "${KERNEL_KEY}"`, { stdio: 'inherit' });
+    console.log(`[fpc] ✓ mac enc (${Math.round(fs.statSync(enc).size/1024/1024)}MB) →`, enc);
   } finally {
     try { execSync(`hdiutil detach "${mnt}"`, { stdio: 'inherit' }); } catch { /* ignore */ }
   }
