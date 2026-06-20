@@ -1187,6 +1187,24 @@ const server = http.createServer(async (req, res) => {
               return writeJSON(res, 200, { ok: false, error: e?.message || String(e) });
             }
           }
+          case 'matrix:buildContent': {
+            // 内容差异化:逐号产片(慢),进度走 matrix:content SSE,完成回传 inputs 映射。
+            try {
+              const { buildDifferentiatedInputs } = await import('./libs/matrix/contentPlan');
+              const a = args[0] as any;
+              buildDifferentiatedInputs(
+                a?.accountIds || [], a?.base, a?.opts || {},
+                (p: unknown) => broadcastSSE('matrix:content', { type: 'progress', progress: p }),
+              ).then((inputs) => {
+                broadcastSSE('matrix:content', { type: 'done', inputs });
+              }).catch((e: any) => {
+                broadcastSSE('matrix:content', { type: 'error', error: e?.message || String(e) });
+              });
+              return writeJSON(res, 200, { ok: true, status: 'started' });
+            } catch (e: any) {
+              return writeJSON(res, 200, { ok: false, error: e?.message || String(e) });
+            }
+          }
 
           // ── User slash commands ──
           // Composer autocomplete reads this list when the user types

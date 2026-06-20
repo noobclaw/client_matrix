@@ -31,6 +31,8 @@ export interface KernelSession {
   pageTargetId: string | null;
   msgId: number;                  // 本会话独立 id 空间
   pending: Map<number, { resolve: (d: any) => void; reject: (e: Error) => void }>;
+  proxyAuth?: { username: string; password: string }; // 带 auth 代理:经 CDP 提供凭据
+  fetchEnabled?: boolean;         // 是否已开 Fetch 域(代理认证拦截)
 }
 
 export interface LaunchKernelOptions {
@@ -90,17 +92,11 @@ function buildKernelArgs(opts: LaunchKernelOptions, debugPort: number): string[]
   if (fp.timezone) args.push(`--timezone=${fp.timezone}`);
 
   if (proxy) {
-    // 带 auth 的代理走本地中转端口(Chromium --proxy-server 不支持内联账密);
-    // 无 auth 直连。socks5h 在 chromium 里用 socks5(socks5 默认远程 DNS)。
+    // socks5h 在 chromium 里用 socks5(socks5 默认远程 DNS,防 DNS 泄漏)。
+    // 带 auth 的代理【不内联账密】(Chromium 不支持)→ 经 CDP Fetch.authRequired
+    // 在 getPage 里提供凭据,无需本地中转进程。
     const scheme = proxy.protocol === 'socks5h' ? 'socks5' : proxy.protocol;
-    if (proxy.username && proxy.localBridgePort) {
-      args.push(`--proxy-server=socks5://127.0.0.1:${proxy.localBridgePort}`);
-    } else {
-      if (proxy.username) {
-        coworkLog('WARN', 'kernelPool', `proxy for ${opts.accountId} has auth but no localBridgePort; auth not applied (MVP)`);
-      }
-      args.push(`--proxy-server=${scheme}://${proxy.host}:${proxy.port}`);
-    }
+    args.push(`--proxy-server=${scheme}://${proxy.host}:${proxy.port}`);
     // 防 WebRTC 漏真实 IP(fingerprint-chromium flag)
     args.push('--disable-non-proxied-udp');
   }
@@ -153,6 +149,9 @@ export async function launchKernel(opts: LaunchKernelOptions): Promise<KernelSes
     pageTargetId: null,
     msgId: 1,
     pending: new Map(),
+    proxyAuth: (opts.proxy?.username && opts.proxy?.password)
+      ? { username: opts.proxy.username, password: opts.proxy.password }
+      : undefined,
   };
   sessions.set(opts.accountId, session);
   coworkLog('INFO', 'kernelPool', `kernel ${opts.accountId} ready on ${debugPort}`);
@@ -184,13 +183,33 @@ async function getPage(accountId: string): Promise<KernelSession> {
           const h = s.pending.get(msg.id)!;
           s.pending.delete(msg.id);
           msg.error ? h.reject(new Error(msg.error.message)) : h.resolve(msg.result);
+          return;
+        }
+        // 代理认证拦截(Fetch 域事件):有 auth 凭据则应答,否则放行。
+        if (msg.method === 'Fetch.authRequired') {
+          const resp = s.proxyAuth
+            ? { response: 'ProvideCredentials', username: s.proxyAuth.username, password: s.proxyAuth.password }
+            : { response: 'Default' };
+          sendNoWait(s, 'Fetch.continueWithAuth', { requestId: msg.params?.requestId, authChallengeResponse: resp });
+        } else if (msg.method === 'Fetch.requestPaused') {
+          sendNoWait(s, 'Fetch.continueRequest', { requestId: msg.params?.requestId });
         }
       } catch { /* ignore */ }
     });
   });
   s.pageWs = ws;
   await send(s, 'Page.enable');
+  // 带 auth 代理:开 Fetch 域拦截认证挑战(patterns:* 会暂停请求,故必须 continueRequest 放行)。
+  if (s.proxyAuth && !s.fetchEnabled) {
+    await send(s, 'Fetch.enable', { handleAuthRequests: true, patterns: [{ urlPattern: '*' }] });
+    s.fetchEnabled = true;
+  }
   return s;
+}
+
+/** 发命令不等响应(用于 Fetch.continueWithAuth / continueRequest 这类拦截应答)。 */
+function sendNoWait(s: KernelSession, method: string, params: Record<string, unknown> = {}): void {
+  try { s.pageWs?.send(JSON.stringify({ id: s.msgId++, method, params })); } catch { /* ignore */ }
 }
 
 function send(s: KernelSession, method: string, params: Record<string, unknown> = {}): Promise<any> {
