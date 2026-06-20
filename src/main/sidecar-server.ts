@@ -1140,8 +1140,8 @@ const server = http.createServer(async (req, res) => {
           case 'matrix:openLogin': {
             // 起该号的指纹内核并导航到平台登录页,供用户扫码;不关窗,登完用户自己确认。
             try {
-              const { getAccount } = await import('./libs/matrix/accountManager');
-              const { launchKernel, kernelNavigate } = await import('./libs/matrix/kernelPool');
+              const { getAccount, setAccountStatus } = await import('./libs/matrix/accountManager');
+              const { launchKernel, kernelNavigate, checkKernelLogin, getSession } = await import('./libs/matrix/kernelPool');
               const a = args[0] as any;
               const acc = getAccount(a?.accountId);
               if (!acc) return writeJSON(res, 200, { ok: false, error: 'account_not_found' });
@@ -1150,7 +1150,36 @@ const server = http.createServer(async (req, res) => {
                 userDataDir: acc.userDataDir, fingerprint: acc.fingerprint, proxy: acc.proxy,
               });
               await kernelNavigate(acc.id, a?.loginUrl || 'about:blank');
+              // 后台轮询登录态:扫码成功后自动把状态翻成 idle 并推 matrix:account SSE(最多 ~3min;窗口关了就停)。
+              (async () => {
+                for (let i = 0; i < 60; i++) {
+                  await new Promise((r) => setTimeout(r, 3000));
+                  if (!getSession(acc.id)) break; // 窗口被关
+                  let ok = false;
+                  try { ok = await checkKernelLogin(acc.id, acc.platform); } catch { ok = false; }
+                  if (ok) {
+                    setAccountStatus(acc.id, 'idle');
+                    broadcastSSE('matrix:account', { id: acc.id, status: 'idle' });
+                    break;
+                  }
+                }
+              })();
               return writeJSON(res, 200, { ok: true });
+            } catch (e: any) {
+              return writeJSON(res, 200, { ok: false, error: e?.message || String(e) });
+            }
+          }
+          case 'matrix:checkLogin': {
+            // 手动「刷新登录态」:立即查一次 cookie,登了就翻 idle + 推 SSE。
+            try {
+              const { getAccount, setAccountStatus } = await import('./libs/matrix/accountManager');
+              const { checkKernelLogin } = await import('./libs/matrix/kernelPool');
+              const a = args[0] as any;
+              const acc = getAccount(a?.accountId);
+              if (!acc) return writeJSON(res, 200, { ok: false, error: 'account_not_found' });
+              const loggedIn = await checkKernelLogin(acc.id, acc.platform);
+              if (loggedIn) { setAccountStatus(acc.id, 'idle'); broadcastSSE('matrix:account', { id: acc.id, status: 'idle' }); }
+              return writeJSON(res, 200, { ok: true, loggedIn });
             } catch (e: any) {
               return writeJSON(res, 200, { ok: false, error: e?.message || String(e) });
             }

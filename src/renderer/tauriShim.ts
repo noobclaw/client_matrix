@@ -503,6 +503,7 @@ export function createTauriElectronShim(): typeof window.electron {
       setAccountKeywords: (args: unknown) => ipcInvoke('matrix:setAccountKeywords', args).then((r: any) => r ?? { ok: false }),
       removeAccount: (args: unknown) => ipcInvoke('matrix:removeAccount', args).then((r: any) => r ?? { ok: false }),
       openLogin: (args: unknown) => ipcInvoke('matrix:openLogin', args).then((r: any) => r ?? { ok: false }),
+      checkLogin: (args: unknown) => ipcInvoke('matrix:checkLogin', args).then((r: any) => r ?? { ok: false }),
       runTask: (args: unknown) => ipcInvoke('matrix:runTask', args).then((r: any) => r ?? { ok: false }),
       runEngage: (args: unknown) => ipcInvoke('matrix:runEngage', args).then((r: any) => r ?? { ok: false }),
       buildContent: (args: unknown) => ipcInvoke('matrix:buildContent', args).then((r: any) => r ?? { ok: false }),
@@ -512,6 +513,7 @@ export function createTauriElectronShim(): typeof window.electron {
       onProgress: (handler: (p: unknown) => void) => onSSE('matrix:progress', handler),
       onContent: (handler: (p: unknown) => void) => onSSE('matrix:content', handler),
       onKernel: (handler: (p: unknown) => void) => onSSE('matrix:kernel', handler),
+      onAccount: (handler: (p: unknown) => void) => onSSE('matrix:account', handler),
     },
 
     // ── Shell ──

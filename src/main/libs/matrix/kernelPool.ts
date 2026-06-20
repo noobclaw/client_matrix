@@ -295,6 +295,32 @@ export async function kernelSetFileInput(accountId: string, selector: string, fi
   return true;
 }
 
+// ── 登录态检测(读 cookie;httpOnly 也能经 CDP 读到,document.cookie 读不到) ──
+
+// 各平台「已登录」的标志性 cookie(命中任一即视为已登录)。
+const LOGIN_COOKIES: Record<string, string[]> = {
+  douyin: ['sessionid', 'sessionid_ss', 'sid_guard', 'passport_auth_status'],
+  xhs: ['web_session'],
+  bilibili: ['SESSDATA', 'DedeUserID'],
+  shipinhao: ['sessionid', 'wxuin'],
+  kuaishou: ['userId', 'kuaishou.server.web_st'],
+  toutiao: ['sessionid', 'sso_uid_tt'],
+  tiktok: ['sessionid', 'sid_tt'],
+  x: ['auth_token'],
+};
+
+/** 该号当前是否已登录对应平台(按标志性 cookie 判断)。session 不在/读失败返回 false。 */
+export async function checkKernelLogin(accountId: string, platform: string): Promise<boolean> {
+  if (!sessions.get(accountId)) return false;
+  try {
+    const s = await getPage(accountId);
+    const r = await send(s, 'Network.getCookies', {}); // 当前页 cookie(已导航到平台站)
+    const names = new Set<string>((r?.cookies || []).map((c: any) => String(c.name)));
+    const need = LOGIN_COOKIES[platform] || [];
+    return need.some((n) => names.has(n));
+  } catch { return false; }
+}
+
 // ── 生命周期 ──
 
 export function getSession(accountId: string): KernelSession | undefined {

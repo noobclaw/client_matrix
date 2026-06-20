@@ -110,6 +110,12 @@ const MatrixView: React.FC<Props> = () => {
     return () => { if (typeof off === 'function') off(); };
   }, [reload]);
 
+  // 登录态自动刷新:扫码成功后 sidecar 轮询检测到 → 推 matrix:account → 重载账号列表。
+  useEffect(() => {
+    const off = M()?.onAccount?.(() => { reload(); });
+    return () => { if (typeof off === 'function') off(); };
+  }, [reload]);
+
   useEffect(() => { localStorage.setItem('matrix:kernelPath', kernelPath); }, [kernelPath]);
 
   const loadKernel = useCallback(() => {
@@ -152,6 +158,13 @@ const MatrixView: React.FC<Props> = () => {
     setEditId(a.id); setNewName(a.displayName); setNewKeywords((a.keywords || []).join(' ')); setNotice(''); setShowAdd(true);
   };
 
+  // 手动「刷新登录态」:登录窗里扫码完成后点一下,立即查 cookie 翻状态(自动轮询的兜底)。
+  const refreshLogin = async (a: MatrixAccount) => {
+    const r = await M()?.checkLogin?.({ accountId: a.id, platform: a.platform });
+    if (r?.loggedIn) { setNotice(`${a.displayName} 已登录 ✓`); await reload(); }
+    else setNotice(`${a.displayName} 还没检测到登录——请确认扫码完成、且该号的浏览器窗口停在平台页面`);
+  };
+
   const confirmAdd = async (thenLogin: boolean) => {
     const m = M();
     if (!m) { setNotice('matrix 接口未就绪(请确认运行的是矩阵版)'); return; }
@@ -169,7 +182,7 @@ const MatrixView: React.FC<Props> = () => {
     setShowAdd(false);
     if (r?.ok) {
       await reload();
-      setNotice(thenLogin ? '已建号,正在打开指纹浏览器扫码…' : `已建号:${name}`);
+      setNotice(thenLogin ? '已建号,正在打开指纹浏览器扫码…扫码成功后状态会自动变「已就绪」' : `已建号:${name}`);
       if (thenLogin && r.account) {
         await m.openLogin({ accountId: r.account.id, kernelPath, loginUrl: LOGIN_URL[platform] || '' });
       }
@@ -273,9 +286,10 @@ const MatrixView: React.FC<Props> = () => {
                   </span>
                   <span className="text-xs px-2 py-0.5 rounded bg-black/5 dark:bg-white/10">{STATUS_LABEL[a.status]}</span>
                   <button onClick={() => openEditKeywords(a)} className="text-xs px-2 py-1 rounded border dark:border-white/15 border-black/15">改词</button>
-                  {a.status === 'login_required' && (
-                    <button onClick={() => { if (!requireKernel()) return; M()?.openLogin({ accountId: a.id, kernelPath, loginUrl: LOGIN_URL[a.platform] || '' }); }} className="text-xs px-2 py-1 rounded border dark:border-white/15 border-black/15">扫码登录</button>
-                  )}
+                  {a.status === 'login_required' && (<>
+                    <button onClick={() => { if (!requireKernel()) return; setNotice(`正在为「${a.displayName}」打开指纹浏览器,扫码后状态会自动刷新`); M()?.openLogin({ accountId: a.id, kernelPath, loginUrl: LOGIN_URL[a.platform] || '' }); }} className="text-xs px-2 py-1 rounded border dark:border-white/15 border-black/15">扫码登录</button>
+                    <button onClick={() => refreshLogin(a)} className="text-xs px-2 py-1 rounded border dark:border-white/15 border-black/15">刷新状态</button>
+                  </>)}
                 </div>
               ))}
             </div>
