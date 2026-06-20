@@ -1104,6 +1104,90 @@ const server = http.createServer(async (req, res) => {
             } catch {}
             return writeJSON(res, 200, true);
           }
+
+          // ── Matrix(矩阵号:多账号同平台铺内容)──
+          // 账号池全本地;driver/计费走 backend/matrix。进度经 matrix:progress SSE。
+          case 'matrix:listAccounts': {
+            const { listAccounts } = await import('./libs/matrix/accountManager');
+            return writeJSON(res, 200, { ok: true, accounts: listAccounts() });
+          }
+          case 'matrix:createAccount': {
+            const { createAccount } = await import('./libs/matrix/accountManager');
+            return writeJSON(res, 200, { ok: true, account: createAccount(args[0]) });
+          }
+          case 'matrix:setAccountProxy': {
+            const { setAccountProxy } = await import('./libs/matrix/accountManager');
+            setAccountProxy(args[0]?.id, args[0]?.proxy);
+            return writeJSON(res, 200, { ok: true });
+          }
+          case 'matrix:setAccountStatus': {
+            const { setAccountStatus } = await import('./libs/matrix/accountManager');
+            setAccountStatus(args[0]?.id, args[0]?.status);
+            return writeJSON(res, 200, { ok: true });
+          }
+          case 'matrix:removeAccount': {
+            const { removeAccount } = await import('./libs/matrix/accountManager');
+            removeAccount(args[0]?.id);
+            return writeJSON(res, 200, { ok: true });
+          }
+          case 'matrix:openLogin': {
+            // 起该号的指纹内核并导航到平台登录页,供用户扫码;不关窗,登完用户自己确认。
+            try {
+              const { getAccount } = await import('./libs/matrix/accountManager');
+              const { launchKernel, kernelNavigate } = await import('./libs/matrix/kernelPool');
+              const a = args[0] as any;
+              const acc = getAccount(a?.accountId);
+              if (!acc) return writeJSON(res, 200, { ok: false, error: 'account_not_found' });
+              await launchKernel({
+                accountId: acc.id, kernelPath: a?.kernelPath, userDataDir: acc.userDataDir,
+                fingerprint: acc.fingerprint, proxy: acc.proxy,
+              });
+              await kernelNavigate(acc.id, a?.loginUrl || 'about:blank');
+              return writeJSON(res, 200, { ok: true });
+            } catch (e: any) {
+              return writeJSON(res, 200, { ok: false, error: e?.message || String(e) });
+            }
+          }
+          case 'matrix:runTask': {
+            // Fire-and-forget(同 video:generate):任务跑数分钟,进度走 matrix:progress SSE。
+            try {
+              const { runMatrixTask } = await import('./libs/matrix/taskRunner');
+              const a = args[0] as any;
+              const getInput = a?.inputs
+                ? (id: string) => a.inputs[id]
+                : () => a?.input;
+              runMatrixTask({
+                platform: a?.platform,
+                accountIds: a?.accountIds || [],
+                getInput,
+                concurrency: a?.concurrency,
+                jitterMinMs: a?.jitterMinMs,
+                jitterMaxMs: a?.jitterMaxMs,
+                kernelPath: a?.kernelPath,
+                headless: a?.headless,
+                authToken: a?.authToken,
+                onLog: (accountId, msg) => broadcastSSE('matrix:progress', { type: 'log', accountId, msg }),
+                onItem: (item) => broadcastSSE('matrix:progress', { type: 'item', ...item }),
+              }).then((report) => {
+                broadcastSSE('matrix:progress', { type: 'done', report });
+              }).catch((e: any) => {
+                broadcastSSE('matrix:progress', { type: 'error', error: e?.message || String(e) });
+              });
+              return writeJSON(res, 200, { ok: true, status: 'started' });
+            } catch (e: any) {
+              return writeJSON(res, 200, { ok: false, error: e?.message || String(e) });
+            }
+          }
+          case 'matrix:selftest': {
+            try {
+              const { runKernelSelfTest } = await import('./libs/matrix/selftest');
+              const report = await runKernelSelfTest(args[0] || {});
+              return writeJSON(res, 200, { ok: true, report });
+            } catch (e: any) {
+              return writeJSON(res, 200, { ok: false, error: e?.message || String(e) });
+            }
+          }
+
           // ── User slash commands ──
           // Composer autocomplete reads this list when the user types
           // "/" at the start of the input; body is NOT returned (too
