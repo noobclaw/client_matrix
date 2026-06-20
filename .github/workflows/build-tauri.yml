@@ -262,22 +262,44 @@ jobs:
         #    bundle 第三方 Chromium 的固有难点)。无 mac 内核(非 mac target)则跳过。
         if: runner.os == 'macOS'
         run: |
+          set -e
           APP=src-tauri/resources/fingerprint-chromium-mac/Chromium.app
-          if [ -d "$APP" ]; then
-            ID="$APPLE_SIGNING_IDENTITY"
-            SIGN() { codesign --force --timestamp --options runtime --sign "$ID" "$1" 2>/dev/null || true; }
-            # 1) 所有 dylib/so
-            find "$APP" -type f \( -name "*.dylib" -o -name "*.so" \) | while read f; do SIGN "$f"; done
-            # 2) framework 内的版本化二进制
-            find "$APP/Contents/Frameworks" -type d -name "*.framework" 2>/dev/null | while read fw; do SIGN "$fw"; done
-            # 3) 嵌套 Helper .app(从最深的先签)
-            find "$APP" -type d -name "*.app" | awk '{ print length, $0 }' | sort -rn | cut -d" " -f2- | while read a; do SIGN "$a"; done
-            # 4) 主 app —— --deep 兜底剩余可执行
-            codesign --force --deep --timestamp --options runtime --sign "$ID" "$APP" || true
-            codesign -dvv "$APP" || true
-          else
+          if [ ! -d "$APP" ]; then
             echo "No bundled fingerprint-chromium-mac for ${{ matrix.target }} — skipping pre-sign."
+            exit 0
           fi
+          ID="$APPLE_SIGNING_IDENTITY"
+          ENT="$RUNNER_TEMP/chromium-ent.plist"
+          cat > "$ENT" <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>com.apple.security.cs.allow-jit</key><true/>
+            <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+            <key>com.apple.security.cs.disable-library-validation</key><true/>
+            <key>com.apple.security.cs.allow-dyld-environment-variables</key><true/>
+          </dict></plist>
+          EOF
+          # 1) 先签所有【叶子 Mach-O 文件】(dylib + 无扩展名 Helper 可执行,如
+          #    chrome_crashpad_handler / app_mode_loader / web_app_shortcut_copier)。
+          #    用 `file` 探测,不靠扩展名 —— 上次就是漏了无扩展名的 Helper 导致公证拒。
+          #    -print0/read -d 处理路径里的空格(Chromium Framework.framework 有空格)。
+          find "$APP" -type f -print0 | while IFS= read -r -d '' f; do
+            if file -b "$f" | grep -q "Mach-O"; then
+              codesign --force --timestamp --options runtime --sign "$ID" "$f"
+            fi
+          done
+          # 2) 再签【bundle】(.framework + 嵌套 .app)由深到浅,带 entitlements(让内层
+          #    Chromium 公证通过且运行时不被 hardened runtime 杀)。NF=路径深度,tab 分隔
+          #    (路径无 tab,空格安全)。
+          find "$APP" -type d \( -name "*.framework" -o -name "*.app" \) \
+            | awk -F/ '{print NF"\t"$0}' | sort -rn | cut -f2- \
+            | while IFS= read -r b; do
+                codesign --force --timestamp --options runtime --entitlements "$ENT" --sign "$ID" "$b"
+              done
+          # 3) 校验(--deep --strict 必须全绿,否则后面公证还会拒)
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          echo "fingerprint-chromium 重签完成"
 
       - name: Build Tauri app
         # macOS workaround: macos-latest runner ships a /usr/local/bin/cargo
