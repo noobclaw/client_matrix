@@ -56,6 +56,11 @@ const MatrixView: React.FC<Props> = () => {
   const [running, setRunning] = useState(false);
   const [doneReport, setDoneReport] = useState<any>(null);
 
+  // 添加账号弹窗 + 通知(Tauri webview 不支持原生 prompt/alert/confirm,全走 app 内 UI)
+  const [showAdd, setShowAdd] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [notice, setNotice] = useState('');
+
   const reload = useCallback(async () => {
     const r = await M()?.listAccounts();
     if (r?.ok) setAccounts(r.accounts || []);
@@ -86,22 +91,31 @@ const MatrixView: React.FC<Props> = () => {
     setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   };
 
-  const addAccount = async () => {
-    const name = prompt('账号备注名(如:美食1号)');
-    if (!name) return;
-    const r = await M()?.createAccount({ platform, displayName: name });
+  const openAdd = () => { setNewName(''); setNotice(''); setShowAdd(true); };
+
+  const confirmAdd = async (thenLogin: boolean) => {
+    const name = newName.trim();
+    if (!name) { setNotice('请填账号备注名'); return; }
+    const m = M();
+    if (!m) { setNotice('matrix 接口未就绪(请确认运行的是矩阵版)'); return; }
+    const r = await m.createAccount({ platform, displayName: name });
+    setShowAdd(false);
     if (r?.ok) {
       await reload();
-      if (confirm('已建号。现在打开指纹浏览器扫码登录?')) {
-        await M()?.openLogin({ accountId: r.account.id, kernelPath, loginUrl: '' });
+      setNotice(thenLogin ? '已建号,正在打开指纹浏览器扫码…' : `已建号:${name}`);
+      if (thenLogin && r.account) {
+        await m.openLogin({ accountId: r.account.id, kernelPath, loginUrl: '' });
       }
+    } else {
+      setNotice('创建失败:' + (r?.error || 'IPC 未响应'));
     }
   };
 
   const startTask = async () => {
     const ids = [...selected];
-    if (!ids.length) { alert('请先勾选账号'); return; }
-    if (!videoPath) { alert('请填视频文件路径'); return; }
+    if (!ids.length) { setNotice('请先勾选账号'); setTab('publish'); return; }
+    if (!videoPath) { setNotice('请填视频文件路径'); setTab('publish'); return; }
+    setNotice('');
     setItems({}); setLogs([]); setDoneReport(null); setRunning(true); setTab('progress');
     await M()?.runTask({
       platform, accountIds: ids, concurrency, kernelPath,
@@ -133,6 +147,13 @@ const MatrixView: React.FC<Props> = () => {
         </div>
       </div>
 
+      {notice && (
+        <div className="mx-5 mt-3 text-sm px-3 py-2 rounded-lg bg-claude-accent/10 text-claude-accent flex items-center justify-between">
+          <span>{notice}</span>
+          <button onClick={() => setNotice('')} className="opacity-60 hover:opacity-100 ml-3">✕</button>
+        </div>
+      )}
+
       <div className="flex-1 overflow-auto p-5">
         {tab === 'accounts' && (
           <div>
@@ -141,7 +162,7 @@ const MatrixView: React.FC<Props> = () => {
               <select value={platform} onChange={(e) => setPlatform(e.target.value)} className="ml-2 text-sm px-2 py-1 rounded border dark:border-white/15 border-black/15 bg-transparent">
                 {PLATFORMS.map((p) => <option key={p} value={p}>{PLATFORM_LABEL[p]}</option>)}
               </select>
-              <button onClick={addAccount} className="ml-auto px-3 py-1.5 text-sm rounded-lg bg-claude-accent text-white">+ 添加账号</button>
+              <button onClick={openAdd} className="ml-auto px-3 py-1.5 text-sm rounded-lg bg-claude-accent text-white">+ 添加账号</button>
             </div>
             <div className="space-y-2">
               {platformAccounts.length === 0 && <div className="text-sm opacity-50 py-8 text-center">该平台还没有账号,点「添加账号」开始。</div>}
@@ -235,6 +256,25 @@ const MatrixView: React.FC<Props> = () => {
           </div>
         )}
       </div>
+
+      {showAdd && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-80 rounded-xl p-5 dark:bg-claude-darkBg bg-white border dark:border-white/10 border-black/10">
+            <div className="text-sm font-medium mb-3">添加 {PLATFORM_LABEL[platform]} 账号</div>
+            <input
+              autoFocus value={newName} onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') confirmAdd(true); }}
+              placeholder="账号备注名(如:美食1号)"
+              className="w-full text-sm px-3 py-2 rounded border dark:border-white/15 border-black/15 bg-transparent mb-4"
+            />
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowAdd(false)} className="px-3 py-1.5 text-sm rounded-lg border dark:border-white/15 border-black/15">取消</button>
+              <button onClick={() => confirmAdd(false)} className="px-3 py-1.5 text-sm rounded-lg border dark:border-white/15 border-black/15">仅创建</button>
+              <button onClick={() => confirmAdd(true)} className="px-3 py-1.5 text-sm rounded-lg bg-claude-accent text-white">创建并扫码登录</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
