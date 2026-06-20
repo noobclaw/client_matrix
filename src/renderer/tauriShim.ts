@@ -507,8 +507,11 @@ export function createTauriElectronShim(): typeof window.electron {
       runEngage: (args: unknown) => ipcInvoke('matrix:runEngage', args).then((r: any) => r ?? { ok: false }),
       buildContent: (args: unknown) => ipcInvoke('matrix:buildContent', args).then((r: any) => r ?? { ok: false }),
       selftest: (args: unknown) => ipcInvoke('matrix:selftest', args).then((r: any) => r ?? { ok: false }),
+      kernelStatus: () => ipcInvoke('matrix:kernelStatus').then((r: any) => r ?? { ok: false, installed: false }),
+      ensureKernel: () => ipcInvoke('matrix:ensureKernel').then((r: any) => r ?? { ok: false }),
       onProgress: (handler: (p: unknown) => void) => onSSE('matrix:progress', handler),
       onContent: (handler: (p: unknown) => void) => onSSE('matrix:content', handler),
+      onKernel: (handler: (p: unknown) => void) => onSSE('matrix:kernel', handler),
     },
 
     // ── Shell ──

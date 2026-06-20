@@ -1209,6 +1209,23 @@ const server = http.createServer(async (req, res) => {
               return writeJSON(res, 200, { ok: false, error: e?.message || String(e) });
             }
           }
+          case 'matrix:kernelStatus': {
+            const { installedKernelPath } = await import('./libs/matrix/kernelInstaller');
+            const p = installedKernelPath();
+            return writeJSON(res, 200, { ok: true, installed: !!p, path: p || '' });
+          }
+          case 'matrix:ensureKernel': {
+            // 按需下载指纹内核(走后端下发的 OSS 地址)。进度走 matrix:kernel SSE。
+            try {
+              const { ensureKernel } = await import('./libs/matrix/kernelInstaller');
+              ensureKernel((pct, msg) => broadcastSSE('matrix:kernel', { pct, msg }))
+                .then((p) => broadcastSSE('matrix:kernel', { pct: 100, msg: p ? '内核就绪' : '内核安装失败', done: true, path: p || '' }))
+                .catch((e: any) => broadcastSSE('matrix:kernel', { pct: 0, msg: '失败:' + (e?.message || e), done: true }));
+              return writeJSON(res, 200, { ok: true, status: 'started' });
+            } catch (e: any) {
+              return writeJSON(res, 200, { ok: false, error: e?.message || String(e) });
+            }
+          }
           case 'matrix:selftest': {
             try {
               const { runKernelSelfTest } = await import('./libs/matrix/selftest');

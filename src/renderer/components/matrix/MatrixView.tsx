@@ -80,6 +80,11 @@ const MatrixView: React.FC<Props> = () => {
   const [newKeywords, setNewKeywords] = useState('');
   const [notice, setNotice] = useState('');
 
+  // 指纹内核(按需下载)状态
+  const [kernelInstalled, setKernelInstalled] = useState(false);
+  const [kernelMsg, setKernelMsg] = useState('');
+  const [kernelBusy, setKernelBusy] = useState(false);
+
   const reload = useCallback(async () => {
     const r = await M()?.listAccounts();
     if (r?.ok) setAccounts(r.accounts || []);
@@ -103,6 +108,18 @@ const MatrixView: React.FC<Props> = () => {
   }, [reload]);
 
   useEffect(() => { localStorage.setItem('matrix:kernelPath', kernelPath); }, [kernelPath]);
+
+  // 内核状态 + 下载进度订阅
+  useEffect(() => {
+    M()?.kernelStatus?.().then((r: any) => setKernelInstalled(!!r?.installed));
+    const off = M()?.onKernel?.((p: any) => {
+      setKernelMsg(p?.msg || '');
+      if (p?.done) { setKernelBusy(false); M()?.kernelStatus?.().then((r: any) => setKernelInstalled(!!r?.installed)); }
+    });
+    return () => { if (typeof off === 'function') off(); };
+  }, []);
+
+  const downloadKernel = async () => { setKernelBusy(true); setKernelMsg('准备下载…'); await M()?.ensureKernel(); };
 
   const platformAccounts = accounts.filter((a) => a.platform === platform);
 
@@ -181,10 +198,19 @@ const MatrixView: React.FC<Props> = () => {
         <Tab id="publish" label="矩阵发布" />
         <Tab id="progress" label="执行进度" />
         <div className="ml-auto flex items-center gap-2">
+          <span className={`text-xs px-2 py-0.5 rounded ${kernelInstalled ? 'bg-green-500/15 text-green-500' : 'bg-amber-500/15 text-amber-500'}`}>
+            {kernelInstalled ? '指纹内核 ✓' : '指纹内核 未安装'}
+          </span>
+          {!kernelInstalled && (
+            <button onClick={downloadKernel} disabled={kernelBusy} className="text-xs px-2 py-1 rounded-lg bg-claude-accent text-white disabled:opacity-50">
+              {kernelBusy ? '下载中…' : '下载内核'}
+            </button>
+          )}
+          {kernelMsg && <span className="text-xs opacity-60 max-w-[200px] truncate">{kernelMsg}</span>}
           <input
             value={kernelPath} onChange={(e) => setKernelPath(e.target.value)}
-            placeholder="fingerprint-chromium 路径"
-            className="text-xs px-2 py-1.5 w-64 rounded border dark:border-white/15 border-black/15 bg-transparent"
+            placeholder="或手动指定内核路径"
+            className="text-xs px-2 py-1.5 w-44 rounded border dark:border-white/15 border-black/15 bg-transparent"
           />
         </div>
       </div>

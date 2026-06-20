@@ -18,69 +18,13 @@
  * 二进制还没 bundle 时,可传普通 Chrome 路径先验证连接池+driver 链路。
  */
 
-import { spawn, spawnSync, type ChildProcess } from 'child_process';
+import { spawn, type ChildProcess } from 'child_process';
 import WebSocket from 'ws';
 import path from 'path';
 import fs from 'fs';
 import { coworkLog } from '../coworkLogger';
-import { isPackaged, getResourcesPath, getUserDataPath } from '../platformAdapter';
+import { installedKernelPath } from './kernelInstaller';
 import type { Fingerprint, Proxy } from './types';
-
-// ── bundle 进包的 fingerprint-chromium 定位(镜像 ffmpegRuntime 的探测) ──
-// mac 内核加密 blob 的对称密钥(同 scripts/fetch-fingerprint-chromium.js)——
-// 非安全机密,只为让 Apple 公证认不出是压缩包而不扫里面。
-const KERNEL_KEY = 'nbmx-fpc-7e3a91c5';
-
-// 候选资源根(同 ffmpegRuntime 的 dual-path 走法)。
-function candidateRoots(): string[] {
-  const roots: string[] = [];
-  if (isPackaged()) {
-    const res = getResourcesPath();
-    const exeDir = path.dirname(process.execPath);
-    roots.push(res, path.join(res, 'resources'), path.join(exeDir, 'resources'),
-      path.join(exeDir, '..', 'Resources'), path.join(exeDir, '..', 'Resources', 'resources'));
-  } else {
-    roots.push(path.join(path.resolve(__dirname, '..', '..', '..', '..'), 'resources'));
-  }
-  roots.push(path.join(getUserDataPath(), 'runtimes'));
-  return roots;
-}
-
-function resolveBundledKernel(): string | null {
-  if (process.platform === 'darwin') {
-    // mac:内核以 .tgz 数据形式 bundle(不参与公证),首次启动本地解压到 runtimes。
-    const runtimeDir = path.join(getUserDataPath(), 'runtimes', 'fingerprint-chromium-mac');
-    const exe = path.join(runtimeDir, 'Chromium.app', 'Contents', 'MacOS', 'Chromium');
-    if (fs.existsSync(exe)) return exe;
-    for (const r of candidateRoots()) {
-      const enc = path.join(r, 'fingerprint-chromium-mac.enc');
-      try {
-        if (!fs.existsSync(enc)) continue;
-        coworkLog('INFO', 'kernelPool', `decrypt+extract bundled kernel → ${runtimeDir}`);
-        fs.mkdirSync(runtimeDir, { recursive: true });
-        const tmpTgz = path.join(runtimeDir, '.kernel.tgz');
-        const dec = spawnSync('openssl', ['enc', '-d', '-aes-256-cbc', '-md', 'sha256', '-in', enc, '-out', tmpTgz, '-k', KERNEL_KEY], { stdio: 'ignore' });
-        if (dec.status !== 0) continue;
-        const ex = spawnSync('tar', ['-xzf', tmpTgz, '-C', runtimeDir], { stdio: 'ignore' });
-        try { fs.rmSync(tmpTgz, { force: true }); } catch { /* ignore */ }
-        if (ex.status === 0 && fs.existsSync(exe)) {
-          try { fs.chmodSync(exe, 0o755); } catch { /* ignore */ }
-          try { spawnSync('xattr', ['-cr', path.join(runtimeDir, 'Chromium.app')], { stdio: 'ignore' }); } catch { /* ignore */ }
-          return exe;
-        }
-      } catch { /* ignore */ }
-    }
-    return null;
-  }
-  // win / linux:直接找 bundle 的内核目录
-  const dir = process.platform === 'win32' ? 'fingerprint-chromium-win' : 'fingerprint-chromium-linux';
-  const exeName = process.platform === 'win32' ? 'chrome.exe' : 'chrome';
-  for (const r of candidateRoots()) {
-    const cand = path.join(r, dir, exeName);
-    try { if (fs.existsSync(cand)) return cand; } catch { /* ignore */ }
-  }
-  return null;
-}
 
 export interface KernelSession {
   accountId: string;
@@ -183,8 +127,8 @@ export async function launchKernel(opts: LaunchKernelOptions): Promise<KernelSes
 }
 
 async function doLaunch(opts: LaunchKernelOptions): Promise<KernelSession> {
-  // 优先级:显式传入 > bundle 进包的指纹内核 > 系统 Chrome(回落,无真指纹隔离)
-  const kernelPath = opts.kernelPath || resolveBundledKernel() || detectChromePath();
+  // 优先级:显式传入 > 已下载的指纹内核 > 系统 Chrome(回落,无真指纹隔离)
+  const kernelPath = opts.kernelPath || installedKernelPath() || detectChromePath();
   if (!kernelPath) throw new Error('fingerprint-chromium / Chrome not found');
   coworkLog('INFO', 'kernelPool', `using kernel: ${kernelPath}`);
 

@@ -184,31 +184,8 @@ function main() {
     }
   }
 
-  // 6b. Bundled fingerprint-chromium 指纹内核(scripts/fetch-fingerprint-chromium.js
-  //     下载到 client/resources/fingerprint-chromium-<platform>/)。拷进
-  //     src-tauri/resources/ 让 Tauri bundle;kernelPool.resolveBundledKernel() 运行时
-  //     解析 win→chrome.exe / mac→Chromium.app/Contents/MacOS/Chromium。
-  if (process.platform === 'darwin') {
-    // mac:内核是【加密 blob】(公证认不出 → 不扫),运行时首次本地解密+解压。直接拷文件。
-    const encSrc = path.join(ROOT, 'resources', 'fingerprint-chromium-mac.enc');
-    const encDest = path.join(RESOURCES_DIR, 'fingerprint-chromium-mac.enc');
-    if (fs.existsSync(encSrc)) {
-      fs.copyFileSync(encSrc, encDest);
-      console.log(`  fingerprint-chromium-mac.enc: ${Math.round(fs.statSync(encDest).size / 1024 / 1024)}MB`);
-    } else {
-      console.warn('  fingerprint-chromium-mac.enc: NOT FOUND (run fetch-fingerprint-chromium.js first) — 矩阵互动回落系统 Chrome。');
-    }
-  } else {
-    const kdir = process.platform === 'win32' ? 'fingerprint-chromium-win' : 'fingerprint-chromium-linux';
-    const kSrc = path.join(ROOT, 'resources', kdir);
-    const kDest = path.join(RESOURCES_DIR, kdir);
-    if (fs.existsSync(kSrc)) {
-      const count = copyDirRecursive(kSrc, kDest);
-      console.log(`  ${kdir}: ${count} files`);
-    } else {
-      console.warn(`  ${kdir}: NOT FOUND (run fetch-fingerprint-chromium.js first) — 矩阵互动回落系统 Chrome。`);
-    }
-  }
+  // 6b. fingerprint-chromium 指纹内核【不再 bundle】(B1:客户端首次使用从自家 OSS 按需
+  //     下载,见 libs/matrix/kernelInstaller.ts)。此处不拷,保持安装包小、可多版本切换。
 
   // 7. Bundled CJK subtitle font (Source Han Sans SC Bold, SIL OFL, commercial
   //    OK). Committed to client/resources/fonts/. compose.ts resolves it at
