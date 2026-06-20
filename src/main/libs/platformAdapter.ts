@@ -10,6 +10,7 @@ import os from 'os';
 import path from 'path';
 import fs from 'fs';
 import { execSync } from 'child_process';
+import { MATRIX_EDITION } from '../matrixEdition';
 
 // ── Mode detection ──
 
@@ -73,14 +74,17 @@ export function getUserDataPath(): string {
     } catch {}
   }
 
-  // Sidecar fallback: standard OS paths
+  // Sidecar fallback: standard OS paths.
+  // 矩阵 edition 用独立目录(NoobClawMatrix),与旧 client 的 NoobClaw 彻底分开,
+  // 否则两个 app 的 sidecar 共享同一任务库 → 矩阵 app 会误读并自动跑旧 scenario 任务。
+  const dirName = MATRIX_EDITION ? 'NoobClawMatrix' : 'NoobClaw';
   if (process.platform === 'win32') {
-    return path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'NoobClaw');
+    return path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), dirName);
   }
   if (process.platform === 'darwin') {
-    return path.join(os.homedir(), 'Library', 'Application Support', 'NoobClaw');
+    return path.join(os.homedir(), 'Library', 'Application Support', dirName);
   }
-  return path.join(os.homedir(), '.noobclaw');
+  return path.join(os.homedir(), MATRIX_EDITION ? '.noobclaw-matrix' : '.noobclaw');
 }
 
 // ── app.getPath('home') equivalent ──

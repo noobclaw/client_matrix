@@ -17,6 +17,7 @@ import { coworkLog } from './libs/coworkLogger';
 // synchronously — its electron require is gated behind isElectronMode()
 // and wrapped in try/catch, so importing it in sidecar/Tauri mode is safe.
 import { attachBrowserBridge, cleanupLegacyNmResidueOnce } from './libs/browserBridge';
+import { MATRIX_EDITION } from './matrixEdition';
 
 // Top-level crash handlers — without these, a synchronous throw during
 // module init (e.g. sql.js failing to load WASM, or a bad require()) kills
@@ -361,6 +362,7 @@ async function getScheduledTaskStoreInstance(): Promise<any> {
 }
 
 async function getSchedulerInstance(): Promise<any> {
+  if (MATRIX_EDITION) return null; // 矩阵 edition:不跑旧 AI 定时任务调度
   if (schedulerInstance) return schedulerInstance;
   try {
     const sts = await getScheduledTaskStoreInstance();
@@ -2220,8 +2222,13 @@ if (!IS_NATIVE_MESSAGING_HOST) {
           broadcastSSE('scenario:scheduledSkipped', info);
         });
       }
-      scenarioManager.startScheduler();
-      coworkLog('INFO', 'sidecar-server', 'Scenario scheduler started');
+      // 矩阵 edition:不启动旧 scenario 定时调度(涨粉/互动),只跑矩阵任务。
+      if (MATRIX_EDITION) {
+        coworkLog('INFO', 'sidecar-server', 'Scenario scheduler SKIPPED (matrix edition)');
+      } else {
+        scenarioManager.startScheduler();
+        coworkLog('INFO', 'sidecar-server', 'Scenario scheduler started');
+      }
     } catch (e) {
       coworkLog('ERROR', 'sidecar-server', 'scenarioManager.startScheduler failed', { err: String(e) });
     }
