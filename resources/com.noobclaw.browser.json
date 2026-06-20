@@ -1,0 +1,10 @@
+{
+  "name": "com.noobclaw.browser",
+  "description": "NoobClaw Browser Assistant Native Messaging Host",
+  "path": "PLACEHOLDER_PATH",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://abchfdkiphahgkoalhnmlfpfmgkedigf/",
+    "chrome-extension://dhmjehcfpjjliiknpahbnflgljinjdeo/"
+  ]
+}

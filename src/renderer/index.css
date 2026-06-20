@@ -1,0 +1,280 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* KaTeX styles */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 1em 0;
+  margin: 1em 0;
+}
+.katex { color: inherit; }
+.dark .katex { color: #E8E8FF; }
+
+/* Code blocks */
+pre {
+  @apply dark:bg-claude-darkSurface bg-claude-surfaceHover;
+  border-radius: 0.75rem !important;
+  padding: 1em !important;
+  margin: 1em 0 !important;
+  overflow-x: auto !important;
+}
+code {
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, Monaco, 'Courier New', monospace;
+}
+
+/* Tables */
+table { border-collapse: collapse; margin: 1em 0; width: 100%; }
+th, td {
+  @apply dark:border-claude-darkBorder border-claude-border;
+  padding: 0.5em;
+}
+th {
+  @apply dark:bg-claude-darkSurface/50 bg-claude-surfaceHover/50;
+  font-weight: bold;
+}
+
+/* Blockquotes */
+blockquote {
+  @apply dark:border-claude-accent border-claude-accent dark:text-claude-darkTextSecondary text-claude-textSecondary;
+  border-left-width: 3px;
+  padding-left: 1em;
+  font-style: italic;
+  margin: 1em 0;
+}
+
+.chat-message {
+  content-visibility: auto;
+  contain-intrinsic-size: 500px;
+}
+
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', system-ui, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.6;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Crypto dark mode ─────────────────────────────────────────── */
+.dark {
+  color-scheme: dark;
+  color: #E8E8FF;
+  background-color: #09090E;
+}
+
+/* Light mode */
+.light {
+  color-scheme: light;
+  color: #1A1D23;
+  background-color: #F8F9FB;
+}
+
+.dark #root,
+.dark .App,
+.dark main {
+  background-color: #09090E;
+  color: #E8E8FF;
+}
+
+.light #root,
+.light .App,
+.light main {
+  background-color: #F8F9FB;
+  color: #1A1D23;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+#root { height: 100vh; }
+
+/* ── Scrollbar — neon green thin ──────────────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(0,255,136,0.25); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,255,136,0.5); }
+
+/* Select options */
+.dark option { background-color: #0F0F1A; color: #E8E8FF; }
+.light option { background-color: #FFFFFF; color: #1A1D23; }
+
+select { -moz-appearance: none; appearance: none; }
+select::-ms-expand { display: none; }
+
+/* Electron draggable regions */
+.draggable { -webkit-app-region: drag; app-region: drag; }
+.non-draggable { -webkit-app-region: no-drag; app-region: no-drag; }
+.non-draggable * { -webkit-app-region: no-drag; app-region: no-drag; }
+.window-controls-floating { user-select: none; }
+
+/* Focus ring — neon green */
+.focus-ring {
+  @apply focus:outline-none focus:ring-2 focus:ring-claude-accent focus:ring-offset-2 dark:focus:ring-offset-claude-darkBg focus:ring-offset-claude-bg;
+}
+
+/* Button styles */
+.btn-primary {
+  @apply bg-claude-accent hover:bg-claude-accentHover text-black font-semibold py-2 px-4 rounded-lg transition-all;
+}
+.dark .btn-primary {
+  box-shadow: 0 0 16px rgba(0,255,136,0.3);
+}
+.dark .btn-primary:hover {
+  box-shadow: 0 0 24px rgba(0,255,136,0.45);
+}
+
+.btn-secondary {
+  @apply dark:bg-claude-darkSurface bg-claude-surface dark:hover:bg-claude-darkSurfaceHover hover:bg-claude-surfaceHover dark:text-claude-darkText text-claude-text border dark:border-claude-darkBorder border-claude-border font-medium py-2 px-4 rounded-lg transition-colors;
+}
+
+/* Sidebar width transition */
+.sidebar-transition { transition: none; }
+
+/* Separator */
+.separator {
+  @apply dark:border-claude-darkBorderLight border-claude-borderLight;
+  border-top-width: 1px;
+}
+
+/* Modal */
+.modal-backdrop {
+  background: rgba(9, 9, 14, 0.85);
+  backdrop-filter: blur(8px);
+  animation: fade-in 0.2s ease-out;
+}
+.modal-content { animation: scale-in 0.2s ease-out; }
+.popover-enter { animation: fade-in-down 0.2s ease-out; }
+
+/* Skeleton loading */
+.skeleton {
+  @apply dark:bg-claude-darkSurface bg-claude-surfaceHover rounded;
+  position: relative;
+  overflow: hidden;
+}
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(0,255,136,0.06), transparent);
+  animation: shimmer 1.5s infinite;
+}
+
+/* Streaming activity bar — neon green */
+.streaming-bar {
+  position: relative;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 1px;
+  background: rgba(0,255,136,0.08);
+}
+.streaming-bar::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  height: 100%;
+  width: 40%;
+  border-radius: 1px;
+  background: linear-gradient(90deg, rgba(0,255,136,0.2) 0%, rgba(0,255,136,0.9) 50%, rgba(0,255,136,0.2) 100%);
+  animation: streaming-slide 1.5s ease-in-out infinite;
+}
+.dark .streaming-bar { background: rgba(0,255,136,0.1); }
+.dark .streaming-bar::before { box-shadow: 0 0 8px rgba(0,255,136,0.6); }
+
+@keyframes streaming-slide {
+  0%   { left: -40%; }
+  100% { left: 100%; }
+}
+
+/* ── Crypto aesthetic helpers ─────────────────────────────────── */
+/* Dot grid background for main area */
+.dark .crypto-grid {
+  background-image:
+    radial-gradient(circle, rgba(0,255,136,0.12) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+/* Neon border glow */
+.dark .neon-border {
+  border-color: rgba(0,255,136,0.3);
+  box-shadow: 0 0 12px rgba(0,255,136,0.15);
+}
+
+/* Glowing text */
+.dark .neon-text {
+  color: #00FF88;
+  text-shadow: 0 0 8px rgba(0,255,136,0.5);
+}
+
+/* Monospace numbers */
+.mono-num {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  letter-spacing: 0.05em;
+}
+
+/* Running-task glow — heavier pulse + a sweeping green line across the top
+   so the user can clearly tell the card is actively running, even from a
+   meter away. The original gentle pulse was too subtle (user feedback:
+   "脉冲一点都不显眼"). */
+@keyframes noobclawRunningGlow {
+  0%, 100% {
+    box-shadow:
+      0 0 0 1.5px rgba(34, 197, 94, 0.85),
+      0 0 18px 3px rgba(34, 197, 94, 0.45),
+      0 0 36px 10px rgba(34, 197, 94, 0.18);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2.5px rgba(34, 197, 94, 1),
+      0 0 28px 8px rgba(34, 197, 94, 0.75),
+      0 0 60px 20px rgba(34, 197, 94, 0.32);
+  }
+}
+.noobclaw-running-glow {
+  animation: noobclawRunningGlow 1.4s ease-in-out infinite;
+  position: relative;
+  overflow: hidden;
+}
+/* Sweeping bright-green light bar that travels left → right along the top
+   edge of the card. Visible "something is happening here" affordance,
+   inspired by ChatGPT's typing indicator. Transparent ends so it fades
+   in/out smoothly. */
+.noobclaw-running-glow::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -40%;
+  width: 40%;
+  height: 3px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(34, 197, 94, 0.6) 30%,
+    rgba(74, 222, 128, 1) 50%,
+    rgba(34, 197, 94, 0.6) 70%,
+    transparent
+  );
+  border-radius: 999px;
+  animation: noobclawRunningSweep 1.6s linear infinite;
+  pointer-events: none;
+}
+@keyframes noobclawRunningSweep {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(350%); }
+}
+
+/* Terminal-style cursor blink: hard on/off (not a soft opacity fade like
+   Tailwind's animate-pulse), so it reads clearly as a live caret. */
+.noobclaw-blink {
+  animation: noobclawBlink 1s steps(1, end) infinite;
+}
+@keyframes noobclawBlink {
+  0%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}

@@ -1,0 +1,79 @@
+[package]
+name = "noobclaw"
+version = "2.8.4"
+description = "NoobClaw - AI Desktop Assistant"
+authors = ["NoobClaw"]
+edition = "2021"
+
+[lib]
+name = "noobclaw_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# devtools is intentionally NOT in this base feature list — it gets added
+# back below ONLY for debug builds. In release the WebView ships without
+# the devtools backend, which makes F12 / Ctrl+Shift+I / right-click →
+# Inspect / programmatic open_devtools() all silent no-ops on user
+# machines. Renderer-side hotkey blocking (main.tsx) is layered on top
+# as belt-and-suspenders so even if a future tauri update accidentally
+# re-enables devtools, end users still can't pop it open.
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-shell = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-deep-link = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-autostart = "2"
+# NOTE: tauri-plugin-updater (+ tauri-plugin-process) is deliberately
+# NOT wired here yet — the plugin requires a base64 ed25519 pubkey
+# committed to tauri.conf.json, and we don't want to rotate signing
+# keys casually. We ship a lightweight HTTP-based version check from
+# the renderer instead (see src/renderer/services/versionCheck.ts)
+# which covers the "know a new version exists" case without touching
+# the auto-install path. When we're ready to ship true auto-updates
+# we generate the keypair via `tauri signer generate`, commit the
+# pubkey, add the env var to CI, and re-enable the plugin.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
+dirs = "5"
+keyring = "3"
+# Used by the sidecar supervisor for oneshot channels + sleep. Tauri
+# already vendors tokio internally, we're just opting into its public
+# API so the features are there at link time.
+tokio = { version = "1", features = ["sync", "time"] }
+
+# Cargo merges feature flags from multiple [dependencies] declarations
+# referencing the same crate, so this just appends `devtools` to the
+# tauri feature list above when (and only when) the build is debug
+# (`cargo build` without --release / `cargo run`). Release builds via
+# `cargo build --release` (what `tauri build` uses) skip this entirely.
+[target.'cfg(debug_assertions)'.dependencies]
+tauri = { version = "2", features = ["devtools"] }
+
+# objc2 is only pulled in on macOS for dock-tile badge access. Behind a
+# target-specific dep so Windows/Linux builds never link Apple frameworks.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.5"
+objc2-foundation = { version = "0.2", features = ["NSString"] }
+objc2-app-kit = { version = "0.2", features = ["NSApplication", "NSDockTile"] }
+
+# Win32 Job Object API — used to wrap the sidecar so it dies kernel-side
+# when the main NoobClaw process dies, regardless of crash / taskkill /
+# panic / power loss. Without this, on Windows the sidecar can outlive
+# its parent and hold port 12581 (chrome extension hard-coded), causing
+# the next app launch to fatal with "port held by another process".
+# See lib.rs::attach_to_kill_on_close_job for the design.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_Security",          # CreateJobObjectW lives behind this feature gate
+    "Win32_System_JobObjects",
+    "Win32_System_Registry",   # RegDeleteKeyExW for cleaning up old NM host registration
+    "Win32_System_Threading",
+] }

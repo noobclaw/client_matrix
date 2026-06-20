@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NoobClaw</title>
+    <script>
+      // 强制深色模式，在 React 挂载前立即生效，彻底避免白色闪烁
+      document.documentElement.classList.add('dark');
+      document.documentElement.style.backgroundColor = '#09090E';
+      document.documentElement.style.color = '#E8E8FF';
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <!-- Loading screen shown before React mounts (prevents white flash) -->
+    <div id="boot-loader" style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#09090E;z-index:99999;flex-direction:column;gap:16px;">
+      <svg width="48" height="48" viewBox="0 0 48 48" style="animation:spin 1s linear infinite"><circle cx="24" cy="24" r="20" fill="none" stroke="#6366f1" stroke-width="4" stroke-dasharray="80 40" stroke-linecap="round"/></svg>
+      <div style="color:#a5a5ff;font-family:system-ui;font-size:14px;">Loading NoobClaw...</div>
+    </div>
+    <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+    <script>
+      // Remove boot loader once React root renders
+      const observer = new MutationObserver(() => {
+        if (document.getElementById('root')?.children.length > 0) {
+          const loader = document.getElementById('boot-loader');
+          if (loader) { loader.style.opacity = '0'; loader.style.transition = 'opacity 0.3s'; setTimeout(() => loader.remove(), 300); }
+          observer.disconnect();
+        }
+      });
+      observer.observe(document.getElementById('root'), { childList: true });
+    </script>
+    <script type="module" src="/src/renderer/main.tsx"></script>
+  </body>
+</html>

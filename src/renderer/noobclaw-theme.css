@@ -1,0 +1,758 @@
+/* ================================================================
+   NoobClaw — Crypto / Web3 Dark Theme
+   Space-black backgrounds · Neon green accent · Subtle grid
+   ================================================================ */
+
+:root {
+  --nc-green:    #00FF88;
+  --nc-cyan:     #00D4FF;
+  --nc-purple:   #7B5CF6;
+  --nc-pink:     #F72585;
+  --nc-bg:       #09090E;
+  --nc-surface:  #0F0F1A;
+  --nc-border:   #1C1C2E;
+  --nc-text:     #E8E8FF;
+  --nc-muted:    #7B7B9E;
+}
+
+/* ── Base ───────────────────────────────────────────────────────── */
+.dark body,
+.dark #root {
+  background-color: var(--nc-bg);
+}
+
+/* ── Sidebar ────────────────────────────────────────────────────── */
+.dark aside {
+  background: linear-gradient(180deg, #0C0C16 0%, #09090E 100%);
+  border-right: 1px solid rgba(0,255,136,0.08);
+}
+
+/* ── Top bar / header ───────────────────────────────────────────── */
+.dark header,
+.dark [class*="titlebar"],
+.dark [class*="WindowTitleBar"] {
+  background: rgba(9, 9, 14, 0.95);
+  border-bottom: 1px solid rgba(0,255,136,0.07);
+  backdrop-filter: blur(12px);
+}
+
+/* ── Cards / panels ─────────────────────────────────────────────── */
+.dark [class*="bg-claude-darkSurface"] {
+  background-color: var(--nc-surface) !important;
+}
+
+/* ── Accent overrides (neon green → replace blue) ───────────────── */
+.dark .bg-claude-accent\/10,
+.dark [class*="bg-claude-accent/10"] {
+  background: rgba(0, 255, 136, 0.08) !important;
+}
+.dark .bg-claude-accent\/20,
+.dark [class*="bg-claude-accent/20"] {
+  background: rgba(0, 255, 136, 0.15) !important;
+}
+.dark .text-claude-accent {
+  color: var(--nc-green) !important;
+}
+.dark .border-claude-accent {
+  border-color: rgba(0, 255, 136, 0.4) !important;
+}
+.dark .bg-claude-accent {
+  background-color: var(--nc-green) !important;
+  color: #000 !important;
+}
+.dark .hover\:bg-claude-accentHover:hover,
+.dark .bg-claude-accentHover {
+  background-color: #00E67A !important;
+  color: #000 !important;
+}
+
+/* Focus ring — neon green */
+.dark :focus-visible {
+  outline: 2px solid rgba(0,255,136,0.5);
+  outline-offset: 2px;
+}
+
+/* ── Dot-grid background on main work area ──────────────────────── */
+.dark .cowork-main-area,
+.dark [class*="cowork-main"] {
+  background-image:
+    radial-gradient(circle, rgba(0,255,136,0.10) 1px, transparent 1px);
+  background-size: 28px 28px;
+  background-attachment: local;
+}
+
+/* ── Input fields ───────────────────────────────────────────────── */
+.dark input,
+.dark textarea,
+.dark select {
+  background: #0C0C16 !important;
+  border-color: #1C1C2E !important;
+  color: var(--nc-text) !important;
+}
+.dark input:focus,
+.dark textarea:focus,
+.dark select:focus {
+  border-color: rgba(0,255,136,0.35) !important;
+  box-shadow: 0 0 0 3px rgba(0,255,136,0.06) !important;
+}
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: var(--nc-muted) !important;
+}
+
+/* ── Buttons with neon glow ─────────────────────────────────────── */
+.dark button[class*="bg-claude-accent"],
+.dark .btn-primary {
+  background: var(--nc-green) !important;
+  color: #000 !important;
+  font-weight: 600;
+  box-shadow: 0 0 16px rgba(0,255,136,0.3);
+  transition: box-shadow 0.2s, transform 0.1s;
+}
+.dark button[class*="bg-claude-accent"]:hover,
+.dark .btn-primary:hover {
+  box-shadow: 0 0 28px rgba(0,255,136,0.5), 0 0 60px rgba(0,255,136,0.15);
+  transform: translateY(-1px);
+}
+
+/* Connect Wallet button */
+.dark [class*="connect-wallet"],
+.dark button[class*="connectWallet"] {
+  background: linear-gradient(135deg, #00FF88, #00D4FF) !important;
+  color: #000 !important;
+  font-weight: 700;
+  box-shadow: 0 0 20px rgba(0,255,136,0.35);
+}
+
+/* ── Chat prompt input area ──────────────────────────────────────── */
+.dark [class*="prompt"],
+.dark [class*="chat-input"],
+.dark [class*="CoworkPromptInput"] {
+  background: #0F0F1A;
+  border: 1px solid #1C1C2E;
+  border-radius: 12px;
+}
+.dark [class*="prompt"]:focus-within,
+.dark [class*="chat-input"]:focus-within {
+  border-color: rgba(0,255,136,0.25);
+  box-shadow: 0 0 0 1px rgba(0,255,136,0.1), 0 4px 24px rgba(0,0,0,0.4);
+}
+
+/* ── Message bubbles ────────────────────────────────────────────── */
+.dark .message-user {
+  background: linear-gradient(135deg, #12121E, #0F1828);
+  border: 1px solid rgba(0,212,255,0.12);
+}
+.dark .message-assistant {
+  background: transparent;
+}
+
+/* ── Sidebar menu items ─────────────────────────────────────────── */
+.dark .sidebar-menu-item {
+  border-radius: 8px;
+  transition: background 0.15s, color 0.15s;
+}
+.dark .sidebar-menu-item:hover {
+  background: rgba(0,255,136,0.06);
+  color: var(--nc-green);
+}
+.dark .sidebar-menu-item.active {
+  background: rgba(0,255,136,0.1);
+  color: var(--nc-green);
+  box-shadow: inset 2px 0 0 var(--nc-green);
+}
+
+/* ── Modal ───────────────────────────────────────────────────────── */
+.dark .modal-overlay,
+.dark .modal-backdrop {
+  background: rgba(9, 9, 14, 0.88);
+  backdrop-filter: blur(12px);
+}
+.dark [class*="modal-content"],
+.dark [role="dialog"] > div {
+  background: var(--nc-surface);
+  border: 1px solid #1C1C2E;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.7), 0 0 0 1px rgba(0,255,136,0.04);
+}
+
+/* ── Dividers ────────────────────────────────────────────────────── */
+.dark hr,
+.dark .separator {
+  border-color: #1C1C2E;
+}
+
+/* ── Scrollbar ───────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(0,255,136,0.2); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,255,136,0.45); }
+
+/* ── Loading spinner ─────────────────────────────────────────────── */
+.dark .animate-spin {
+  border-top-color: var(--nc-green) !important;
+}
+
+/* ── Logo gradient text ──────────────────────────────────────────── */
+.nc-logo-text {
+  background: linear-gradient(135deg, #00FF88 0%, #00D4FF 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+}
+
+/* ── Token / balance pills ───────────────────────────────────────── */
+.nc-token-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  background: rgba(0, 255, 136, 0.08);
+  border: 1px solid rgba(0, 255, 136, 0.2);
+  color: var(--nc-green);
+  font-size: 12px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  letter-spacing: 0.03em;
+}
+
+.nc-badge-online {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: rgba(0, 255, 136, 0.1);
+  border: 1px solid rgba(0, 255, 136, 0.3);
+  color: var(--nc-green);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* ── Chain / network badge ───────────────────────────────────────── */
+.nc-chain-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  background: rgba(123, 92, 246, 0.1);
+  border: 1px solid rgba(123, 92, 246, 0.25);
+  color: #A78BFA;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* ── Neon glow animations ────────────────────────────────────────── */
+@keyframes nc-glow {
+  0%, 100% { box-shadow: 0 0 6px rgba(0,255,136,0.2); }
+  50%       { box-shadow: 0 0 24px rgba(0,255,136,0.5), 0 0 48px rgba(0,255,136,0.15); }
+}
+.nc-glow { animation: nc-glow 3s ease-in-out infinite; }
+
+@keyframes nc-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.45; }
+}
+.nc-pulse { animation: nc-pulse 2s ease-in-out infinite; }
+
+/* Scanline overlay (subtle, optional — add class to body for max cyberpunk) */
+@keyframes scanline {
+  0%   { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
+}
+.nc-scanline::after {
+  content: '';
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(0,255,136,0.08), transparent);
+  animation: scanline 6s linear infinite;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ── Tooltip ─────────────────────────────────────────────────────── */
+.dark [role="tooltip"],
+.dark [class*="tooltip"] {
+  background: #0F0F1A !important;
+  border: 1px solid #1C1C2E !important;
+  color: var(--nc-text) !important;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.6) !important;
+}
+
+/* ── Code blocks with crypto feel ───────────────────────────────── */
+.dark pre {
+  background: #0C0C16 !important;
+  border: 1px solid #1C1C2E !important;
+}
+.dark code {
+  color: #00FF88;
+}
+.dark pre code {
+  color: #E8E8FF;
+}
+
+/* ── Table ───────────────────────────────────────────────────────── */
+.dark th {
+  background: rgba(0,255,136,0.05) !important;
+  color: var(--nc-green);
+  border-color: #1C1C2E !important;
+}
+.dark td {
+  border-color: #1C1C2E !important;
+}
+.dark tr:hover td {
+  background: rgba(0,255,136,0.03);
+}
+
+/* ── Select / dropdown ───────────────────────────────────────────── */
+.dark [class*="ThemedSelect"],
+.dark [class*="themed-select"] {
+  background: #0C0C16 !important;
+  border-color: #1C1C2E !important;
+  color: var(--nc-text) !important;
+}
+
+/* ── Progress / toggle switch ────────────────────────────────────── */
+.dark input[type="checkbox"]:checked,
+.dark input[type="range"] {
+  accent-color: var(--nc-green);
+}
+
+/* ── Settings panel ──────────────────────────────────────────────── */
+.dark [class*="Settings"],
+.dark [class*="settings-panel"] {
+  background: var(--nc-surface);
+}
+
+/* ── Tab nav ─────────────────────────────────────────────────────── */
+.dark [role="tab"][aria-selected="true"] {
+  color: var(--nc-green) !important;
+  border-bottom-color: var(--nc-green) !important;
+}
+
+/* ── Neon border utility ─────────────────────────────────────────── */
+.dark .neon-border {
+  border-color: rgba(0,255,136,0.3) !important;
+  box-shadow: 0 0 12px rgba(0,255,136,0.1);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   Lucky Bag
+   ══════════════════════════════════════════════════════════════════ */
+
+/* Anchor container — fixed to bottom-right of chat area, does not affect layout */
+.nc-lucky-bag-anchor {
+  position: absolute;
+  right: 24px;
+  bottom: 24px;
+  z-index: 30;
+  pointer-events: none;
+}
+
+/* Lucky bag main body */
+.nc-lucky-bag {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: auto;
+  cursor: pointer;
+  user-select: none;
+  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.4s ease;
+}
+
+/* Phase animations */
+.nc-lucky-bag.entering {
+  opacity: 0;
+  transform: translateX(60px) scale(0.3);
+}
+.nc-lucky-bag.visible {
+  opacity: 1;
+  transform: translateX(0) scale(1);
+  animation: nc-lb-float 2.5s ease-in-out infinite;
+}
+.nc-lucky-bag.opening {
+  opacity: 1;
+  transform: scale(1.2);
+}
+.nc-lucky-bag.reward {
+  opacity: 1;
+  transform: scale(1);
+}
+.nc-lucky-bag.exiting {
+  opacity: 0;
+  transform: translateX(80px) translateY(-30px) scale(0.2) rotate(20deg);
+  transition: all 0.8s cubic-bezier(0.55, 0, 1, 0.45);
+  pointer-events: none;
+}
+
+/* Float animation */
+@keyframes nc-lb-float {
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50%      { transform: translateY(-6px) rotate(2deg); }
+}
+
+/* Glowing pulse ring */
+.nc-lb-pulse-ring {
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  border: 2px solid rgba(0, 255, 136, 0.4);
+  animation: nc-lb-pulse-ring-anim 1.8s ease-out infinite;
+  pointer-events: none;
+}
+@keyframes nc-lb-pulse-ring-anim {
+  0%   { transform: scale(0.8); opacity: 0.8; }
+  100% { transform: scale(1.8);  opacity: 0; }
+}
+
+/* Lucky bag icon */
+.nc-lb-icon {
+  filter: drop-shadow(0 0 10px rgba(255, 215, 0, 0.5))
+          drop-shadow(0 0 20px rgba(231, 76, 60, 0.3));
+  transition: transform 0.15s ease;
+}
+.nc-lucky-bag:hover .nc-lb-icon {
+  transform: scale(1.15) rotate(-5deg);
+  filter: drop-shadow(0 0 16px rgba(255, 215, 0, 0.7))
+          drop-shadow(0 0 30px rgba(231, 76, 60, 0.4));
+}
+
+/* Explode */
+.nc-lb-explode {
+  animation: nc-lb-explode-anim 0.5s ease-out forwards;
+}
+@keyframes nc-lb-explode-anim {
+  0%   { transform: scale(1);   opacity: 1; }
+  40%  { transform: scale(1.4); opacity: 1; }
+  100% { transform: scale(0);   opacity: 0; }
+}
+
+/* Particle container */
+.nc-lb-particles {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+/* Individual particle */
+.nc-lb-particle {
+  position: absolute;
+  width: var(--p-size);
+  height: var(--p-size);
+  background: var(--p-color);
+  border-radius: 50%;
+  box-shadow: 0 0 6px var(--p-color);
+  animation: nc-lb-particle-fly 0.8s ease-out var(--p-delay) forwards;
+  opacity: 0;
+}
+@keyframes nc-lb-particle-fly {
+  0% {
+    transform: translate(0, 0) scale(1);
+    opacity: 1;
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    transform:
+      translate(
+        calc(cos(var(--p-angle)) * var(--p-dist)),
+        calc(sin(var(--p-angle)) * var(--p-dist))
+      )
+      scale(0);
+    opacity: 0;
+  }
+}
+
+/* Reward display */
+.nc-lb-reward {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  animation: nc-lb-reward-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+@keyframes nc-lb-reward-pop {
+  0%   { transform: scale(0); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.nc-lb-reward-coin {
+  font-size: 28px;
+  animation: nc-lb-coin-spin 0.6s ease-out;
+}
+.nc-lb-reward-coin-img {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  animation: nc-lb-coin-spin 0.6s ease-out;
+  filter: drop-shadow(0 0 8px rgba(255, 215, 0, 0.6));
+}
+@keyframes nc-lb-coin-spin {
+  0%   { transform: rotateY(0deg); }
+  100% { transform: rotateY(720deg); }
+}
+
+.nc-lb-reward-amount {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 18px;
+  font-weight: 800;
+  color: #FFD700;
+  text-shadow: 0 0 10px rgba(255, 215, 0, 0.6), 0 0 25px rgba(255, 215, 0, 0.3);
+  line-height: 1.2;
+  white-space: nowrap;
+  animation: nc-lb-amount-glow 1.5s ease-in-out infinite alternate;
+}
+@keyframes nc-lb-amount-glow {
+  0%   { text-shadow: 0 0 10px rgba(255,215,0,0.6), 0 0 25px rgba(255,215,0,0.3); }
+  100% { text-shadow: 0 0 16px rgba(255,215,0,0.9), 0 0 40px rgba(255,215,0,0.5), 0 0 60px rgba(255,215,0,0.2); }
+}
+
+.nc-lb-reward-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--nc-green);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+/* Hint text */
+.nc-lb-hint {
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #FFD700;
+  text-shadow: 0 0 8px rgba(255, 215, 0, 0.4);
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  animation: nc-lb-hint-blink 1.2s ease-in-out infinite;
+}
+@keyframes nc-lb-hint-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.5; }
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   Partner tier cascade — 全局版
+   ──────────────────────────────────────────────────────────────────
+   背景:InviteView 之前把 partner 色 cascade 全写在组件 inline <style>
+   里;现在我的充值(WalletView)页也要套同款酷炫,而且当用户从邀请页跳到
+   充值页时,InviteView 的 inline <style> 一卸载,sidebar/scrollbar 立刻
+   失去 partner 色 — 这块视觉是跨页的,必须放全局。
+
+   触发方式:
+     - body.invite-partner-active 由两个页面共用(同名 class 命名是历
+       史,InviteView 已经在用,Wallet 跟进。后续如果第 3、4 页也要加,
+       直接复用)。
+     - --invite-partner-color / --invite-partner-glow 由 useEffect
+       设到 <body> 上,CSS 变量天然向下继承到所有子节点。
+     - 页面内部的 .invite-view--partner / .wallet-view--partner class
+       由各自的 root <div> 加,用来 scope 卡片/按钮/数字等内部细节。
+
+   color-mix 用法:把 tier 色按 % 跟 transparent 混,得到半透明色,既
+   能跟着 tier 色变,又不影响子元素文字。 */
+
+/* ── Sidebar(claude-accent)+ 全局 scrollbar:跨页通用 ── */
+body.invite-partner-active .bg-claude-accent\/10,
+body.invite-partner-active [class*="bg-claude-accent/10"] {
+  background-color: color-mix(in srgb, var(--invite-partner-color) 12%, transparent) !important;
+}
+body.invite-partner-active .bg-claude-accent\/20,
+body.invite-partner-active [class*="bg-claude-accent/20"] {
+  background-color: color-mix(in srgb, var(--invite-partner-color) 22%, transparent) !important;
+}
+body.invite-partner-active .hover\:bg-claude-accent\/20:hover,
+body.invite-partner-active [class*="hover:bg-claude-accent/20"]:hover {
+  background-color: color-mix(in srgb, var(--invite-partner-color) 30%, transparent) !important;
+}
+body.invite-partner-active .text-claude-accent { color: var(--invite-partner-color) !important; }
+body.invite-partner-active .border-claude-accent {
+  border-color: color-mix(in srgb, var(--invite-partner-color) 50%, transparent) !important;
+}
+/* v1.x cascade(2026-05-18):合伙人进入"新建对话(cowork)"页面时,Sidebar 新建对话按钮
+   (.bg-claude-accent) + 输入框发送按钮 (.bg-claude-accent rounded) + drag-over indicator
+   (.bg-claude-accent/10) + focus ring 全部跟 tier 色走。不限于 cowork 页 — 任何带
+   body.invite-partner-active 的页面都适用,跨页一致。 */
+body.invite-partner-active .bg-claude-accent {
+  background-color: var(--invite-partner-color) !important;
+  color: #0a0a0a !important;
+}
+body.invite-partner-active .bg-claude-accent .text-white,
+body.invite-partner-active button.bg-claude-accent { color: #0a0a0a !important; }
+body.invite-partner-active .hover\:bg-claude-accentHover:hover,
+body.invite-partner-active [class*="hover:bg-claude-accentHover"]:hover {
+  background-color: var(--invite-partner-color) !important;
+  filter: brightness(1.1);
+}
+body.invite-partner-active .ring-claude-accent\/40,
+body.invite-partner-active .ring-claude-accent\/50,
+body.invite-partner-active [class*="ring-claude-accent/40"],
+body.invite-partner-active [class*="ring-claude-accent/50"],
+body.invite-partner-active .focus-within\:ring-claude-accent\/40:focus-within,
+body.invite-partner-active [class*="focus-within:ring-claude-accent/40"]:focus-within {
+  --tw-ring-color: color-mix(in srgb, var(--invite-partner-color) 55%, transparent) !important;
+}
+body.invite-partner-active .focus-within\:border-claude-accent:focus-within,
+body.invite-partner-active [class*="focus-within:border-claude-accent"]:focus-within,
+body.invite-partner-active .border-claude-accent\/60,
+body.invite-partner-active [class*="border-claude-accent/60"] {
+  border-color: var(--invite-partner-color) !important;
+}
+body.invite-partner-active ::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--invite-partner-color) 30%, transparent) !important;
+}
+body.invite-partner-active ::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--invite-partner-color) 55%, transparent) !important;
+}
+
+/* ── 我的充值页 cascade:跟邀请返佣那块视觉同 source ── */
+/* primary 颜色(默认 neon 绿)整页换 tier 色 */
+.wallet-view--partner .text-primary { color: var(--invite-partner-color) !important; }
+.wallet-view--partner .bg-primary {
+  background-color: var(--invite-partner-color) !important;
+  color: #0a0a0a !important;
+}
+.wallet-view--partner .bg-primary:hover {
+  background-color: var(--invite-partner-color) !important;
+  filter: brightness(0.92);
+}
+.wallet-view--partner .bg-primary\/5  { background-color: color-mix(in srgb, var(--invite-partner-color)  6%, transparent) !important; }
+.wallet-view--partner .bg-primary\/10 { background-color: color-mix(in srgb, var(--invite-partner-color) 10%, transparent) !important; }
+.wallet-view--partner .bg-primary\/15 { background-color: color-mix(in srgb, var(--invite-partner-color) 15%, transparent) !important; }
+.wallet-view--partner .bg-primary\/20 { background-color: color-mix(in srgb, var(--invite-partner-color) 20%, transparent) !important; }
+/* 充值通道 tab(USDT/BNB/CNY)激活态:默认 neon 绿用 bg-primary/15 淡底 + text-primary 绿字,
+   合伙人色(尤其 bronze)淡底 + 同色字对比度太低看不清。合伙人态下改成「亮色实底 + 近黑字」,
+   跟同面板「充值积分」按钮一致、高对比。复合选择器 .bg-primary/15.text-primary 只命中激活 tab,
+   比单独的 .text-primary(617)特异性高 → 覆盖其铜色文字。非合伙人态不受影响。 */
+.wallet-view--partner .bg-primary\/15.text-primary {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--invite-partner-color) 100%, white 35%),
+    var(--invite-partner-color),
+    color-mix(in srgb, var(--invite-partner-color) 100%, black 35%)
+  ) !important;
+  color: #0a0a0a !important;
+  -webkit-text-fill-color: #0a0a0a !important;
+}
+.wallet-view--partner .border-primary { border-color: var(--invite-partner-color) !important; }
+.wallet-view--partner .border-primary\/20 {
+  border-color: color-mix(in srgb, var(--invite-partner-color) 28%, transparent) !important;
+}
+.wallet-view--partner .border-primary\/40 {
+  border-color: color-mix(in srgb, var(--invite-partner-color) 50%, transparent) !important;
+}
+.wallet-view--partner .hover\:border-primary\/40:hover {
+  border-color: color-mix(in srgb, var(--invite-partner-color) 50%, transparent) !important;
+}
+.wallet-view--partner .focus\:border-primary:focus {
+  border-color: var(--invite-partner-color) !important;
+}
+.wallet-view--partner .hover\:bg-primary-hover:hover {
+  background-color: var(--invite-partner-color) !important;
+  filter: brightness(1.08);
+}
+
+/* 大卡片脉冲呼吸光晕 + 顶光带 — 跟 InviteView 大卡同款。
+   v1.x update 2026-05-18:边框 1px → 1.5px 让 tier 色更显眼;
+   keyframe shadow blur / spread 全面加大,确保任何 tier(浅银亦然)
+   都能看到呼吸光晕,不再只在深色 tier(diamond/bronze)下勉强可见。 */
+.wallet-view--partner .rounded-xl.dark\:bg-claude-darkSurface,
+.wallet-view--partner .rounded-xl.bg-claude-surface,
+.wallet-view--partner .rounded-2xl.dark\:bg-claude-darkSurface,
+.wallet-view--partner .rounded-2xl.bg-claude-surface {
+  position: relative;
+  border-color: var(--invite-partner-color) !important;
+  border-width: 1.5px !important;
+  animation: wallet-card-pulse 3.2s ease-in-out infinite;
+}
+@keyframes wallet-card-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--invite-partner-color) 35%, transparent),
+      0 -8px 28px -2px var(--invite-partner-glow),
+      0  8px 28px -2px var(--invite-partner-glow),
+      0 0 22px 2px var(--invite-partner-glow);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--invite-partner-color) 55%, transparent),
+      0 -14px 48px 0  var(--invite-partner-color),
+      0  14px 48px 0  var(--invite-partner-color),
+      0 0 40px 4px var(--invite-partner-glow);
+  }
+}
+
+/* 数字大字 — 金属三色渐变文字填充(套餐金额、积分余额、$NoobCoin 总量) */
+.wallet-view--partner .text-3xl.font-bold,
+.wallet-view--partner .text-2xl.font-bold.text-primary,
+.wallet-view--partner .text-xl.font-bold.text-primary {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--invite-partner-color) 100%, white 40%) 0%,
+    var(--invite-partner-color) 50%,
+    color-mix(in srgb, var(--invite-partner-color) 100%, black 40%) 100%
+  ) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  color: transparent !important;
+  filter: drop-shadow(0 0 6px var(--invite-partner-glow));
+}
+
+/* 按钮亮金 shine + 主色 */
+.wallet-view--partner button.bg-primary {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--invite-partner-color) 100%, white 35%),
+    var(--invite-partner-color),
+    color-mix(in srgb, var(--invite-partner-color) 100%, black 35%)
+  ) !important;
+  background-size: 200% 200% !important;
+  box-shadow: 0 0 16px var(--invite-partner-glow);
+  animation: wallet-btn-shine 3s ease-in-out infinite;
+  font-weight: 700;
+}
+@keyframes wallet-btn-shine {
+  0%, 100% { background-position: 0% 50%; }
+  50%      { background-position: 100% 50%; }
+}
+
+/* QR 码 / 收款地址 / 套餐金额等 code mono 文本染色(跟 InviteView 邀请
+   链接 code 同款 metallic gradient) */
+.wallet-view--partner code.text-primary,
+.wallet-view--partner span.font-mono.text-primary {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--invite-partner-color) 100%, white 40%) 0%,
+    var(--invite-partner-color) 50%,
+    color-mix(in srgb, var(--invite-partner-color) 100%, black 40%) 100%
+  ) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  color: transparent !important;
+}
+
+/* ── Partner VIP frame keyframes:可被任何组件复用 ──
+   原本只在 PartnerHero 组件内 inline,提到这里之后 WalletView 的
+   wallet header card 也能直接用同一套动画,视觉上跟邀请页 PartnerHero
+   是一对兄弟(同 shimmer 4s 周期、同 conic 6s 转速、同 twinkle 3s 节奏)。 */
+@keyframes partner-frame-conic {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+@keyframes partner-frame-shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+@keyframes partner-frame-spark {
+  0%, 100% { opacity: 0; transform: scale(0.4); }
+  50%      { opacity: 1; transform: scale(1.2); }
+}

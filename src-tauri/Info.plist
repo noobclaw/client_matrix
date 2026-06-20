@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    This file is auto-merged into Contents/Info.plist by the Tauri v2
+    bundler (`bundle.macOS.infoPlist` defaults to this path when the
+    file sits next to tauri.conf.json). Merging happens BEFORE codesign
+    and notarization, so the keys here are part of the final signature
+    and there's no need for a post-build re-sign step.
+
+    Purpose of each key:
+
+    1. NSAppTransportSecurity — The MCP OAuth loopback flow
+       (src/main/libs/mcpOAuth.ts) spins up an HTTP server on
+       127.0.0.1:<ephemeral> and opens an authorize URL that redirects
+       back to that loopback. Notarized macOS blocks plain-HTTP loads
+       unless we whitelist 127.0.0.1 / localhost via an exception
+       domain. Scope is narrow: only loopback, not arbitrary HTTP.
+
+    2. NS*UsageDescription — The desktopControlMcp tools invoke
+       Screen Capture, Accessibility (keyboard/mouse), Microphone,
+       Camera, and AppleScript APIs. macOS triggers a TCC prompt the
+       first time each is touched; if the matching usage-description
+       key is missing the prompt either shows a scary empty dialog
+       or is silently denied. Setting them here gives the user an
+       honest one-line explanation of WHY NoobClaw wants the access.
+
+    3. LSApplicationCategoryType — Routes NoobClaw into the
+       "Productivity" bucket in Launchpad search.
+
+    4. NSHumanReadableCopyright — Shown in Finder's Get Info panel
+       and required by App Store review; we ship outside the store
+       but set it anyway for Get Info parity with notarized apps.
+
+    5. NSSupportsSuddenTermination — Opt out of the OS killing us
+       abruptly at shutdown. NoobClaw manages a Node sidecar child
+       process that needs a graceful SIGTERM; sudden termination
+       would orphan it.
+  -->
+
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+    <key>NSExceptionDomains</key>
+    <dict>
+      <key>localhost</key>
+      <dict>
+        <key>NSExceptionAllowsInsecureHTTPLoads</key>
+        <true/>
+        <key>NSIncludesSubdomains</key>
+        <true/>
+      </dict>
+      <key>127.0.0.1</key>
+      <dict>
+        <key>NSExceptionAllowsInsecureHTTPLoads</key>
+        <true/>
+      </dict>
+    </dict>
+  </dict>
+
+  <key>NSAppleEventsUsageDescription</key>
+  <string>NoobClaw automates other apps via AppleScript when you ask it to.</string>
+
+  <key>NSScreenCaptureUsageDescription</key>
+  <string>NoobClaw reads your screen so AI agents can see what you are working on.</string>
+
+  <key>NSMicrophoneUsageDescription</key>
+  <string>NoobClaw captures audio when you use voice input.</string>
+
+  <key>NSCameraUsageDescription</key>
+  <string>NoobClaw uses the camera only when you explicitly share a video stream.</string>
+
+  <key>NSSystemAdministrationUsageDescription</key>
+  <string>NoobClaw may request administrator privileges to install or update helper tools.</string>
+
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.productivity</string>
+
+  <key>NSHumanReadableCopyright</key>
+  <string>Copyright © 2026 NoobClaw. All rights reserved.</string>
+
+  <key>NSSupportsSuddenTermination</key>
+  <false/>
+</dict>
+</plist>

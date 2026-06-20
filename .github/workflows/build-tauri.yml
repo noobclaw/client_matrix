@@ -1,0 +1,328 @@
+name: Build Tauri
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-tauri:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows — pinned to windows-2022 (Visual Studio 2022 / v17). As of
+          # 2026-06, windows-latest redirects to windows-2025-vs2026 (Visual
+          # Studio 18), which node-gyp@11 does not recognize ("find VS unknown
+          # version undefined" → native addon build fails). VS 2022 is fully
+          # supported by node-gyp, so pin until node-gyp gains VS18 support.
+          - platform: windows-2022
+            target: x86_64-pc-windows-msvc
+          # macOS arm64 — Apple Silicon native build on the default
+          # macos-latest runner (M-series).
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+          # macOS Intel — was on macos-13 (last GitHub-hosted Intel runner)
+          # but those runners are essentially dead: builds queued for
+          # 9-10 hours then got cancelled. Switched to macos-latest
+          # (Apple Silicon, plentiful capacity) with cross-compile:
+          #   - Rust: x86_64-apple-darwin target installed via dtolnay
+          #     toolchain action; tauri build --target produces Intel binary
+          #   - Sidecar: SIDECAR_TARGET env var → pkg picks node20-macos-x64
+          #   - Native node addon: arch -x86_64 + --arch=x86_64 forces
+          #     node-gyp to produce x86_64 .node (Rosetta 2 lets Apple
+          #     Silicon runners host x86_64 toolchain)
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          # Pinned to the last known-good Build Tauri run (26647566429, 2026-05-29).
+          # macos-latest's auto node drifted 24.15.0 -> 24.16.0 between that build
+          # and the broken 26668392912 — pin to remove it as a variable.
+          node-version: '24.15.0'
+
+      - name: Setup Rust
+        # Pinned to 1.96.0 (what 26647566429 used). @stable would otherwise
+        # float to a newer rustc on a fresh rebuild, adding a NEW variable.
+        uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Force cargo PATH (macOS rustup-shim workaround)
+        # macos-latest ships /usr/local/bin/cargo as a rustup-init shim that
+        # doesn't recognize 'cargo metadata'. dtolnay appends $HOME/.cargo/bin
+        # to GITHUB_PATH but it goes AFTER the system PATH, so the shim wins.
+        # Write to GITHUB_PATH explicitly so $HOME/.cargo/bin is PREPENDED to
+        # the PATH for all subsequent steps. Previously only the Build Tauri
+        # step's inline `export PATH=...` had this — but transient toolchain
+        # install issues + which-cargo-resolves-where in earlier steps made
+        # the build flaky on Intel mac cross-compile.
+        if: runner.os == 'macOS'
+        run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        shell: bash
+
+      - name: Cache Rust build artifacts
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          cache-on-failure: true
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Sync version from package.json
+        # Single source of truth is package.json. This writes the same
+        # version into src-tauri/tauri.conf.json, src-tauri/Cargo.toml,
+        # and src/main/sidecar-server.ts so every artifact carries the
+        # same number. Run BEFORE build-sidecar so the sidecar's
+        # /api/version endpoint reports the bumped version too.
+        run: node scripts/sync-version.js
+
+      # Cache the prebuilt node20 binary that @yao-pkg/pkg downloads on demand.
+      # On a cold runner pkg pulls a ~30MB node binary from the pkg-fetch GH
+      # release and stitches it together with our sidecar bundle — normally
+      # ~10-30s but occasionally minutes-to-hours when the release CDN is
+      # slow (we hit this when 6.20.0 dropped on 2026-05-27 and sidecar went
+      # from 9s to 55 min). Cache hit makes the step nearly instant.
+      #
+      # Key is partitioned by runner OS + matrix target + pinned pkg
+      # version so a future pkg bump invalidates cleanly.
+      - name: Cache pkg node binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.pkg-cache
+          key: pkg-cache-v6.19.0-${{ runner.os }}-${{ matrix.target }}
+
+      # Pin @yao-pkg/pkg version: leaving it unpinned bit us hard. On
+      # 2026-05-27 12:42 UTC the maintainer published 6.20.0 — the very
+      # next build picked it up via npm latest and `Build sidecar` step
+      # went from 9-30s to 27-55 minutes per arch (3x ~30min, ~90min wall
+      # clock). 6.19.0 (one month prior) was stable. Lock it.
+      - name: Install @yao-pkg/pkg
+        run: npm install -g @yao-pkg/pkg@6.19.0
+
+      - name: Build macOS native desktop addon
+        # Compiles native/macos-desktop/src/noobclaw_desktop.mm into a
+        # .node addon used by the sidecar's desktopControlMcp for fast
+        # screenshots (CGDisplayCreateImage), smooth 60fps mouse motion
+        # (CGEvent), real keyboard input (CGEvent + UnicodeString),
+        # clipboard read/verify (NSPasteboard) and active-window lookup
+        # (NSWorkspace + CGWindowListCopyWindowInfo).
+        # prepare-tauri-resources.js picks the build output up and
+        # copies it into src-tauri/resources/native/ so Tauri bundles
+        # it alongside the sidecar binary.
+        #
+        # Both arm64 + x86_64 build on macos-latest (Apple Silicon).
+        # For x86_64 we pass --arch=x86_64 + --target_arch=x86_64 to
+        # node-gyp so it produces a Mach-O x86_64 .node (Rosetta 2 makes
+        # the toolchain available on M-series).
+        if: runner.os == 'macOS'
+        working-directory: native/macos-desktop
+        run: |
+          npm install
+          if [[ "${{ matrix.target }}" == "x86_64-apple-darwin" ]]; then
+            echo "Building x86_64 native addon (cross-compile from arm64 host)"
+            npx node-gyp rebuild --verbose --arch=x86_64 --target_arch=x86_64
+          else
+            npx node-gyp rebuild --verbose
+          fi
+          test -f build/Release/noobclaw_desktop.node
+          lipo -info build/Release/noobclaw_desktop.node || file build/Release/noobclaw_desktop.node
+
+      - name: Build Windows native desktop addon
+        # Compiles native/win-desktop/src/noobclaw_desktop_win.cc into a
+        # .node addon. Uses BitBlt for screenshots and SendInput for
+        # mouse / keyboard, replacing the slow PowerShell subprocess
+        # fallbacks in desktopControlMcp.ts.
+        if: runner.os == 'Windows'
+        working-directory: native/win-desktop
+        shell: bash
+        run: |
+          npm install
+          npx node-gyp rebuild --verbose
+          test -f build/Release/noobclaw_desktop_win.node
+
+      - name: Build sidecar
+        # Single-arch sidecar for the matrix target. build-sidecar.js
+        # auto-detects the rust host triple unless SIDECAR_TARGET is set.
+        # For Intel Mac on Apple Silicon runner we MUST set the env var
+        # explicitly — otherwise the script defaults to host (arm64) and
+        # produces an arm64 binary tagged as the x86_64 target.
+        shell: bash
+        env:
+          SIDECAR_TARGET: ${{ matrix.target }}
+        run: node scripts/build-sidecar.js
+
+      - name: Fetch ffmpeg (bundle into resources)
+        # Downloads static ffmpeg/ffprobe into client/resources/ffmpeg-<platform>/
+        # so the next step copies them into src-tauri/resources/ for bundling.
+        #   - Windows: gyan.dev essentials static build.
+        #   - macOS arm64 + x64: Martin-Riedl.de static builds (per matrix.target).
+        # Linux has no target in this matrix; on any other platform the script
+        # no-ops and the app falls back to system ffmpeg at runtime.
+        # SIDECAR_TARGET picks the right platform/arch.
+        shell: bash
+        env:
+          SIDECAR_TARGET: ${{ matrix.target }}
+        run: node scripts/fetch-ffmpeg.js
+
+      - name: Prepare Tauri resources
+        run: node scripts/prepare-tauri-resources.js
+
+      - name: Install Tauri CLI
+        # Pinned to the package-lock'd version (npx tauri build uses the local
+        # 2.10.1 anyway, but pin the global too so the two never diverge).
+        run: npm install -g @tauri-apps/cli@2.10.1
+
+      - name: Import code signing certificate (macOS)
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERT_BASE64: ${{ secrets.APPLE_CERT_BASE64 }}
+          CSC_KEY: ${{ secrets.CSC_KEY }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          echo "$APPLE_CERT_BASE64" | base64 --decode > /tmp/cert.cer
+          echo "$CSC_KEY" > /tmp/key.pem
+          openssl x509 -inform DER -in /tmp/cert.cer -out /tmp/cert.pem
+          openssl pkcs12 -export -out /tmp/cert.p12 -inkey /tmp/key.pem -in /tmp/cert.pem -passout pass:"$CSC_KEY_PASSWORD"
+          security create-keychain -p actions build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p actions build.keychain
+          security import /tmp/cert.p12 -k build.keychain -P "$CSC_KEY_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions build.keychain
+          # Extract signing identity for Tauri
+          IDENTITY=$(security find-identity -v -p codesigning build.keychain | grep -o '"[^"]*"' | head -1 | tr -d '"')
+          echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> $GITHUB_ENV
+          echo "Found signing identity: $IDENTITY"
+
+      - name: Pre-sign native addon (macOS)
+        # Tauri's bundler signs externalBin binaries in Contents/MacOS/
+        # but does NOT reach Mach-O files nested under Contents/Resources/.
+        # Our noobclaw_desktop.node ends up at
+        # Contents/Resources/resources/native/ and the notary service
+        # rejects the whole bundle with "The signature does not include a
+        # secure timestamp." unless we pre-sign it ourselves with
+        # --timestamp --options runtime using the imported identity.
+        # Signing it BEFORE Tauri build means Tauri's subsequent deep
+        # sign either leaves it alone (signature already valid) or
+        # re-signs with the same settings, both of which notarization
+        # accepts.
+        if: runner.os == 'macOS'
+        run: |
+          ADDON=src-tauri/resources/native/noobclaw_desktop.node
+          if [ -f "$ADDON" ]; then
+            codesign --force --timestamp --options runtime \
+              --sign "$APPLE_SIGNING_IDENTITY" "$ADDON"
+            codesign -dvv "$ADDON" || true
+          else
+            echo "ERROR: $ADDON not found — prepare-tauri-resources.js should have copied it"
+            ls -la src-tauri/resources/native/ || true
+            exit 1
+          fi
+
+      - name: Pre-sign bundled ffmpeg (macOS)
+        # Same reasoning as the native addon above: ffmpeg is a Mach-O binary
+        # nested under Contents/Resources/resources/ffmpeg-mac/bin/, which
+        # Tauri's deep sign reaches but the notary still rejects unless it
+        # carries a secure timestamp under OUR Developer ID. Martin-Riedl ships
+        # it notarized under HIS identity; re-signing with --force replaces that
+        # with ours (--timestamp --options runtime). Skipped silently if ffmpeg
+        # wasn't bundled for this target. (ffprobe is no longer bundled — see
+        # scripts/fetch-ffmpeg.js.)
+        if: runner.os == 'macOS'
+        run: |
+          FF_DIR=src-tauri/resources/ffmpeg-mac/bin
+          if [ -f "$FF_DIR/ffmpeg" ]; then
+            codesign --force --timestamp --options runtime \
+              --sign "$APPLE_SIGNING_IDENTITY" "$FF_DIR/ffmpeg"
+            codesign -dvv "$FF_DIR/ffmpeg" || true
+          else
+            echo "No bundled ffmpeg-mac for ${{ matrix.target }} — skipping pre-sign."
+          fi
+
+      - name: Build Tauri app
+        # macOS workaround: macos-latest runner ships a /usr/local/bin/cargo
+        # which is a rustup-init shim that doesn't recognise the 'metadata'
+        # subcommand. dtolnay/rust-toolchain installs the real cargo at
+        # $HOME/.cargo/bin/cargo and *appends* its bin to GITHUB_PATH, but
+        # the system shim still wins. Prepend $HOME/.cargo/bin so the real
+        # cargo is found first when tauri build calls `cargo metadata`.
+        # Windows is unaffected (no system shim) — the export is harmless.
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          npx tauri build --target ${{ matrix.target }}
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ''
+          # Tauri v2 uses these for automatic codesign + notarization
+          APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Tauri v2's macOS dmg bundler normally passes `--skip-jenkins`
+          # to bundle_dmg.sh when it detects `CI=true`, which skips the
+          # Finder-prettifying AppleScript — the one step that actually
+          # applies our tauri.conf.json appPosition / applicationFolderPosition
+          # values. Without it the DMG ships with the default Finder
+          # layout (Applications on the left, app on the right) and all
+          # our icon-position config is silently ignored.
+          #
+          # Setting TAURI_BUNDLER_DMG_IGNORE_CI="true" tells Tauri to NOT
+          # add --skip-jenkins, so the AppleScript runs and our positions
+          # actually show up in the generated .DS_Store. Must be the
+          # exact string "true" — Tauri's check is
+          #   env::var_os("TAURI_BUNDLER_DMG_IGNORE_CI") != "true"
+          # (see tauri-bundler/src/bundle/macos/dmg/mod.rs).
+          TAURI_BUNDLER_DMG_IGNORE_CI: 'true'
+
+      # NOTE: Info.plist extras (ATS loopback exception, TCC usage
+      # descriptions, LSApplicationCategoryType, NSHumanReadableCopyright)
+      # are now merged via src-tauri/Info.plist which Tauri v2's bundler
+      # picks up automatically via bundle.macOS.infoPlist defaulting to
+      # the file next to tauri.conf.json. Merging happens BEFORE codesign
+      # and notarization so no post-build step or re-sign is needed.
+      # Previously we had a `node scripts/patch-macos-plist.js` step here
+      # that ran after tauri build — it failed because Tauri cleans the
+      # staged .app once the dmg has been bundled, leaving no plist to
+      # patch on disk.
+
+      - name: Verify macOS codesign
+        if: runner.os == 'macOS'
+        run: |
+          APP_PATH=$(find src-tauri/target/${{ matrix.target }}/release/bundle -name "*.app" -type d | head -1)
+          if [ -n "$APP_PATH" ]; then
+            echo "Verifying: $APP_PATH"
+            codesign -dvvv "$APP_PATH" 2>&1 | head -10
+            # If Tauri didn't notarize, do it manually
+            if ! spctl --assess --type execute "$APP_PATH" 2>/dev/null; then
+              echo "App not notarized by Tauri, doing manual notarization..."
+              ZIP_PATH="${APP_PATH%.app}.zip"
+              ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ZIP_PATH"
+              xcrun notarytool submit "$ZIP_PATH" \
+                --apple-id "${{ secrets.APPLE_ID }}" \
+                --password "${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}" \
+                --team-id "${{ secrets.APPLE_TEAM_ID }}" \
+                --wait --timeout 600 || echo "Notarization failed"
+              xcrun stapler staple "$APP_PATH" || echo "Stapler failed"
+              rm -f "$ZIP_PATH"
+            else
+              echo "App already notarized by Tauri"
+            fi
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: noobclaw-tauri-${{ matrix.target }}
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/**/*
+          retention-days: 7
+  # Artifact 配额清理已拆到独立的定时 workflow(.github/workflows/cleanup-artifacts.yml):
+  #   每天 cron 自动删 >7 天前的 artifact + 可手动触发。拆出去的原因:原来作为 build 的
+  #   收尾 job(needs: build-tauri),它一旦 cancelled/failed 就把整个 Build Tauri run 标红,
+  #   即便三个平台包全部打成功,看着像"打包失败"。解耦后 build run 只反映打包本身的成败。

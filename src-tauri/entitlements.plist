@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      Required for the pkg-bundled Node.js sidecar to run under macOS
+      hardened runtime. Without allow-jit + allow-unsigned-executable-
+      memory, Node's V8 JIT compiler cannot allocate executable pages
+      and the sidecar process dies at startup with SIGKILL, which
+      surfaces to the renderer as "sidecar unreachable" — the user
+      then sees no chat responses, no lucky bag, etc. The main Tauri
+      binary (Rust) also picks up these entitlements, which is fine
+      because WKWebView also has a JIT.
+    -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <!--
+      pkg binaries embed a Node snapshot that codesign considers an
+      "unsigned library"; disable-library-validation lets the main
+      binary load it. Without this the sidecar aborts with
+      `dyld: Library not loaded (code signature invalid)`.
+    -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <!--
+      Required so Tauri's shell plugin can spawn the sidecar as a
+      child process. Technically already covered by the default
+      Tauri template but we set it explicitly because this whole
+      bundle is about *the sidecar working*.
+    -->
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+    <!--
+      Local network access for 127.0.0.1:18800 (sidecar HTTP/SSE) and
+      127.0.0.1:12581 (browser bridge TCP). macOS Sequoia tightened
+      rules around local network access and may prompt/deny otherwise.
+    -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <key>com.apple.security.network.server</key>
+    <true/>
+</dict>
+</plist>

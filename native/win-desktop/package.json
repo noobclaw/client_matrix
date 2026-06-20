@@ -1,0 +1,15 @@
+{
+  "name": "noobclaw-desktop-native-win",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Native Windows desktop automation addon for NoobClaw sidecar. Replaces the PowerShell-subprocess fallbacks with direct Win32 SendInput / BitBlt / Windows clipboard calls for <1ms latency mouse and keyboard, 10x faster screenshots.",
+  "main": "build/Release/noobclaw_desktop_win.node",
+  "scripts": {
+    "build": "node-gyp rebuild",
+    "clean": "node-gyp clean"
+  },
+  "devDependencies": {
+    "node-addon-api": "^7.1.0",
+    "node-gyp": "^11.0.0"
+  }
+}

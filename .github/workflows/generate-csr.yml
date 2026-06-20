@@ -1,0 +1,21 @@
+name: Generate CSR
+on: workflow_dispatch
+
+jobs:
+  generate-csr:
+    runs-on: macos-latest
+    steps:
+      - name: Generate CSR and Private Key
+        run: |
+          # Generate private key
+          openssl genrsa -out noobclaw.key 2048
+          
+          # Generate CSR
+          openssl req -new -key noobclaw.key -out noobclaw.csr \
+            -subj "/CN=NoobClaw/O=5D7Q94WC2A/C=US"
+          
+          echo "=== CSR Content (copy this) ==="
+          cat noobclaw.csr
+          echo ""
+          echo "=== Private Key (save securely) ==="
+          cat noobclaw.key

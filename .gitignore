@@ -1,0 +1,79 @@
+build/*
+!build/entitlements.mac.plist
+!build/icons/
+!build/icons/**
+release/
+node_modules
+dist
+dist-electron
+src-tauri/target/
+.DS_Store
+.env 
+.claude/
+__pycache__/
+.codebuddy/
+sandbox/image/out/
+sandbox/image/publish/
+sandbox/image/.work/
+.work/
+sandbox/runtime/out/
+sandbox/runtime-darwin-*/
+
+# Bundled PortableGit for Windows builds (downloaded via scripts/setup-mingit.js)
+resources/mingit/
+resources/MinGit-*.zip
+resources/PortableGit-*.7z.exe
+resources/python-win/
+resources/python-*.zip
+
+# Bundled ffmpeg/ffprobe for video creation (downloaded via scripts/fetch-ffmpeg.js)
+resources/ffmpeg-win/
+resources/ffmpeg-mac/
+resources/ffmpeg-linux/
+# ...and the copies prepare-tauri-resources.js stages into src-tauri/resources/
+# (regenerated every build; ~194MB of binaries that must never be committed)
+src-tauri/resources/ffmpeg-win/
+src-tauri/resources/ffmpeg-mac/
+src-tauri/resources/ffmpeg-linux/
+
+# SKILLs runtime files
+SKILLs/**/.connection
+SKILLs/**/.server.log
+SKILLs/**/.server.pid
+SKILLs/**/.venv/
+SKILLs/**/node_modules/
+
+nul
+.work.env
+
+.playwright-mcp/
+.cowork-temp/
+
+# editorconfig files
+.vscode/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE
+.idea/
+*.swp
+*.swo
+chrome-extension.zip
+
+# Browser extension is no longer bundled — users install the NoobClaw
+# Browser Assistant from the Chrome / Firefox / Edge stores. Source for
+# the extension lives in the private noobclaw/chrome-extension repo.
+# The two paths below are kept ignored so that an accidental local clone
+# of the extension repo or a stale build artifact doesn't sneak back in.
+chrome-extension/
+src-tauri/resources/chrome-extension/
+
+# TS incremental build cache
+tsconfig.node.tsbuildinfo

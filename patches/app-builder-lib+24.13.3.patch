@@ -1,0 +1,69 @@
+diff --git a/node_modules/app-builder-lib/templates/nsis/include/installer.nsh b/node_modules/app-builder-lib/templates/nsis/include/installer.nsh
+index 34e91df..684f9da 100644
+--- a/node_modules/app-builder-lib/templates/nsis/include/installer.nsh
++++ b/node_modules/app-builder-lib/templates/nsis/include/installer.nsh
+@@ -178,6 +178,7 @@
+       # clear error (if shortcut already exists)
+       ClearErrors
+       WinShell::SetLnkAUMI "$newStartMenuLink" "${APP_ID}"
++      ClearErrors
+     # The keepShortcuts mechanism IS enabled.
+     # The menu shortcut could either not exist (it shouldn't be recreated) or exist in an obsolete location.
+     ${elseif} $oldStartMenuLink != $newStartMenuLink
+@@ -186,7 +187,9 @@
+ 
+       Rename $oldStartMenuLink $newStartMenuLink
+       WinShell::UninstShortcut "$oldStartMenuLink"
++      ClearErrors
+       WinShell::SetLnkAUMI "$newStartMenuLink" "${APP_ID}"
++      ClearErrors
+ 
+       !insertmacro cleanupOldMenuDirectory
+     ${endIf}
+@@ -203,13 +206,16 @@
+         CreateShortCut "$newDesktopLink" "$appExe" "" "$appExe" 0 "" "" "${APP_DESCRIPTION}"
+         ClearErrors
+         WinShell::SetLnkAUMI "$newDesktopLink" "${APP_ID}"
++        ClearErrors
+       # The keepShortcuts mechanism IS enabled.
+       # The desktop shortcut could exist in an obsolete location (due to name change).
+       ${elseif} $oldDesktopLink != $newDesktopLink
+       ${andIf} ${FileExists} "$oldDesktopLink"
+         Rename $oldDesktopLink $newDesktopLink
+         WinShell::UninstShortcut "$oldDesktopLink"
++        ClearErrors
+         WinShell::SetLnkAUMI "$newDesktopLink" "${APP_ID}"
++        ClearErrors
+ 
+       !ifdef RECREATE_DESKTOP_SHORTCUT
+       ${elseif} $oldDesktopLink != $newDesktopLink
+@@ -218,6 +224,7 @@
+           CreateShortCut "$newDesktopLink" "$appExe" "" "$appExe" 0 "" "" "${APP_DESCRIPTION}"
+           ClearErrors
+           WinShell::SetLnkAUMI "$newDesktopLink" "${APP_ID}"
++          ClearErrors
+         ${endIf}
+       !endif
+       ${endIf}
+diff --git a/node_modules/app-builder-lib/templates/nsis/uninstaller.nsh b/node_modules/app-builder-lib/templates/nsis/uninstaller.nsh
+index 8282a6f..95b81c3 100644
+--- a/node_modules/app-builder-lib/templates/nsis/uninstaller.nsh
++++ b/node_modules/app-builder-lib/templates/nsis/uninstaller.nsh
+@@ -171,14 +171,17 @@ Section "un.install"
+ 
+   ${ifNot} ${isKeepShortcuts}
+     WinShell::UninstAppUserModelId "${APP_ID}"
++    ClearErrors
+ 
+     !ifndef DO_NOT_CREATE_DESKTOP_SHORTCUT
+       WinShell::UninstShortcut "$oldDesktopLink"
++      ClearErrors
+       Delete "$oldDesktopLink"
+     !endif
+ 
+     !ifndef DO_NOT_CREATE_START_MENU_SHORTCUT
+       WinShell::UninstShortcut "$oldStartMenuLink"
++      ClearErrors
+ 
+       Delete "$oldStartMenuLink"
+       ReadRegStr $R1 SHELL_CONTEXT "${INSTALL_REGISTRY_KEY}" MenuDirectory

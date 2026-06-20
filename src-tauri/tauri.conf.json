@@ -1,0 +1,110 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
+  "productName": "NoobClaw",
+  "version": "2.8.4",
+  "identifier": "com.noobclaw.desktop",
+  "build": {
+    "beforeBuildCommand": "npm run build",
+    "beforeDevCommand": "npm run dev -- --port 5175",
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5175"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "NoobClaw",
+        "width": 1200,
+        "height": 800,
+        "resizable": true,
+        "fullscreen": false
+      },
+      {
+        "label": "command-bar",
+        "title": "NoobClaw Command Bar",
+        "url": "index.html#command-bar",
+        "width": 680,
+        "height": 60,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "center": true,
+        "focus": false,
+        "shadow": false,
+        "hiddenTitle": true,
+        "acceptFirstMouse": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis",
+      "dmg"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "externalBin": [
+      "binaries/noobclaw-server"
+    ],
+    "resources": [
+      "resources/**/*"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "10.15",
+      "entitlements": "entitlements.plist",
+      "dmg": {
+        "background": "icons/dmg-background.png",
+        "appPosition": {
+          "x": 180,
+          "y": 170
+        },
+        "applicationFolderPosition": {
+          "x": 480,
+          "y": 170
+        },
+        "windowSize": {
+          "width": 660,
+          "height": 400
+        }
+      }
+    },
+    "windows": {
+      "allowDowngrades": false,
+      "nsis": {
+        "installMode": "perMachine",
+        "installerIcon": "icons/icon.ico",
+        "headerImage": null,
+        "displayLanguageSelector": false,
+        "languages": [
+          "English"
+        ],
+        "installerHooks": "./nsis-hooks.nsh"
+      }
+    }
+  },
+  "plugins": {
+    "shell": {
+      "open": true
+    },
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "noobclaw"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,140 @@
+name: Build All Platforms
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-win-x64:
+    name: Windows (x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Bundle Node.js runtime for Native Messaging
+        shell: bash
+        run: |
+          mkdir -p resources/node-runtime
+          cp "$(which node)" resources/node-runtime/node.exe
+
+      - name: Build & Package (Windows x64)
+        run: npm run dist:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Windows Installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: NoobClaw-win-x64
+          path: |
+            release/*.exe
+            !release/*-unpacked/**
+          retention-days: 7
+
+  build-mac-x64:
+    name: macOS Intel (x64)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Import code signing certificate
+        env:
+          APPLE_CERT_BASE64: ${{ secrets.APPLE_CERT_BASE64 }}
+          CSC_KEY: ${{ secrets.CSC_KEY }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          echo "$APPLE_CERT_BASE64" | base64 --decode > /tmp/cert.cer
+          echo "$CSC_KEY" > /tmp/key.pem
+          openssl x509 -inform DER -in /tmp/cert.cer -out /tmp/cert.pem
+          openssl pkcs12 -export -out /tmp/cert.p12 -inkey /tmp/key.pem -in /tmp/cert.pem -passout pass:"$CSC_KEY_PASSWORD"
+          security create-keychain -p actions build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p actions build.keychain
+          security import /tmp/cert.p12 -k build.keychain -P "$CSC_KEY_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions build.keychain
+          echo "CSC_LINK=/tmp/cert.p12" >> $GITHUB_ENV
+
+      - name: Bundle Node.js runtime for Native Messaging
+        run: |
+          mkdir -p resources/node-runtime
+          cp "$(which node)" resources/node-runtime/node
+
+      - name: Build & Package (x64)
+        run: npm run dist:mac:x64
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Upload x64 DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: NoobClaw-mac-x64
+          path: release/*.dmg
+          retention-days: 7
+
+  build-mac-arm64:
+    name: macOS Apple Silicon (arm64)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Import code signing certificate
+        env:
+          APPLE_CERT_BASE64: ${{ secrets.APPLE_CERT_BASE64 }}
+          CSC_KEY: ${{ secrets.CSC_KEY }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          echo "$APPLE_CERT_BASE64" | base64 --decode > /tmp/cert.cer
+          echo "$CSC_KEY" > /tmp/key.pem
+          openssl x509 -inform DER -in /tmp/cert.cer -out /tmp/cert.pem
+          openssl pkcs12 -export -out /tmp/cert.p12 -inkey /tmp/key.pem -in /tmp/cert.pem -passout pass:"$CSC_KEY_PASSWORD"
+          security create-keychain -p actions build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p actions build.keychain
+          security import /tmp/cert.p12 -k build.keychain -P "$CSC_KEY_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions build.keychain
+          echo "CSC_LINK=/tmp/cert.p12" >> $GITHUB_ENV
+
+      - name: Bundle Node.js runtime for Native Messaging
+        run: |
+          mkdir -p resources/node-runtime
+          cp "$(which node)" resources/node-runtime/node
+
+      - name: Build & Package (arm64)
+        run: npm run dist:mac:arm64
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Upload arm64 DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: NoobClaw-mac-arm64
+          path: release/*.dmg
+          retention-days: 7
