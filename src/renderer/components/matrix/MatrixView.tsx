@@ -156,7 +156,6 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate }) => {
     if (!r?.ok) { setRunning(false); setNotice('启动失败:' + (r?.error === 'another_task_running' ? '已有任务在跑' : r?.error || '未知')); }
   };
   const stopTask = async () => { setNotice('已请求停止,正在关闭窗口…'); await M()?.stopTask?.(); };
-  const toggleTask = async (t: MatrixTask) => { await M()?.setTaskEnabled({ id: t.id, enabled: !t.enabled }); await reloadTasks(); };
   const deleteTask = async (t: MatrixTask) => { await M()?.removeTask({ id: t.id }); setSelectedTaskId(null); await reloadTasks(); };
 
   // ── 复用片段 ──
@@ -317,7 +316,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate }) => {
                   const isRunning = runningTaskId === t.id;
                   return (
                     <button key={t.id} type="button" onClick={() => setSelectedTaskId(t.id)}
-                      className={`w-full text-left rounded-xl border p-4 transition-colors relative ${isRunning ? 'border-green-500 ring-2 ring-green-500/30 bg-white dark:bg-gray-900' : 'border-gray-200 dark:border-gray-700 hover:border-violet-500/50 dark:hover:border-violet-500/50 bg-white dark:bg-gray-900'}`}>
+                      className={`w-full text-left rounded-xl border p-4 transition-colors relative ${isRunning ? 'border-green-500 ring-2 ring-green-500/30 bg-white dark:bg-gray-900 noobclaw-running-glow' : 'border-gray-200 dark:border-gray-700 hover:border-violet-500/50 dark:hover:border-violet-500/50 bg-white dark:bg-gray-900'}`}>
                       <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
                         <div className="flex items-center gap-2 min-w-0 flex-1">
                           <span className="shrink-0 inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300">🎵 {PLATFORM_LABEL[t.platform]}</span>
@@ -363,7 +362,6 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate }) => {
                 {runningTaskId === selectedTask.id
                   ? <button onClick={stopTask} className="px-4 py-2 rounded-lg text-sm font-semibold bg-red-500 text-white hover:bg-red-600">⏹ 停止</button>
                   : <button onClick={() => runTaskNow(selectedTask)} disabled={running} className="px-4 py-2 rounded-lg text-sm font-semibold bg-violet-500 text-white hover:bg-violet-600 disabled:opacity-50">{running ? '运行中…' : '🎯 直接运行'}</button>}
-                {selectedTask.frequency !== 'once' && <button onClick={() => toggleTask(selectedTask)} className="px-3 py-2 rounded-lg text-sm font-medium border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800">{selectedTask.enabled ? '停用定时' : '启用定时'}</button>}
                 <button onClick={() => { setTaskEditId(selectedTask.id); setShowTaskEditModal(true); }} className="px-3 py-2 rounded-lg text-sm font-medium border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800">编辑</button>
                 <button onClick={() => deleteTask(selectedTask)} className="px-3 py-2 rounded-lg text-sm font-medium border border-red-500/40 text-red-500 hover:bg-red-500/5">删除</button>
               </div>
@@ -375,7 +373,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate }) => {
               <div className="flex gap-3 text-xs"><span className="text-gray-500 dark:text-gray-400 w-20 shrink-0">账号({selectedTask.accountIds.length})</span><span className="text-gray-800 dark:text-gray-200 break-all">{selectedTask.accountIds.map((id) => accounts.find((a) => a.id === id)?.displayName || id).join('、')}</span></div>
             </div>
             {(running || Object.keys(items).length > 0) && (
-              <div className="rounded-xl border border-green-500/40 bg-green-500/5 p-4 mb-4">
+              <div className="rounded-xl border border-green-500/50 bg-green-500/5 p-4 mb-4 noobclaw-running-glow">
                 <div className="text-sm font-semibold text-green-600 dark:text-green-400 mb-1">本次运行进度</div>
                 {renderProgress()}
               </div>

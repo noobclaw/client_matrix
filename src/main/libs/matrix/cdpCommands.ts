@@ -41,15 +41,21 @@ export async function matrixCmd(
       return { ok: true, value };
     }
 
-    // 元素查询:driver 只用返回的 elements 数组长度判存在。深遍历兼容 shadow/iframe。
+    // 元素查询:深遍历兼容 shadow/iframe。每个元素带 tag/text/id + 调用方请求的 attrs
+    // (对齐老客户端扩展:剧本靠 attrs:'id' 读 [id^="waterfall_item_"] 采集视频,
+    //  之前只返回 {tag,text} 丢了 id → 候选池恒 0 → 互动跑一会就空手放弃)。
     case 'query_selector': {
       const sel = String(params?.selector || '');
       const limit = Number(params?.limit) || 50;
+      const attrList = String(params?.attrs || '').split(',').map((x) => x.trim()).filter(Boolean);
       const expr =
         '(function(){' + DEEP_FN +
+        'var ATTRS=' + JSON.stringify(attrList) + ';' +
         'try{var n=nbDeepAll(' + s(sel) + ');var out=[];' +
-        'for(var i=0;i<Math.min(n.length,' + limit + ');i++){' +
-        'out.push({tag:(n[i].tagName||"").toLowerCase(),text:((n[i].innerText||n[i].value||"")+"").slice(0,80)});}' +
+        'for(var i=0;i<Math.min(n.length,' + limit + ');i++){var e=n[i];' +
+        'var o={tag:(e.tagName||"").toLowerCase(),text:((e.innerText||e.value||"")+"").slice(0,80),id:e.id||""};' +
+        'for(var k=0;k<ATTRS.length;k++){try{o[ATTRS[k]]=e.getAttribute(ATTRS[k])||"";}catch(_e){}}' +
+        'out.push(o);}' +
         'return out;}catch(e){return[];}})()';
       const elements = await kernelEval(accountId, expr);
       return { ok: true, elements: Array.isArray(elements) ? elements : [] };
