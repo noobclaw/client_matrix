@@ -183,8 +183,8 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string): Pr
       // task-tab:内核单页,openTab=导航并返回伪 tab,getTaskTab 复用
       openTab: async (o: any) => { if (o?.url) { await kernelNavigate(accountId, o.url); await sleep(1500); } return taskTab; },
       getTaskTab: async () => taskTab,
-      // 进度/日志
-      report: (m: string) => log(m),
+      // 进度/日志(同时写 cowork.log,方便真机排查互动卡在哪一步)
+      report: (m: string) => { log(m); try { coworkLog('INFO', 'engage', `[${accountId}] ${m}`); } catch { /* ignore */ } },
       stepStart: (s: number) => log('▶ 步骤 ' + s),
       stepLog: (_s: number, _st: string, m: string) => log(m),
       stepDone: (_s: number) => {},
@@ -208,16 +208,18 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string): Pr
     };
 
     const code = pack?.orchestrator;
-    if (!code) return { accountId, state: 'failed', reason: 'no_orchestrator' };
+    if (!code) { coworkLog('ERROR', 'engage', `[${accountId}] no_orchestrator`); return { accountId, state: 'failed', reason: 'no_orchestrator' }; }
     const fn = new AsyncFunction('ctx', code);
     await fn(ctx);
 
     setAccountStatus(accountId, 'idle');
     const fin = finished as { status: string; error?: string } | null;
-    if (fin && fin.status === 'error') return { accountId, state: 'failed', counts, reason: fin.error };
+    if (fin && fin.status === 'error') { coworkLog('ERROR', 'engage', `[${accountId}] finished error: ${fin.error}`); return { accountId, state: 'failed', counts, reason: fin.error }; }
+    coworkLog('INFO', 'engage', `[${accountId}] done 赞${counts.like}/关${counts.follow}/评${counts.comment}`);
     return { accountId, state: 'success', counts };
   } catch (e: any) {
     setAccountStatus(accountId, 'idle');
+    coworkLog('ERROR', 'engage', `[${accountId}] threw: ${String(e?.stack || e?.message || e).slice(0, 300)}`);
     return { accountId, state: 'failed', counts, reason: 'engage_threw:' + String(e?.message || e).slice(0, 140) };
   } finally {
     try { closeKernel(accountId); } catch { /* ignore */ }
