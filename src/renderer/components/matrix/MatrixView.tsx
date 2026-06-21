@@ -357,20 +357,23 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate, onShowIn
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="text-sm font-semibold dark:text-white truncate">{a.nickname || a.displayName}</span>
                           <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${stChip}`}>{STATUS_LABEL[a.status]}</span>
-                          {a.persona && <span className="shrink-0 text-[10px] text-gray-400">人设✓</span>}
                         </div>
                         <div className="text-[11px] truncate" title={a.boundUid ? `uid: ${a.boundUid}` : undefined}>
                           {a.status === 'login_required'
                             ? <span className="text-amber-500">未关联 — 点「扫码关联」</span>
                             : (<span className="text-gray-500 dark:text-gray-400">
-                                {a.displayId ? `${PLATFORM_LABEL[a.platform] || ''}号: ${a.displayId}` : (a.nickname ? '已关联' : '已关联 · 平台号读取中,点「刷新信息」')}
-                                {a.nickname && a.displayName && a.displayName !== a.nickname ? `${a.displayId ? ' · ' : ''}备注: ${a.displayName}` : ''}
-                                {a.group ? ` · ${a.group}` : ''}
+                                {a.displayId ? `${PLATFORM_LABEL[a.platform] || ''}号: ${a.displayId} · ` : ''}
+                                备注: {a.displayName}
                               </span>)}
                         </div>
                       </div>
                     </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{a.keywords && a.keywords.length ? `🏷️ ${a.keywords.join(' · ')}` : <span className="text-amber-500">未配关键词(互动需要)</span>}</div>
+                    {/* 赛道 / 人设 / 关键词,分三行 */}
+                    <div className="text-xs space-y-0.5">
+                      <div className="text-gray-500 dark:text-gray-400 truncate">🎯 赛道:{a.group ? <span className="text-gray-700 dark:text-gray-300">{a.group}</span> : <span className="text-amber-500">未设</span>}</div>
+                      <div className="text-gray-500 dark:text-gray-400 truncate">🎭 人设:{a.persona ? <span className="text-gray-700 dark:text-gray-300">{a.persona}</span> : <span className="text-amber-500">未设</span>}</div>
+                      <div className="text-gray-500 dark:text-gray-400 truncate">🏷️ 关键词:{a.keywords && a.keywords.length ? <span className="text-gray-700 dark:text-gray-300">{a.keywords.join(' · ')}</span> : <span className="text-amber-500">未配(互动需要)</span>}</div>
+                    </div>
                     {/* 右侧可点击按钮:全色按钮 */}
                     <div className="flex items-center gap-2 flex-wrap pt-1">
                       {a.proxy
