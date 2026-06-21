@@ -59,10 +59,14 @@ const launching = new Map<string, Promise<KernelSession>>(); // 启动去重
 let nextDebugPort = 9300;        // 每号一个端口,递增分配
 let nextSlot = 0;                // 第几个窗口(错开层叠位置用)
 
-/** 注入「账号角标」脚本:窗口左上角常驻绿色标签显示账号名,多窗叠在一起也能分清。 */
+/**
+ * 注入「账号角标」脚本:窗口左上角常驻绿色标签显示账号名,多窗叠在一起也能分清。
+ * 防风控:① 账号名文字放进 closed shadowRoot —— 页面 JS 读不到内容;② 宿主元素不带
+ * id/class、状态只存闭包(不挂 window)—— 抖音侧基本无法枚举/识别这个角标。
+ */
 function badgeScript(label: string): string {
   const L = JSON.stringify(label);
-  return `(function(){var ID='__nb_acct_badge__';function m(){try{var root=document.body||document.documentElement;if(!root)return;if(document.getElementById(ID))return;var d=document.createElement('div');d.id=ID;d.textContent=${L};d.style.cssText='position:fixed;top:0;left:0;z-index:2147483647;background:#16a34a;color:#fff;font:bold 13px/1.5 system-ui,sans-serif;padding:3px 12px;border-bottom-right-radius:8px;pointer-events:none;box-shadow:0 1px 6px rgba(0,0,0,.35)';root.appendChild(d);}catch(e){}}m();try{new MutationObserver(m).observe(document.documentElement,{childList:true});}catch(e){}setInterval(m,1500);})();`;
+  return `(function(){var node=null;function m(){try{var root=document.body||document.documentElement;if(!root)return;if(node&&node.isConnected)return;var host=document.createElement('div');host.style.cssText='position:fixed;top:0;left:0;z-index:2147483647;pointer-events:none';var sr=host.attachShadow?host.attachShadow({mode:'closed'}):null;var b=document.createElement('div');b.textContent=${L};b.style.cssText='background:#16a34a;color:#fff;font:bold 13px/1.5 system-ui,sans-serif;padding:3px 12px;border-bottom-right-radius:8px';(sr||host).appendChild(b);root.appendChild(host);node=host;}catch(e){}}m();setInterval(m,2000);})();`;
 }
 
 // 内核缺失的统一错误标记:UI 据此弹「去下载内核」引导,不再回退系统 Chrome。

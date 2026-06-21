@@ -143,7 +143,7 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string): Pr
     await launchKernel({
       accountId, kernelPath: opts.kernelPath, kernelVersion: acc.kernelVersion,
       userDataDir: acc.userDataDir, fingerprint: acc.fingerprint, proxy: acc.proxy,
-      label: acc.displayName + (acc.group ? ' · ' + acc.group : ''),
+      // 跑任务时不注入角标:降低页面足迹(风控最敏感时段),账号在进度面板里看即可。
     });
     await kernelNavigate(accountId, 'https://www.douyin.com/');
     await sleep(2000);
