@@ -47,7 +47,6 @@ const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, accounts, initialTas
   const setCmtMin = (v: number) => { const n = Math.max(0, Math.min(COMMENT_HARDCAP, v)); setCmtMinRaw(n); setCmtMaxRaw((p) => (p < n ? n : p)); };
   const setCmtMax = (v: number) => { const n = Math.max(0, Math.min(COMMENT_HARDCAP, v)); setCmtMaxRaw(n); setCmtMinRaw((p) => (p > n ? n : p)); };
 
-  const [concurrency, setConcurrency] = useState<number>(initialTask?.concurrency || 3);
   const [runInterval, setRunInterval] = useState<string>(initialTask?.frequency || 'daily_random');
   const [termsAccepted, setTermsAccepted] = useState<boolean[]>([true, true]);
   const allTermsAccepted = termsAccepted.every(Boolean);
@@ -71,7 +70,7 @@ const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, accounts, initialTas
       await onSave({
         name: name.trim() || `${platformLabel}互动`,
         accountIds: [...selected],
-        concurrency,
+        concurrency: selected.size,   // 选几个号就同时开几个窗(runner 内部有安全上限兜底)
         frequency: runInterval,
         quota: { daily_like_min: likeMin, daily_like_max: likeMax, daily_follow_min: folMin, daily_follow_max: folMax, daily_comment_min: cmtMin, daily_comment_max: cmtMax },
       });
@@ -137,11 +136,6 @@ const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, accounts, initialTas
             <RangeSlider label="每次运行点赞数量" min={likeMin} max={likeMax} setMin={setLikeMin} setMax={setLikeMax} hardCap={LIKE_HARDCAP} hint={`每次随机点赞 ${likeMin}-${likeMax} 个视频 (0-${LIKE_HARDCAP},越大风险越高)`} disabled={saving} />
             <RangeSlider label="每次运行关注数量" min={folMin} max={folMax} setMin={setFolMin} setMax={setFolMax} hardCap={FOLLOW_HARDCAP} hint={`每次随机关注 ${folMin}-${folMax} 个作者 (0-${FOLLOW_HARDCAP},关注是风控最严的动作,建议保守)`} disabled={saving} />
             <RangeSlider label="每次运行评论数量" min={cmtMin} max={cmtMax} setMin={setCmtMin} setMax={setCmtMax} hardCap={COMMENT_HARDCAP} hint={`每次随机发 ${cmtMin}-${cmtMax} 条评论 (0-${COMMENT_HARDCAP},内容由 AI 按视频上下文+该号人设自动写)`} disabled={saving} />
-            <div>
-              <label className="text-sm font-medium dark:text-gray-200 mb-2 block">同时开窗(并发账号数)</label>
-              <input type="number" min={1} max={10} value={concurrency} onChange={(e) => setConcurrency(Math.max(1, Math.min(10, Number(e.target.value) || 1)))} className="w-24 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm dark:text-white" disabled={saving} />
-              <span className="text-[11px] text-gray-400 ml-2">一次最多同时开几个账号的浏览器</span>
-            </div>
             <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs text-amber-700 dark:text-amber-300 leading-relaxed space-y-1">
               <div className="font-semibold">⚠️ 安全提示</div>
               <ul className="list-disc list-inside space-y-0.5">
@@ -170,7 +164,7 @@ const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, accounts, initialTas
               <SummaryRow label="点赞数" value={`${likeMin}-${likeMax} / 次`} />
               <SummaryRow label="关注数" value={`${folMin}-${folMax} / 次`} />
               <SummaryRow label="评论数" value={`${cmtMin}-${cmtMax} / 次`} />
-              <SummaryRow label="同时开窗" value={`${concurrency}`} />
+              <SummaryRow label="同时开窗" value={`${selected.size} 个号一起跑`} />
               <SummaryRow label="运行频率" value={intervalLabel} />
             </div>
             <div className="space-y-2">
