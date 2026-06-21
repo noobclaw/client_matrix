@@ -183,6 +183,9 @@ const sseClients = new Set<http.ServerResponse>();
 // 对齐 Electron main.ts 的 activeVideoRuns;Tauri 下视频跑在 sidecar,停止必须在这里 abort。
 const activeVideoRuns = new Map<string, AbortController>();
 
+// 矩阵号「全局同时只跑一个任务」的运行时锁(产品约束:一次只一个平台多窗)。
+let matrixRunning = false;
+
 function broadcastSSE(event: string, data: unknown): void {
   const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const client of sseClients) {
@@ -1216,10 +1219,13 @@ const server = http.createServer(async (req, res) => {
             }
           }
           case 'matrix:runEngage': {
-            // 多号自动互动(点赞/评论/关注)。进度走 matrix:progress SSE(同 runTask)。
+            // 多号自动互动(点赞/评论/关注)即时跑。全局同时只跑一个任务。
             try {
+              if (matrixRunning) return writeJSON(res, 200, { ok: false, error: 'another_task_running' });
               const { runEngageTask } = await import('./libs/matrix/engageRunner');
               const a = args[0] as any;
+              matrixRunning = true;
+              broadcastSSE('matrix:progress', { type: 'taskStart' });
               runEngageTask({
                 platform: a?.platform || 'douyin',
                 accountIds: a?.accountIds || [],
@@ -1233,11 +1239,70 @@ const server = http.createServer(async (req, res) => {
                 broadcastSSE('matrix:progress', { type: 'done', report });
               }).catch((e: any) => {
                 broadcastSSE('matrix:progress', { type: 'error', error: e?.message || String(e) });
-              });
+              }).finally(() => { matrixRunning = false; });
               return writeJSON(res, 200, { ok: true, status: 'started' });
             } catch (e: any) {
+              matrixRunning = false;
               return writeJSON(res, 200, { ok: false, error: e?.message || String(e) });
             }
+          }
+          // ── 矩阵任务(可保存 + 调度;每平台≤5、同类型唯一、全局只跑一个)──
+          case 'matrix:listTasks': {
+            const { listTasks } = await import('./libs/matrix/taskStore');
+            return writeJSON(res, 200, { ok: true, tasks: listTasks(), running: matrixRunning });
+          }
+          case 'matrix:saveTask': {
+            const { saveTask } = await import('./libs/matrix/taskStore');
+            return writeJSON(res, 200, saveTask(args[0] as any));
+          }
+          case 'matrix:removeTask': {
+            const { removeTask } = await import('./libs/matrix/taskStore');
+            removeTask((args[0] as any)?.id);
+            return writeJSON(res, 200, { ok: true });
+          }
+          case 'matrix:setTaskEnabled': {
+            const { setTaskEnabled } = await import('./libs/matrix/taskStore');
+            setTaskEnabled((args[0] as any)?.id, !!(args[0] as any)?.enabled);
+            return writeJSON(res, 200, { ok: true });
+          }
+          case 'matrix:runTaskById': {
+            // 按保存的任务跑(手动或定时都走这)。全局同时只一个。
+            try {
+              if (matrixRunning) return writeJSON(res, 200, { ok: false, error: 'another_task_running' });
+              const { getTask, setTaskLastRun } = await import('./libs/matrix/taskStore');
+              const { runEngageTask } = await import('./libs/matrix/engageRunner');
+              const a = args[0] as any;
+              const task = getTask(a?.taskId);
+              if (!task) return writeJSON(res, 200, { ok: false, error: 'task_not_found' });
+              if (task.type !== 'engage') return writeJSON(res, 200, { ok: false, error: 'unsupported_task_type' });
+              matrixRunning = true;
+              broadcastSSE('matrix:progress', { type: 'taskStart', taskId: task.id });
+              runEngageTask({
+                platform: task.platform,
+                accountIds: task.accountIds || [],
+                quota: task.quota,
+                concurrency: task.concurrency,
+                kernelPath: a?.kernelPath,
+                authToken: a?.authToken,
+                onLog: (accountId, msg) => broadcastSSE('matrix:progress', { type: 'log', accountId, msg }),
+                onItem: (item) => broadcastSSE('matrix:progress', { type: 'item', accountId: item.accountId, state: item.state, reason: item.reason, counts: item.counts }),
+              }).then((report) => {
+                setTaskLastRun(task.id, Date.now());
+                broadcastSSE('matrix:progress', { type: 'done', report, taskId: task.id });
+              }).catch((e: any) => {
+                broadcastSSE('matrix:progress', { type: 'error', error: e?.message || String(e) });
+              }).finally(() => { matrixRunning = false; });
+              return writeJSON(res, 200, { ok: true, status: 'started' });
+            } catch (e: any) {
+              matrixRunning = false;
+              return writeJSON(res, 200, { ok: false, error: e?.message || String(e) });
+            }
+          }
+          case 'matrix:updateAccountMeta': {
+            const { updateAccountMeta } = await import('./libs/matrix/accountManager');
+            const a = args[0] as any;
+            updateAccountMeta(a?.id, { displayName: a?.displayName, group: a?.group, persona: a?.persona, keywords: a?.keywords, track: a?.track });
+            return writeJSON(res, 200, { ok: true });
           }
           case 'matrix:kernelStatus': {
             const { kernelInfo } = await import('./libs/matrix/kernelInstaller');

@@ -73,6 +73,7 @@ export function createAccount(args: {
   proxy?: Proxy;
   keywords?: string[];
   track?: string;
+  persona?: string;
   kernelVersion?: string;
 }): MatrixAccount {
   ensureDirs();
@@ -84,6 +85,7 @@ export function createAccount(args: {
     platform: args.platform,
     displayName: args.displayName,
     group: args.group,
+    persona: args.persona,
     status: 'login_required',           // 新号默认需扫码登录
     userDataDir: path.join(profilesDir(), id),
     fingerprint: {
@@ -132,6 +134,18 @@ export function setAccountKeywords(id: string, keywords: string[], track?: strin
   if (!a) return;
   a.keywords = (keywords || []).filter(Boolean);
   if (track !== undefined) a.track = track;
+  persist();
+}
+
+/** 编辑账号元信息(备注名/赛道分组/人设/关键词)。只更新传入的字段。 */
+export function updateAccountMeta(id: string, patch: { displayName?: string; group?: string; persona?: string; keywords?: string[]; track?: string }): void {
+  const a = getAccount(id);
+  if (!a) return;
+  if (patch.displayName !== undefined) a.displayName = patch.displayName;
+  if (patch.group !== undefined) a.group = patch.group;
+  if (patch.persona !== undefined) a.persona = patch.persona;
+  if (patch.keywords !== undefined) a.keywords = (patch.keywords || []).filter(Boolean);
+  if (patch.track !== undefined) a.track = patch.track;
   persist();
 }
 

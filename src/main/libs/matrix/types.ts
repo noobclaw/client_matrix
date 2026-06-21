@@ -42,6 +42,7 @@ export interface MatrixAccount {
   platform: string;                // douyin / xhs / ... (对齐 backend/matrix/drivers 文件名)
   displayName: string;
   group?: string;                  // 赛道/分组
+  persona?: string;                // 人设(喂评论 AI 口吻;点赞/关注用不到)
   status: AccountStatus;
   userDataDir: string;             // 持久 profile 目录(登录态长期粘住)
   fingerprint: Fingerprint;
@@ -53,4 +54,34 @@ export interface MatrixAccount {
   track?: string;
   // 绑定的指纹内核版本(指纹稳定:一号长期用固定版本)。空 = 用任意已装版本。
   kernelVersion?: string;
+}
+
+/** 互动配额区间(各项在 [min,max] 内随机)。 */
+export interface EngageQuota {
+  daily_like_min?: number; daily_like_max?: number;
+  daily_follow_min?: number; daily_follow_max?: number;
+  daily_comment_min?: number; daily_comment_max?: number;
+}
+
+export type MatrixTaskType = 'engage';   // 互动(点赞/评论/关注)。后续可扩展别的类型。
+// 频率枚举对齐老客户端 DouyinConfigWizard(便于复用频率算法/文案)。
+export type MatrixTaskFrequency = 'once' | '30min' | '1h' | '3h' | '6h' | 'daily_random';
+
+/**
+ * 矩阵任务 = 某平台一类自动化(目前只有互动)的「可保存配置 + 调度」。
+ * 约束:每平台最多 5 个任务、同平台同类型只允许 1 个;全局同时只跑 1 个(运行时锁)。
+ */
+export interface MatrixTask {
+  id: string;
+  platform: string;
+  type: MatrixTaskType;
+  name: string;
+  enabled: boolean;                // 定时调度是否启用(手动运行不受此限)
+  accountIds: string[];            // 勾选的(已登录)账号
+  quota: EngageQuota;
+  concurrency?: number;            // 同时开窗数
+  frequency: MatrixTaskFrequency;  // 运行频率
+  nextPlannedRunAt?: number;       // 下次计划运行(epoch ms;调度器预排,UI 展示)
+  lastRunAt?: number;              // 上次运行(调度判断 + 展示)
+  createdAt: number;
 }

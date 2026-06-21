@@ -151,6 +151,7 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string): Pr
     // orchestrator 需要的 task(配额从 opts.quota,缺省回落 scenario manifest 默认)
     const task: any = {
       id: accountId, keywords: acc.keywords, track: acc.track || 'douyin_default',
+      persona: acc.persona || '',   // 人设:orchestrator 写评论时按此口吻(见 backend/matrix engage prompt)
       daily_like_min: q.daily_like_min, daily_like_max: q.daily_like_max,
       daily_follow_min: q.daily_follow_min, daily_follow_max: q.daily_follow_max,
       daily_comment_min: q.daily_comment_min, daily_comment_max: q.daily_comment_max,
