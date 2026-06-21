@@ -84,6 +84,12 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate, onShowIn
   const [newPersona, setNewPersona] = useState('');
   const [newKeywords, setNewKeywords] = useState('');
   const [notice, setNotice] = useState('');
+  // 顶部 toast 提示 5s 后自动消失(弹窗内的校验提示走 showAdd 常驻,不在这清)。
+  useEffect(() => {
+    if (!notice || showAdd) return;
+    const t = setTimeout(() => setNotice(''), 5000);
+    return () => clearTimeout(t);
+  }, [notice, showAdd]);
 
   // 代理弹窗
   const [proxyFor, setProxyFor] = useState<string | null>(null);
