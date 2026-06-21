@@ -316,8 +316,10 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate, onShowIn
                     : a.status === 'banned' ? 'text-red-600 dark:text-red-400 bg-red-500/15'
                     : 'text-gray-500 bg-gray-500/15';
                   return (
-                  <div key={a.id} className={`rounded-xl border p-4 flex flex-col gap-2 transition-colors ${a.status === 'running' ? 'border-green-500 ring-2 ring-green-500/30 bg-white dark:bg-gray-900 noobclaw-running-glow' : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900'}`}>
-                    <div className="flex items-center gap-2.5 min-w-0">
+                  <div key={a.id} className={`relative rounded-xl border p-4 flex flex-col gap-2 transition-colors ${(a.status === 'running' || a.status === 'idle') ? 'border-green-500 ring-2 ring-green-500/30 bg-white dark:bg-gray-900 noobclaw-running-glow' : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900'}`}>
+                    {/* 右上角移除 ✕ */}
+                    <button onClick={() => deleteAccount(a)} title="移除该账号(彻底删除配置与 profile)" className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded-full text-gray-400 hover:text-white hover:bg-red-500/90 transition-colors text-sm leading-none">✕</button>
+                    <div className="flex items-center gap-2.5 min-w-0 pr-6">
                       {/* 头像 + 状态点角标 */}
                       <div className="relative shrink-0">
                         {a.avatar
@@ -348,7 +350,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate, onShowIn
                     <div className="flex items-center gap-2 flex-wrap pt-1">
                       {a.proxy
                         ? <button onClick={() => openProxy(a)} className="text-[11px] px-2.5 py-1 rounded-lg bg-blue-500 text-white hover:bg-blue-600">🌐 {a.proxy.geo || a.proxy.host}</button>
-                        : <button onClick={() => openProxy(a)} className={`text-[11px] px-2.5 py-1 rounded-lg text-white ${idx === 0 ? 'bg-gray-500 hover:bg-gray-600' : 'bg-amber-500 hover:bg-amber-600'}`}>{idx === 0 ? '本地IP(默认)' : 'IP 未配·点配'}</button>}
+                        : <button onClick={() => openProxy(a)} className={`text-[11px] px-2.5 py-1 rounded-lg text-white ${idx === 0 ? 'bg-gray-500 hover:bg-gray-600' : 'bg-amber-500 hover:bg-amber-600'}`}>{idx === 0 ? '配置IP(本地)' : 'IP 未配·点配'}</button>}
                       <button onClick={() => openEdit(a)} className="text-xs px-2.5 py-1 rounded-lg bg-gray-600 text-white hover:bg-gray-700">编辑</button>
                       {a.status === 'login_required'
                         ? <button onClick={() => { if (!requireKernel()) return; setNotice(`正在为「${a.displayName}」打开指纹浏览器,扫码关联后状态自动刷新`); M()?.openLogin({ accountId: a.id, kernelPath, loginUrl: LOGIN_URL[a.platform] || '' }); }} className="text-xs px-2.5 py-1 rounded-lg bg-violet-500 text-white hover:bg-violet-600">扫码关联</button>
@@ -357,7 +359,6 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate, onShowIn
                             <button onClick={() => refreshIdentity(a)} className="text-xs px-2.5 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">刷新信息</button>
                             <button onClick={() => disconnectAccount(a)} className="text-xs px-2.5 py-1 rounded-lg bg-orange-500 text-white hover:bg-orange-600">断开关联</button>
                           </>)}
-                      <button onClick={() => deleteAccount(a)} className="text-xs px-2.5 py-1 rounded-lg bg-red-500/90 text-white hover:bg-red-600 ml-auto">移除</button>
                     </div>
                   </div>
                   );

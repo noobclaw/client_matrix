@@ -23,6 +23,7 @@
 import { spawn, type ChildProcess } from 'child_process';
 import WebSocket from 'ws';
 import fs from 'fs';
+import path from 'path';
 import { coworkLog } from '../coworkLogger';
 import { installedKernelPath } from './kernelInstaller';
 import type { Fingerprint, Proxy } from './types';
@@ -72,6 +73,18 @@ function badgeScript(label: string): string {
 // 内核缺失的统一错误标记:UI 据此弹「去下载内核」引导,不再回退系统 Chrome。
 export const NO_KERNEL_ERROR = 'NO_KERNEL';
 
+/**
+ * 清理上次实例残留的单例锁。
+ * 同一 user-data-dir 第二次启动时,Chromium 见到陈旧的 SingletonLock/lockfile 会把命令
+ * 转交「上一个实例」后【自身立即退出】→ 调试端口永不打开 → 上层表现为「浏览器意外退出 /
+ * read ECONNRESET」。只在【没有存活 session】时清(有存活 session 走复用,绝不清)。
+ */
+function clearSingletonLocks(dir: string): void {
+  for (const name of ['SingletonLock', 'SingletonCookie', 'SingletonSocket', 'lockfile']) {
+    try { fs.rmSync(path.join(dir, name), { force: true }); } catch { /* ignore */ }
+  }
+}
+
 // ── 启动参数:指纹 + 代理 + 防泄漏 ──
 
 function buildKernelArgs(opts: LaunchKernelOptions, debugPort: number): string[] {
@@ -106,7 +119,9 @@ function buildKernelArgs(opts: LaunchKernelOptions, debugPort: number): string[]
 
 export async function launchKernel(opts: LaunchKernelOptions): Promise<KernelSession> {
   const existing = sessions.get(opts.accountId);
-  if (existing && existing.process && !existing.process.killed) {
+  // 复用前确认进程【真活着】:崩溃的子进程 .killed 仍是 false(那只代表我们没主动 kill),
+  // 必须再查 exitCode===null,否则会复用到已死进程 → 后续 CDP 全部 ECONNRESET。
+  if (existing && existing.process && !existing.process.killed && existing.process.exitCode === null) {
     return existing;
   }
   const inflight = launching.get(opts.accountId);
@@ -130,11 +145,20 @@ async function doLaunch(opts: LaunchKernelOptions): Promise<KernelSession> {
   if (!fs.existsSync(opts.userDataDir)) fs.mkdirSync(opts.userDataDir, { recursive: true });
 
   const prev = sessions.get(opts.accountId);
+  // 没有存活实例才清单例锁(有存活的会走上面 launchKernel 的复用分支,不会到这);
+  // 防「二次启动撞上陈旧锁 → 内核秒退 → ECONNRESET」。
+  if (!prev || !prev.process || prev.process.killed) clearSingletonLocks(opts.userDataDir);
   const debugPort = prev?.debugPort ?? nextDebugPort++;
   const args = buildKernelArgs(opts, debugPort);
 
+  // 把内核 stdout/stderr 落到 profile 下的 kernel.log:崩了能看到真实原因(原来 stdio:'ignore' 完全瞎)。
+  let outFd: number | 'ignore' = 'ignore';
+  const logPath = path.join(opts.userDataDir, 'kernel.log');
+  try { outFd = fs.openSync(logPath, 'a'); } catch { outFd = 'ignore'; }
+
   coworkLog('INFO', 'kernelPool', `launch kernel ${opts.accountId}`, { debugPort, seed: opts.fingerprint.seed });
-  const proc = spawn(kernelPath, args, { detached: false, stdio: 'ignore' });
+  const proc = spawn(kernelPath, args, { detached: false, stdio: ['ignore', outFd, outFd] });
+  if (typeof outFd === 'number') { try { fs.closeSync(outFd); } catch { /* 子进程已持有 fd */ } }
   proc.on('error', (err) => coworkLog('ERROR', 'kernelPool', `kernel ${opts.accountId} error: ${err.message}`));
 
   let ready = false;
@@ -147,7 +171,8 @@ async function doLaunch(opts: LaunchKernelOptions): Promise<KernelSession> {
   }
   if (!ready) {
     try { proc.kill(); } catch { /* ignore */ }
-    throw new Error(`kernel ${opts.accountId} failed to open debug port ${debugPort}`);
+    // 端口没起来 = 内核启动后秒退(单例锁/参数/损坏)。把日志路径带出去便于排查。
+    throw new Error(`指纹浏览器启动失败(调试端口 ${debugPort} 未就绪),日志: ${logPath}`);
   }
 
   const session: KernelSession = {
