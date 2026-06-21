@@ -13,7 +13,7 @@ interface MatrixAccount {
   displayName: string;
   group?: string;
   status: AccountStatus;
-  proxy?: { host: string; port: number; geo?: string; health?: string };
+  proxy?: { protocol?: string; host: string; port: number; username?: string; password?: string; geo?: string; health?: string };
   keywords?: string[];
   kernelVersion?: string;
 }
@@ -80,6 +80,10 @@ const MatrixView: React.FC<Props> = () => {
   const [newName, setNewName] = useState('');
   const [newKeywords, setNewKeywords] = useState('');
   const [notice, setNotice] = useState('');
+
+  // 代理(出口 IP)配置弹窗 —— 每号绑一个独立 IP(多开抖音必须,否则同 IP 被风控)
+  const [proxyFor, setProxyFor] = useState<string | null>(null);
+  const [proxyForm, setProxyForm] = useState({ protocol: 'socks5', host: '', port: '', username: '', password: '', geo: '' });
 
   // 指纹内核(单版本,按需下载/更新)
   const [kernel, setKernel] = useState<{ installed?: boolean; installedVersion?: string; configuredVersion?: string; needsUpdate?: boolean }>({});
@@ -163,6 +167,34 @@ const MatrixView: React.FC<Props> = () => {
     const r = await M()?.checkLogin?.({ accountId: a.id, platform: a.platform });
     if (r?.loggedIn) { setNotice(`${a.displayName} 已登录 ✓`); await reload(); }
     else setNotice(`${a.displayName} 还没检测到登录——请确认扫码完成、且该号的浏览器窗口停在平台页面`);
+  };
+
+  const openProxy = (a: MatrixAccount) => {
+    setProxyForm({
+      protocol: a.proxy?.protocol || 'socks5',
+      host: a.proxy?.host || '',
+      port: a.proxy?.port ? String(a.proxy.port) : '',
+      username: a.proxy?.username || '',
+      password: a.proxy?.password || '',
+      geo: a.proxy?.geo || '',
+    });
+    setProxyFor(a.id);
+  };
+  const saveProxy = async () => {
+    const host = proxyForm.host.trim();
+    const port = Number(proxyForm.port);
+    if (!host || !Number.isInteger(port) || port <= 0) { setNotice('请填写正确的代理 host 和 port'); return; }
+    await M()?.setAccountProxy({
+      id: proxyFor,
+      proxy: {
+        protocol: proxyForm.protocol,
+        host, port,
+        username: proxyForm.username.trim() || undefined,
+        password: proxyForm.password.trim() || undefined,
+        geo: proxyForm.geo.trim() || undefined,
+      },
+    });
+    setProxyFor(null); await reload(); setNotice('已绑定代理 IP(该号此后固定走这个出口)');
   };
 
   const confirmAdd = async (thenLogin: boolean) => {
@@ -281,9 +313,9 @@ const MatrixView: React.FC<Props> = () => {
                         : <span className="text-amber-500">未配赛道关键词(互动需要)</span>}
                     </div>
                   </div>
-                  <span className="text-xs px-2 py-0.5 rounded bg-black/5 dark:bg-white/10">
-                    {a.proxy ? `IP ${a.proxy.geo || a.proxy.host}` : 'IP 未配'}
-                  </span>
+                  <button onClick={() => openProxy(a)} className={`text-xs px-2 py-0.5 rounded border ${a.proxy ? 'bg-black/5 dark:bg-white/10 dark:border-white/15 border-black/15' : 'text-amber-500 border-amber-500/40'}`}>
+                    {a.proxy ? `IP ${a.proxy.geo || a.proxy.host}` : 'IP 未配·点配'}
+                  </button>
                   <span className="text-xs px-2 py-0.5 rounded bg-black/5 dark:bg-white/10">{STATUS_LABEL[a.status]}</span>
                   <button onClick={() => openEditKeywords(a)} className="text-xs px-2 py-1 rounded border dark:border-white/15 border-black/15">改词</button>
                   {a.status === 'login_required' && (<>
@@ -482,6 +514,33 @@ const MatrixView: React.FC<Props> = () => {
                   {kernelBusy ? '下载中…' : (kernelPct > 0 ? '重试下载' : '开始下载')}
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      {proxyFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-[26rem] rounded-xl p-5 dark:bg-claude-darkBg bg-white border dark:border-white/10 border-black/10">
+            <div className="text-sm font-medium mb-1">绑定代理 IP</div>
+            <div className="text-xs opacity-60 mb-3">多开同平台必须每号一个独立 IP,否则同 IP 会被风控(扫码登录第二个号常因此失败)。绑定后该号固定走此出口。</div>
+            <div className="flex gap-2 mb-2">
+              <select value={proxyForm.protocol} onChange={(e) => setProxyForm((f) => ({ ...f, protocol: e.target.value }))} className="text-sm px-2 py-2 rounded border dark:border-white/15 border-black/15 bg-transparent">
+                <option value="socks5">socks5</option>
+                <option value="socks5h">socks5h</option>
+                <option value="http">http</option>
+                <option value="https">https</option>
+              </select>
+              <input value={proxyForm.host} onChange={(e) => setProxyForm((f) => ({ ...f, host: e.target.value }))} placeholder="host(如 1.2.3.4)" className="flex-1 text-sm px-3 py-2 rounded border dark:border-white/15 border-black/15 bg-transparent" />
+              <input value={proxyForm.port} onChange={(e) => setProxyForm((f) => ({ ...f, port: e.target.value.replace(/[^0-9]/g, '') }))} placeholder="port" className="w-20 text-sm px-2 py-2 rounded border dark:border-white/15 border-black/15 bg-transparent" />
+            </div>
+            <div className="flex gap-2 mb-2">
+              <input value={proxyForm.username} onChange={(e) => setProxyForm((f) => ({ ...f, username: e.target.value }))} placeholder="用户名(可选)" className="flex-1 text-sm px-3 py-2 rounded border dark:border-white/15 border-black/15 bg-transparent" />
+              <input value={proxyForm.password} onChange={(e) => setProxyForm((f) => ({ ...f, password: e.target.value }))} placeholder="密码(可选)" className="flex-1 text-sm px-3 py-2 rounded border dark:border-white/15 border-black/15 bg-transparent" />
+            </div>
+            <input value={proxyForm.geo} onChange={(e) => setProxyForm((f) => ({ ...f, geo: e.target.value }))} placeholder="归属地标注(可选,如 上海;仅显示用)" className="w-full text-sm px-3 py-2 rounded border dark:border-white/15 border-black/15 bg-transparent mb-3" />
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setProxyFor(null)} className="px-3 py-1.5 text-sm rounded-lg border dark:border-white/15 border-black/15">取消</button>
+              <button onClick={saveProxy} className="px-3 py-1.5 text-sm rounded-lg bg-claude-accent text-white">保存</button>
             </div>
           </div>
         </div>
