@@ -91,6 +91,9 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate, onShowIn
     return () => clearTimeout(t);
   }, [notice, showAdd]);
 
+  // 应用内确认弹窗(替代被 ACL 拦的 window.confirm)
+  const [confirmDlg, setConfirmDlg] = useState<{ title: string; body: string; okText?: string; danger?: boolean; onYes: () => void } | null>(null);
+
   // 代理弹窗
   const [proxyFor, setProxyFor] = useState<string | null>(null);
   const [proxyForm, setProxyForm] = useState({ protocol: 'socks5', host: '', port: '', username: '', password: '', geo: '' });
@@ -172,19 +175,35 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate, onShowIn
     else setNotice('读取失败:' + (r?.error || '未知'));
   };
   // 断开关联:清登录 cookie + 身份,但保留赛道/关键词/人设/代理/指纹配置,可随时重新扫码关联。
-  const disconnectAccount = async (a: MatrixAccount) => {
-    if (!window.confirm(`断开「${a.nickname || a.displayName}」的关联?\n会登出该账号(清 cookie),但保留赛道/关键词/代理等配置,可随时重新扫码关联。`)) return;
-    setNotice(`正在断开「${a.displayName}」…`);
-    const r = await M()?.disconnectAccount?.({ accountId: a.id, kernelPath });
-    if (r?.ok) { await reload(); setNotice(`已断开「${a.displayName}」,需重新扫码关联`); }
-    else setNotice('断开失败:' + (r?.error || '未知'));
+  // 用应用内确认弹窗(不能用 window.confirm —— Tauri dialog 插件被 ACL 拦)。
+  const disconnectAccount = (a: MatrixAccount) => {
+    setConfirmDlg({
+      title: '断开关联',
+      body: `断开「${a.nickname || a.displayName}」的关联?会登出该账号(清 cookie),但保留赛道 / 关键词 / 代理等配置,可随时重新扫码关联。`,
+      okText: '断开关联',
+      onYes: async () => {
+        setConfirmDlg(null);
+        setNotice(`正在断开「${a.displayName}」…`);
+        const r = await M()?.disconnectAccount?.({ accountId: a.id, kernelPath });
+        if (r?.ok) { await reload(); setNotice(`已断开「${a.displayName}」,需重新扫码关联`); }
+        else setNotice('断开失败:' + (r?.error || '未知'));
+      },
+    });
   };
   // 移除:彻底移除账号配置 + profile,不可恢复。
-  const deleteAccount = async (a: MatrixAccount) => {
-    if (!window.confirm(`彻底移除「${a.nickname || a.displayName}」?\n账号配置和指纹 profile 都会移除,不可恢复。`)) return;
-    await M()?.removeAccount?.({ id: a.id });
-    await reload();
-    setNotice(`已移除「${a.displayName}」`);
+  const deleteAccount = (a: MatrixAccount) => {
+    setConfirmDlg({
+      title: '移除账号',
+      danger: true,
+      body: `彻底移除「${a.nickname || a.displayName}」?账号配置和指纹 profile 都会移除,不可恢复。`,
+      okText: '移除',
+      onYes: async () => {
+        setConfirmDlg(null);
+        await M()?.removeAccount?.({ id: a.id });
+        await reload();
+        setNotice(`已移除「${a.displayName}」`);
+      },
+    });
   };
   const openProxy = (a: MatrixAccount) => { setProxyForm({ protocol: a.proxy?.protocol || 'socks5', host: a.proxy?.host || '', port: a.proxy?.port ? String(a.proxy.port) : '', username: a.proxy?.username || '', password: a.proxy?.password || '', geo: a.proxy?.geo || '' }); setProxyFor(a.id); };
   const saveProxy = async () => {
@@ -566,6 +585,20 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate, onShowIn
           </div>
         )}
       </div>
+
+      {/* 应用内确认弹窗(断开 / 移除)—— 不用 window.confirm(Tauri ACL 拦) */}
+      {confirmDlg && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={() => setConfirmDlg(null)}>
+          <div className="w-[26rem] max-w-full rounded-2xl p-6 dark:bg-claude-darkBg bg-white border dark:border-white/10 border-black/10 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="text-base font-semibold mb-2 dark:text-white">{confirmDlg.title}</div>
+            <div className="text-sm text-gray-600 dark:text-gray-300 mb-5 leading-relaxed">{confirmDlg.body}</div>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setConfirmDlg(null)} className="px-3.5 py-1.5 text-sm rounded-lg border dark:border-white/15 border-black/15">取消</button>
+              <button onClick={() => confirmDlg.onYes()} className={`px-3.5 py-1.5 text-sm rounded-lg text-white ${confirmDlg.danger ? 'bg-red-500 hover:bg-red-600' : 'bg-orange-500 hover:bg-orange-600'}`}>{confirmDlg.okText || '确定'}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 添加/编辑账号 */}
       {showAdd && (
