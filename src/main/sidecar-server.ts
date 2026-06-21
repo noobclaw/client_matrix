@@ -196,21 +196,26 @@ function broadcastSSE(event: string, data: unknown): void {
 // 矩阵任务运行(手动 IPC 与定时调度共用,保证「全局同时只跑一个」+ 进度 SSE 一致)。
 async function runMatrixTaskById(taskId: string, kernelPath?: string): Promise<{ ok: boolean; error?: string }> {
   if (matrixRunning) return { ok: false, error: 'another_task_running' };
-  const { getTask, setTaskLastRun } = await import('./libs/matrix/taskStore');
-  const { runEngageTask } = await import('./libs/matrix/engageRunner');
-  const task = getTask(taskId);
-  if (!task) return { ok: false, error: 'task_not_found' };
-  if (task.type !== 'engage') return { ok: false, error: 'unsupported_task_type' };
-  matrixRunning = true;
-  broadcastSSE('matrix:progress', { type: 'taskStart', taskId: task.id });
-  runEngageTask({
-    platform: task.platform, accountIds: task.accountIds || [], quota: task.quota, concurrency: task.concurrency, kernelPath,
-    onLog: (accountId, msg) => broadcastSSE('matrix:progress', { type: 'log', accountId, msg }),
-    onItem: (item) => broadcastSSE('matrix:progress', { type: 'item', accountId: item.accountId, state: item.state, reason: item.reason, counts: item.counts }),
-  }).then((report) => { setTaskLastRun(task.id, Date.now()); broadcastSSE('matrix:progress', { type: 'done', report, taskId: task.id }); })
-    .catch((e: any) => broadcastSSE('matrix:progress', { type: 'error', error: e?.message || String(e) }))
-    .finally(() => { matrixRunning = false; });
-  return { ok: true };
+  matrixRunning = true; // 同步占锁:必须在任何 await 之前,杜绝 手动+定时 同时进来的 TOCTOU 双跑
+  try {
+    const { getTask, setTaskLastRun } = await import('./libs/matrix/taskStore');
+    const { runEngageTask } = await import('./libs/matrix/engageRunner');
+    const task = getTask(taskId);
+    if (!task) { matrixRunning = false; return { ok: false, error: 'task_not_found' }; }
+    if (task.type !== 'engage') { matrixRunning = false; return { ok: false, error: 'unsupported_task_type' }; }
+    broadcastSSE('matrix:progress', { type: 'taskStart', taskId: task.id });
+    runEngageTask({
+      platform: task.platform, accountIds: task.accountIds || [], quota: task.quota, concurrency: task.concurrency, kernelPath,
+      onLog: (accountId, msg) => broadcastSSE('matrix:progress', { type: 'log', accountId, msg }),
+      onItem: (item) => broadcastSSE('matrix:progress', { type: 'item', accountId: item.accountId, state: item.state, reason: item.reason, counts: item.counts }),
+    }).then((report) => { setTaskLastRun(task.id, Date.now()); broadcastSSE('matrix:progress', { type: 'done', report, taskId: task.id }); })
+      .catch((e: any) => broadcastSSE('matrix:progress', { type: 'error', error: e?.message || String(e) }))
+      .finally(() => { matrixRunning = false; });
+    return { ok: true };
+  } catch (e: any) {
+    matrixRunning = false;
+    return { ok: false, error: e?.message || String(e) };
+  }
 }
 
 // 矩阵定时调度:跑在 sidecar(app 开着即在,切到别的页面也不停),对齐老客户端 60s tick。
@@ -1257,9 +1262,9 @@ const server = http.createServer(async (req, res) => {
             // 多号自动互动(点赞/评论/关注)即时跑。全局同时只跑一个任务。
             try {
               if (matrixRunning) return writeJSON(res, 200, { ok: false, error: 'another_task_running' });
+              matrixRunning = true; // 同步占锁(在 await 前),防与定时调度 TOCTOU 双跑
               const { runEngageTask } = await import('./libs/matrix/engageRunner');
               const a = args[0] as any;
-              matrixRunning = true;
               broadcastSSE('matrix:progress', { type: 'taskStart' });
               runEngageTask({
                 platform: a?.platform || 'douyin',
