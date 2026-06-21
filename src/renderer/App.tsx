@@ -1098,7 +1098,7 @@ const App: React.FC = () => {
                 updateBadge={isSidebarCollapsed ? updateBadge : null}
               />
             ) : (mainView === 'matrix') ? (
-              // 「我的矩阵号」= 账号管理(增删/登录/配赛道关键词人设),仍走 MatrixView。
+              // 「我的矩阵账号」= 账号管理(增删/登录/配赛道关键词人设),仍走 MatrixView。
               <MatrixView
                 screen={'accounts'}
                 onNavigate={(s: string) => setMainView(s === 'newTask' ? 'matrixTaskNew' : s === 'tasks' ? 'matrixTasks' : s === 'runs' ? 'matrixRuns' : 'matrix')}

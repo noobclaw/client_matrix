@@ -643,7 +643,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
             <div className="text-xl font-bold dark:text-white mb-1">🎯 {platLabel} · 互动涨粉</div>
             <div className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed mb-4">
               勾选多个已登录账号,每个账号在各自指纹浏览器里按<strong>自己的赛道关键词</strong>搜索,自动点赞 / 关注 / 评论。
-              赛道 / 关键词 / 人设在「我的矩阵号」里给每个号设;选几个号就同时开几个窗。
+              赛道 / 关键词 / 人设在「我的矩阵账号」里给每个号设;选几个号就同时开几个窗。
             </div>
             <button
               type="button"

@@ -106,7 +106,7 @@ const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, accounts, initialTas
                 选账号<span className="text-xs text-gray-400 font-normal ml-1">· 已登录且配了关键词;已选 {selected.size}</span>
               </label>
               <div className="space-y-1.5 max-h-64 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 p-2">
-                {accounts.length === 0 && <div className="text-xs text-gray-400 p-2">该平台还没有账号。先去「我的矩阵号」添加并扫码登录、配关键词。</div>}
+                {accounts.length === 0 && <div className="text-xs text-gray-400 p-2">该平台还没有账号。先去「我的矩阵账号」添加并扫码登录、配关键词。</div>}
                 {accounts.map((a) => {
                   const hasKw = !!(a.keywords && a.keywords.length);
                   // 放宽:配了词且没被封即可勾(profile cookie 持久,登录态只是标记;真没登录时跑会自动跳过)
@@ -137,7 +137,7 @@ const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, accounts, initialTas
               <div className="font-semibold">⚠️ 安全提示</div>
               <ul className="list-disc list-inside space-y-0.5">
                 <li>关注默认 0-2 — 平台对自动关注检测最严,长期跑建议保守</li>
-                <li>多开账号务必每号配独立 IP(在「我的矩阵号」里设),否则同 IP 易被风控</li>
+                <li>多开账号务必每号配独立 IP(在「我的矩阵账号」里设),否则同 IP 易被风控</li>
               </ul>
             </div>
           </>

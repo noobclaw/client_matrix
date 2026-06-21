@@ -430,7 +430,7 @@ class ScenarioService {
   // ── XHS login gate ──
 
   async checkXhsLogin(platform: 'xhs' | 'x' | 'binance' | 'tiktok' | 'youtube' | 'douyin' | 'kuaishou' | 'bilibili' | 'shipinhao' | 'toutiao' = 'xhs'): Promise<XhsLoginStatus> {
-    // 矩阵号:登录是【每个账号在各自指纹内核里】扫码完成的(在「我的矩阵号」里),
+    // 矩阵号:登录是【每个账号在各自指纹内核里】扫码完成的(在「我的矩阵账号」里),
     // 不存在「一个浏览器登录态」这回事 → 运行前登录门禁恒通过(没登录的号跑时自动跳过)。
     if (MATRIX_EDITION) return { loggedIn: true };
     try {

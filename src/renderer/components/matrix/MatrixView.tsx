@@ -3,7 +3,7 @@ import MatrixTaskWizard from './MatrixTaskWizard';
 
 /**
  * 矩阵号主界面 —— 由左侧分组菜单驱动的 4 屏(screen prop):
- *   accounts 我的矩阵号 / newTask 新建矩阵涨粉任务 / tasks 我的矩阵涨粉任务(含详情) / runs 运行记录
+ *   accounts 我的矩阵账号 / newTask 新建矩阵涨粉任务 / tasks 我的矩阵涨粉任务(含详情) / runs 运行记录
  * 全走 window.electron.matrix.*(sidecar IPC);进度走 matrix:progress SSE。
  * 设计参照老客户端 scenario(账号池→任务→调度→详情→运行记录),矩阵自成运行时(指纹内核池)。
  */
@@ -25,12 +25,14 @@ interface ItemResult { accountId: string; state: 'success' | 'failed' | 'skipped
 
 function parseKeywords(s: string): string[] { return s.split(/[\s,，、\n]+/).map((x) => x.trim()).filter(Boolean); }
 
-const PLATFORMS = ['douyin', 'xhs', 'bilibili', 'shipinhao', 'kuaishou', 'toutiao', 'tiktok', 'x'];
-const PLATFORM_LABEL: Record<string, string> = { douyin: '抖音', xhs: '小红书', bilibili: 'B站', shipinhao: '视频号', kuaishou: '快手', toutiao: '头条', tiktok: 'TikTok', x: 'X' };
+// 对齐支持「互动涨粉」的平台(与新建页一致)。
+const PLATFORMS = ['douyin', 'kuaishou', 'bilibili', 'xhs', 'x', 'binance', 'youtube', 'tiktok'];
+const PLATFORM_LABEL: Record<string, string> = { douyin: '抖音', xhs: '小红书', bilibili: 'B站', kuaishou: '快手', tiktok: 'TikTok', x: 'X', binance: '币安广场', youtube: 'YouTube', shipinhao: '视频号', toutiao: '头条' };
 const LOGIN_URL: Record<string, string> = {
   douyin: 'https://www.douyin.com/', xhs: 'https://www.xiaohongshu.com/', bilibili: 'https://passport.bilibili.com/login',
-  shipinhao: 'https://channels.weixin.qq.com/', kuaishou: 'https://www.kuaishou.com/', toutiao: 'https://mp.toutiao.com/',
-  tiktok: 'https://www.tiktok.com/login', x: 'https://x.com/login',
+  kuaishou: 'https://www.kuaishou.com/', tiktok: 'https://www.tiktok.com/login', x: 'https://x.com/login',
+  binance: 'https://www.binance.com/zh-CN/square', youtube: 'https://www.youtube.com/',
+  shipinhao: 'https://channels.weixin.qq.com/', toutiao: 'https://mp.toutiao.com/',
 };
 const STATUS_DOT: Record<AccountStatus, string> = { idle: 'bg-green-500', running: 'bg-blue-500', login_required: 'bg-amber-500', limited: 'bg-gray-400', banned: 'bg-red-500' };
 const STATUS_LABEL: Record<AccountStatus, string> = { idle: '已就绪', running: '运行中', login_required: '需登录', limited: '限流冷却', banned: '已封' };
@@ -192,7 +194,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate }) => {
   };
 
   const selectedTask = tasks.find((t) => t.id === selectedTaskId) || null;
-  const SCREEN_TITLE: Record<string, string> = { accounts: '我的矩阵号', newTask: '新建矩阵涨粉任务', tasks: '我的矩阵涨粉任务', runs: '矩阵涨粉运行记录' };
+  const SCREEN_TITLE: Record<string, string> = { accounts: '我的矩阵账号', newTask: '新建矩阵涨粉任务', tasks: '我的矩阵涨粉任务', runs: '矩阵涨粉运行记录' };
 
   return (
     <div className="h-full flex flex-col dark:text-claude-darkText text-claude-text">
@@ -215,17 +217,18 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate }) => {
       )}
 
       <div className="flex-1 overflow-auto p-5">
-        {/* 我的矩阵号 —— 账号池(卡片样式对齐老客户端) */}
+        {/* 我的矩阵账号 —— 账号池(卡片样式对齐老客户端) */}
         {screen === 'accounts' && (
           <div className="max-w-6xl mx-auto">
-            <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
-              <h2 className="text-lg font-bold dark:text-white">🧬 我的矩阵号</h2>
-              <div className="flex items-center gap-2">
-                <select value={platform} onChange={(e) => setPlatform(e.target.value)} className="text-sm px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 dark:text-white">
-                  {PLATFORMS.map((p) => <option key={p} value={p}>{PLATFORM_LABEL[p]}</option>)}
-                </select>
-                <button onClick={openAdd} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-white text-sm font-semibold bg-violet-500 hover:bg-violet-600 shadow-sm shadow-violet-500/25 active:scale-95 transition-all">+ 添加账号</button>
-              </div>
+            <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
+              <h2 className="text-lg font-bold dark:text-white">🧬 我的矩阵账号</h2>
+              <button onClick={openAdd} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-white text-sm font-semibold bg-violet-500 hover:bg-violet-600 shadow-sm shadow-violet-500/25 active:scale-95 transition-all">+ 添加{PLATFORM_LABEL[platform]}账号</button>
+            </div>
+            {/* 平台 tab 切换(跟新建页一致),按平台分别管理账号 */}
+            <div className="flex flex-wrap gap-2 mb-4">
+              {PLATFORMS.map((p) => (
+                <button key={p} onClick={() => setPlatform(p)} className={`px-3.5 py-1.5 rounded-full text-sm border transition-colors ${platform === p ? 'border-violet-500 bg-violet-500/10 text-violet-500 font-medium' : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-violet-500/50'}`}>{PLATFORM_LABEL[p]}</button>
+              ))}
             </div>
             {platformAccounts.length === 0 ? (
               <div className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 p-10 text-center">
@@ -274,7 +277,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate }) => {
                     <div className="relative flex flex-col flex-1">
                       <div className="inline-flex items-center gap-1.5 text-xs font-medium text-violet-500 mb-2"><span className="inline-block w-1.5 h-1.5 rounded-full bg-violet-500 animate-pulse" />互动涨粉</div>
                       <h3 className="text-base font-bold dark:text-white mb-1.5">🎶 抖音 · 互动涨粉(矩阵)</h3>
-                      <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed mb-3 flex-1">同时控制多个账号,每个号在自己的指纹浏览器里、按【自己的赛道关键词】搜抖音视频,按你配的随机区间做点赞 / 关注 / 评论。评论由 AI 按视频文案 + 该号人设自动生成,行为间隔随机模拟真人。赛道/关键词/人设在「我的矩阵号」给每个号设。</p>
+                      <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed mb-3 flex-1">同时控制多个账号,每个号在自己的指纹浏览器里、按【自己的赛道关键词】搜抖音视频,按你配的随机区间做点赞 / 关注 / 评论。评论由 AI 按视频文案 + 该号人设自动生成,行为间隔随机模拟真人。赛道/关键词/人设在「我的矩阵账号」给每个号设。</p>
                       <button onClick={() => { if (!requireKernel()) return; setShowNewWizard(true); }} className="w-full py-2.5 rounded-lg text-sm font-semibold text-white bg-violet-500 hover:bg-violet-600 shadow-lg shadow-violet-500/25">🎶 开始互动 →</button>
                     </div>
                   </div>
