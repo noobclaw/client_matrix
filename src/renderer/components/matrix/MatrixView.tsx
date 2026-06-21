@@ -113,7 +113,6 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate }) => {
 
   const platformAccounts = accounts.filter((a) => a.platform === platform);
   const platformTasks = tasks.filter((t) => t.platform === platform);
-  const eligibleAccounts = platformAccounts.filter((a) => (a.status === 'idle' || a.status === 'limited') && a.keywords && a.keywords.length);
   const kernelReady = !!kernel.installed || !!kernelPath.trim();
   const requireKernel = (): boolean => { if (kernelReady) return true; setShowKernelModal(true); return false; };
 
@@ -261,7 +260,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate }) => {
             {renderPlatformPicker()}
             <MatrixTaskWizard
               platformLabel={PLATFORM_LABEL[platform]}
-              accounts={eligibleAccounts as any}
+              accounts={platformAccounts as any}
               initialTask={null}
               onCancel={() => onNavigate?.('tasks')}
               onSave={saveTaskFromWizard}
@@ -425,7 +424,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate }) => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-auto">
           <MatrixTaskWizard
             platformLabel={PLATFORM_LABEL[platform]}
-            accounts={eligibleAccounts as any}
+            accounts={platformAccounts as any}
             initialTask={tasks.find((t) => t.id === taskEditId) || null}
             onCancel={() => { setShowTaskEditModal(false); setTaskEditId(null); }}
             onSave={saveTaskFromWizard}

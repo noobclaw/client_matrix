@@ -110,15 +110,22 @@ const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, accounts, initialTas
                 ✨ 矩阵号 = 同时控制这些账号各自的指纹浏览器,按<strong>每个账号自己的赛道关键词</strong>去互动。赛道/关键词/人设在「我的矩阵号」里给每个号设。
               </div>
               <div className="space-y-1.5 max-h-64 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 p-2">
-                {accounts.length === 0 && <div className="text-xs text-gray-400 p-2">没有可用账号——需「已就绪」且配了关键词。先去「我的矩阵号」登录/配词。</div>}
-                {accounts.map((a) => (
-                  <label key={a.id} className="flex items-center gap-2 text-sm dark:text-gray-200 cursor-pointer px-1.5 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800">
-                    <input type="checkbox" checked={selected.has(a.id)} onChange={() => toggle(a.id)} className="h-4 w-4 accent-violet-500" disabled={saving} />
-                    <span className="font-medium">{a.displayName}</span>
-                    {a.group && <span className="text-xs text-gray-400">· {a.group}</span>}
-                    <span className="text-xs text-gray-400 truncate">[{(a.keywords || []).join('/')}]</span>
-                  </label>
-                ))}
+                {accounts.length === 0 && <div className="text-xs text-gray-400 p-2">该平台还没有账号。先去「我的矩阵号」添加并扫码登录、配关键词。</div>}
+                {accounts.map((a) => {
+                  const hasKw = !!(a.keywords && a.keywords.length);
+                  // 放宽:配了词且没被封即可勾(profile cookie 持久,登录态只是标记;真没登录时跑会自动跳过)
+                  const ready = hasKw && a.status !== 'banned';
+                  const reason = a.status === 'banned' ? '已封' : !hasKw ? '未配关键词' : (a.status === 'login_required' ? '可能需登录' : '');
+                  return (
+                    <label key={a.id} className={`flex items-center gap-2 text-sm px-1.5 py-1 rounded ${ready ? 'dark:text-gray-200 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800' : 'opacity-50 cursor-not-allowed'}`}>
+                      <input type="checkbox" checked={selected.has(a.id)} onChange={() => ready && toggle(a.id)} disabled={saving || !ready} className="h-4 w-4 accent-violet-500" />
+                      <span className="font-medium">{a.displayName}</span>
+                      {a.group && <span className="text-xs text-gray-400">· {a.group}</span>}
+                      {hasKw ? <span className="text-xs text-gray-400 truncate">[{(a.keywords || []).join('/')}]</span> : null}
+                      {reason && <span className="ml-auto text-[11px] text-amber-500 shrink-0">{reason}</span>}
+                    </label>
+                  );
+                })}
               </div>
             </div>
           </>
