@@ -333,7 +333,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate, onShowIn
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {platformAccounts.map((a, idx) => {
+                {platformAccounts.map((a) => {
                   // 状态小标签(挪到名字后边,表示状态;不放右侧按钮区)。
                   const stChip = a.status === 'idle' ? 'text-green-600 dark:text-green-400 bg-green-500/15'
                     : a.status === 'login_required' ? 'text-amber-600 dark:text-amber-400 bg-amber-500/15'
@@ -377,10 +377,8 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate, onShowIn
                     </div>
                     {/* 右侧可点击按钮:全色按钮 */}
                     <div className="flex items-center gap-2 flex-wrap pt-1">
-                      {a.proxy
-                        ? <button onClick={() => openProxy(a)} className="text-[11px] px-2.5 py-1 rounded-lg bg-blue-500 text-white hover:bg-blue-600">🌐 {a.proxy.geo || a.proxy.host}</button>
-                        : <button onClick={() => openProxy(a)} className={`text-[11px] px-2.5 py-1 rounded-lg text-white ${idx === 0 ? 'bg-gray-500 hover:bg-gray-600' : 'bg-amber-500 hover:bg-amber-600'}`}>{idx === 0 ? '配置IP(本地)' : 'IP 未配·点配'}</button>}
-                      <button onClick={() => openEdit(a)} className="text-xs px-2.5 py-1 rounded-lg bg-gray-600 text-white hover:bg-gray-700">编辑</button>
+                      <button onClick={() => openProxy(a)} className="text-xs px-2.5 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">配置IP</button>
+                      <button onClick={() => openEdit(a)} className="text-xs px-2.5 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">编辑</button>
                       {a.status === 'login_required'
                         ? <button onClick={() => { if (!requireKernel()) return; setNotice(`正在为「${a.displayName}」打开指纹浏览器,扫码关联后状态自动刷新`); M()?.openLogin({ accountId: a.id, kernelPath, loginUrl: LOGIN_URL[a.platform] || '' }); }} className="text-xs px-2.5 py-1 rounded-lg bg-violet-500 text-white hover:bg-violet-600">扫码关联</button>
                         : (<>
