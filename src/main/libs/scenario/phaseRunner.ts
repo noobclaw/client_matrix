@@ -1890,8 +1890,8 @@ function buildContext(
           fileName,
           ttlMs: opts.ttlMs || 5 * 60 * 1000,
         });
-        // sidecar 端口 — 跟 sidecar-server.ts 里的 PORT 同步,默认 18800
-        const port = parseInt(process.env.NOOBCLAW_SIDECAR_PORT || '18800', 10);
+        // sidecar 端口 — 跟 sidecar-server.ts 里的 PORT 同步,默认 18801
+        const port = parseInt(process.env.NOOBCLAW_SIDECAR_PORT || '18801', 10);
         const fileUrl = buildUrl(token, port);
         try {
           // v1.2.17 bug fix: 老代码把 getBridgeOpts() 当 timeoutMs 传(setTimeout
@@ -2696,7 +2696,7 @@ function createScopedTab(
       const fileName = opts.fileName || require('path').basename(filePath);
       const ttl = opts.ttlMs || 5 * 60 * 1000;
       const token = registerFile(filePath, { mimeType: opts.mimeType, fileName, ttlMs: ttl });
-      const port = parseInt(process.env.NOOBCLAW_SIDECAR_PORT || '18800', 10);
+      const port = parseInt(process.env.NOOBCLAW_SIDECAR_PORT || '18801', 10);
       const fileUrl = buildUrl(token, port);
       try {
         const r = await deps.sendBrowserCommand('upload_file_from_url', {

@@ -5,7 +5,7 @@
  * a website's file input. Native messaging IPC can't carry hundreds of MB
  * (single-message limit + JSON serialization). Solution: register the file
  * here, get a one-time token, build URL like:
- *   http://127.0.0.1:18800/api/local-file?token=xxx
+ *   http://127.0.0.1:18801/api/local-file?token=xxx
  * Extension `fetch()`s that URL, gets a Blob, builds a File, and assigns to
  * input.files via DataTransfer.
  *

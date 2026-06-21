@@ -2,13 +2,13 @@
  * Browser Bridge — HTTP-anchored transport for chrome / edge / firefox
  * extensions to talk to the desktop client.
  *
- * Two transports, both mounted on the sidecar HTTP server (18800):
- *   1. WebSocket  ws://127.0.0.1:18800/browser-bridge
+ * Two transports, both mounted on the sidecar HTTP server (18801):
+ *   1. WebSocket  ws://127.0.0.1:18801/browser-bridge
  *      Used by Chrome / Edge. Firefox falls through to SSE because
  *      Firefox upgrades ws://localhost → wss:// under HTTPS-Only Mode
  *      (Bug 1670581), and we can't serve wss without a trusted cert.
- *   2. SSE + POST  http://127.0.0.1:18800/browser-bridge/events  (server→ext)
- *                  http://127.0.0.1:18800/browser-bridge/send?session=<id>  (ext→server)
+ *   2. SSE + POST  http://127.0.0.1:18801/browser-bridge/events  (server→ext)
+ *                  http://127.0.0.1:18801/browser-bridge/send?session=<id>  (ext→server)
  *      Used by Firefox as primary; available as fallback for chrome/edge too.
  *      Plain `fetch` to localhost is never upgraded by Firefox HTTPS-Only
  *      Mode, so this path is always reachable.
@@ -962,7 +962,7 @@ export function attachBrowserBridge(httpServer: http.Server): void {
   attachBrowserBridgeSse(httpServer);
   startStaleConnScanner();
   bridgeAttached = true;
-  bridgePort = 18800;
+  bridgePort = 18801;
   console.log('[BrowserBridge] Attached (ws + sse + stale-scanner) on shared HTTP server');
 }
 

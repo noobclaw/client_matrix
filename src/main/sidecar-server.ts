@@ -42,7 +42,7 @@ process.on('unhandledRejection', (reason) => {
 // ── Native Messaging residual-spawn guard (v2.8) ────────────────────────
 // NM transport was removed. If a leftover registry entry from a pre-v2.8
 // install causes a browser to spawn us with `--native-messaging-host`, exit
-// cleanly so we don't double-bind 18800 with the main sidecar process. The
+// cleanly so we don't double-bind 18801 with the main sidecar process. The
 // main sidecar runs cleanupLegacyNmResidueOnce() on startup to remove the
 // stale registry / .bat residue, so this guard becomes vacuous within one
 // boot cycle of upgrading.
@@ -68,7 +68,7 @@ if (process.platform === 'darwin' && !process.env.NODE_EXTRA_CA_CERTS) {
 // Pick the first bare numeric argv token as the port. Flags like
 // --tauri-pid=12345 are skipped so argv order doesn't matter.
 const portArg = process.argv.slice(2).find((a) => /^\d+$/.test(a));
-const PORT = parseInt(portArg || '18800', 10);
+const PORT = parseInt(portArg || '18801', 10);
 
 // ── Sleep/wake wiring (macOS NSWorkspace / Windows PowerRegisterSuspendResumeNotification) ─
 // On willSleep we ask the CoworkRunner to pause every active session
@@ -200,15 +200,28 @@ async function runMatrixTaskById(taskId: string, kernelPath?: string): Promise<{
   try {
     const { getTask, setTaskLastRun } = await import('./libs/matrix/taskStore');
     const { runEngageTask } = await import('./libs/matrix/engageRunner');
+    const { addRun } = await import('./libs/matrix/runStore');
+    const { getAccount } = await import('./libs/matrix/accountManager');
     const task = getTask(taskId);
     if (!task) { matrixRunning = false; return { ok: false, error: 'task_not_found' }; }
     if (task.type !== 'engage') { matrixRunning = false; return { ok: false, error: 'unsupported_task_type' }; }
+    const startedAt = Date.now();
+    const collected = new Map<string, any>(); // 每号最后一条结果(用于运行记录)
     broadcastSSE('matrix:progress', { type: 'taskStart', taskId: task.id });
     runEngageTask({
       platform: task.platform, accountIds: task.accountIds || [], quota: task.quota, concurrency: task.concurrency, kernelPath,
       onLog: (accountId, msg) => broadcastSSE('matrix:progress', { type: 'log', accountId, msg }),
-      onItem: (item) => broadcastSSE('matrix:progress', { type: 'item', accountId: item.accountId, state: item.state, reason: item.reason, counts: item.counts }),
-    }).then((report) => { setTaskLastRun(task.id, Date.now()); broadcastSSE('matrix:progress', { type: 'done', report, taskId: task.id }); })
+      onItem: (item) => { collected.set(item.accountId, item); broadcastSSE('matrix:progress', { type: 'item', accountId: item.accountId, state: item.state, reason: item.reason, counts: item.counts }); },
+    }).then((report) => {
+      setTaskLastRun(task.id, Date.now());
+      // 存运行记录(供「矩阵涨粉运行记录」页)
+      try {
+        const items = Array.from(collected.values()).map((it: any) => ({ accountId: it.accountId, displayName: getAccount(it.accountId)?.displayName, state: it.state, reason: it.reason, counts: it.counts }));
+        const totals = items.reduce((acc, it: any) => ({ like: acc.like + (it.counts?.like || 0), follow: acc.follow + (it.counts?.follow || 0), comment: acc.comment + (it.counts?.comment || 0) }), { like: 0, follow: 0, comment: 0 });
+        addRun({ taskId: task.id, taskName: task.name, platform: task.platform, startedAt, finishedAt: Date.now(), success: report?.success ?? 0, failed: report?.failed ?? 0, skipped: report?.skipped ?? 0, totals, items });
+      } catch (e) { coworkLog('WARN', 'sidecar-server', 'addRun failed', { err: String(e) }); }
+      broadcastSSE('matrix:progress', { type: 'done', report, taskId: task.id });
+    })
       .catch((e: any) => broadcastSSE('matrix:progress', { type: 'error', error: e?.message || String(e) }))
       .finally(() => { matrixRunning = false; });
     return { ok: true };
@@ -1291,6 +1304,10 @@ const server = http.createServer(async (req, res) => {
             const { listTasks } = await import('./libs/matrix/taskStore');
             return writeJSON(res, 200, { ok: true, tasks: listTasks(), running: matrixRunning });
           }
+          case 'matrix:listRuns': {
+            const { listRuns } = await import('./libs/matrix/runStore');
+            return writeJSON(res, 200, { ok: true, runs: listRuns((args[0] as any)?.taskId) });
+          }
           case 'matrix:saveTask': {
             const { saveTask } = await import('./libs/matrix/taskStore');
             return writeJSON(res, 200, saveTask(args[0] as any));
@@ -2213,7 +2230,7 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-// ── EARLY MOUNT: browser bridge + port 18800 bind ────────────────
+// ── EARLY MOUNT: browser bridge + port 18801 bind ────────────────
 // v5.x+: bridge handlers AND the listen() call run at module-load time,
 // before any awaits. Previously these lived inside getRunner() which had
 // to await 4 dynamic imports + a SQLite open first — a 200-1000ms window
@@ -2232,7 +2249,7 @@ const server = http.createServer(async (req, res) => {
 // the runner if a request lands during the boot window. Bridge traffic
 // doesn't need the runner so it gets served immediately.
 // ── Port reclaim (v2.8.1) ───────────────────────────────────────────────
-// PORT (18800) is hard-coded and shared with the renderer's BASE_URL, so we
+// PORT (18801) is hard-coded and shared with the renderer's BASE_URL, so we
 // cannot fall back to another port. On reinstall / crash / overlapping launch
 // a stale noobclaw-server from a previous session can still hold it → bind
 // fails EADDRINUSE → (previously) the process crashed (exit 91) and the Rust
@@ -2247,7 +2264,7 @@ function killPortHolders(port: number): number[] {
   const pids = new Set<number>();
   try {
     if (process.platform === 'win32') {
-      // netstat lines: "  TCP  127.0.0.1:18800  ...  LISTENING  <pid>"
+      // netstat lines: "  TCP  127.0.0.1:18801  ...  LISTENING  <pid>"
       const out = execFileSync('netstat', ['-ano', '-p', 'tcp'], { encoding: 'utf8', windowsHide: true });
       for (const line of out.split(/\r?\n/)) {
         if (!new RegExp(`:${port}\\b`).test(line) || !/LISTENING/i.test(line)) continue;
@@ -2255,7 +2272,7 @@ function killPortHolders(port: number): number[] {
         if (m) pids.add(parseInt(m[1], 10));
       }
     } else {
-      // lsof -ti tcp:18800 -sTCP:LISTEN → newline-separated PIDs (exits 1 if none)
+      // lsof -ti tcp:18801 -sTCP:LISTEN → newline-separated PIDs (exits 1 if none)
       const out = execFileSync('lsof', ['-ti', `tcp:${port}`, '-sTCP:LISTEN'], { encoding: 'utf8' });
       for (const tok of out.split(/\s+/)) {
         const n = parseInt(tok, 10);

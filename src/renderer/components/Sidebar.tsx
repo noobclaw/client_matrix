@@ -14,7 +14,7 @@ import { MATRIX_EDITION } from '../matrixEdition';
 interface SidebarProps {
   onShowSettings: () => void;
   onShowLogin?: () => void;
-  activeView: 'cowork' | 'skills' | 'scheduledTasks' | 'mcp' | 'wallet' | 'invite' | 'quickuse' | 'scenarioCreate' | 'scenarioRuns' | 'web3news' | 'hotsearch' | 'partners' | 'personality' | 'matrix';
+  activeView: 'cowork' | 'skills' | 'scheduledTasks' | 'mcp' | 'wallet' | 'invite' | 'quickuse' | 'scenarioCreate' | 'scenarioRuns' | 'web3news' | 'hotsearch' | 'partners' | 'personality' | 'matrix' | 'matrixTaskNew' | 'matrixTasks' | 'matrixRuns';
   onShowSkills: () => void;
   onShowCowork: () => void;
   onShowScheduledTasks: () => void;
@@ -29,6 +29,9 @@ interface SidebarProps {
   onShowPersonality: () => void;
   onShowPartners: () => void;
   onShowMatrix: () => void;
+  onShowMatrixTaskNew?: () => void;
+  onShowMatrixTasks?: () => void;
+  onShowMatrixRuns?: () => void;
   onNewChat: () => void;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
@@ -52,6 +55,9 @@ const Sidebar: React.FC<SidebarProps> = ({
   onShowPersonality,
   onShowPartners,
   onShowMatrix,
+  onShowMatrixTaskNew,
+  onShowMatrixTasks,
+  onShowMatrixRuns,
   onNewChat,
   isCollapsed,
   onToggleCollapse,
@@ -234,19 +240,31 @@ const Sidebar: React.FC<SidebarProps> = ({
           )}
           </>)}
 
-          {/* 矩阵号 — 多账号同平台铺内容 */}
-          <button
-            type="button"
-            onClick={() => { setIsSearchOpen(false); onShowMatrix(); }}
-            className={`w-full inline-flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors ${
-              activeView === 'matrix'
-                ? 'bg-claude-accent/10 text-claude-accent hover:bg-claude-accent/20'
-                : 'dark:text-claude-darkTextSecondary text-claude-textSecondary hover:text-claude-text dark:hover:text-claude-darkText hover:bg-claude-surfaceHover dark:hover:bg-claude-darkSurfaceHover'
-            }`}
-          >
-            <span className="text-sm">{'🧬'}</span>
-            矩阵号
-          </button>
+          {/* 矩阵号 — 收纳分组:我的矩阵号 / 新建涨粉任务 / 我的涨粉任务 / 运行记录 */}
+          <div className="inline-flex items-center gap-2 px-2.5 pt-2 pb-1 text-xs font-semibold opacity-50">
+            <span className="text-sm">{'🧬'}</span>矩阵号
+          </div>
+          <div className="space-y-1 pl-3">
+            {([
+              ['matrix', '我的矩阵号', onShowMatrix],
+              ['matrixTaskNew', '新建矩阵涨粉任务', onShowMatrixTaskNew],
+              ['matrixTasks', '我的矩阵涨粉任务', onShowMatrixTasks],
+              ['matrixRuns', '矩阵涨粉运行记录', onShowMatrixRuns],
+            ] as const).map(([key, label, handler]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => { setIsSearchOpen(false); (handler || onShowMatrix)(); }}
+                className={`w-full inline-flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors ${
+                  activeView === key
+                    ? 'bg-claude-accent/10 text-claude-accent hover:bg-claude-accent/20'
+                    : 'dark:text-claude-darkTextSecondary text-claude-textSecondary hover:text-claude-text dark:hover:text-claude-darkText hover:bg-claude-surfaceHover dark:hover:bg-claude-darkSurfaceHover'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
 
           {!MATRIX_EDITION && (<>
           {/* 4. AI对话 — 折叠二级菜单：新建对话 / web3连接 / 行业热点 */}

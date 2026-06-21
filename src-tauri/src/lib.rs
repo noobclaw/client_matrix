@@ -539,7 +539,7 @@ impl Drop for SidecarState {
 fn spawn_sidecar_once(app: &tauri::AppHandle) -> Result<(u16, CommandChild), String> {
     use tauri_plugin_shell::ShellExt;
 
-    let port: u16 = 18800;
+    let port: u16 = 18801;
     // Tauri's real PID. Pass it explicitly so the sidecar can monitor the
     // correct process — `process.ppid` on Windows is unreliable because the
     // shell plugin may spawn us through an intermediate helper that exits
@@ -1248,7 +1248,7 @@ pub fn run() {
                     eprintln!("Sidecar start failed: {}", e);
                     app.manage(SidecarState {
                         child: Mutex::new(None),
-                        port: 18800,
+                        port: 18801,
                     });
                 }
             }

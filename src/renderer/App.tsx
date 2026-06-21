@@ -52,7 +52,7 @@ const App: React.FC = () => {
   // 启动默认落到「一键涨粉」(scenarioCreate),而不是 AI 对话(cowork)。副作用:Sidebar 的
   // 「AI对话」二级折叠组只在其子项(cowork/mcp/web3news/scheduledTasks)激活时才强制展开,
   // 默认页非该组子项 → 该组保持收起(aiChatOpen 初始 false),正好满足「AI对话菜单默认收起」。
-  const [mainView, setMainView] = useState<'cowork' | 'skills' | 'scheduledTasks' | 'mcp' | 'wallet' | 'invite' | 'quickuse' | 'scenarioCreate' | 'scenarioRuns' | 'web3news' | 'hotsearch' | 'partners' | 'personality' | 'matrix'>(MATRIX_EDITION ? 'matrix' : 'scenarioCreate');
+  const [mainView, setMainView] = useState<'cowork' | 'skills' | 'scheduledTasks' | 'mcp' | 'wallet' | 'invite' | 'quickuse' | 'scenarioCreate' | 'scenarioRuns' | 'web3news' | 'hotsearch' | 'partners' | 'personality' | 'matrix' | 'matrixTaskNew' | 'matrixTasks' | 'matrixRuns'>(MATRIX_EDITION ? 'matrix' : 'scenarioCreate');
   // v4.31.44: 主页 6 个涨粉标签可以指定打开"一键使用"时初选哪个平台
   const [quickUseInitialPlatform, setQuickUseInitialPlatform] = useState<'xhs' | 'x' | 'binance' | 'youtube' | 'tiktok' | 'douyin' | 'kuaishou' | 'bilibili' | 'shipinhao' | 'toutiao' | 'video' | undefined>(undefined);
   // ScenarioView 下钻到任务/运行记录详情时为 true:任务详情逻辑上属于「我的涨粉任务」,
@@ -918,6 +918,9 @@ const App: React.FC = () => {
   const handleShowPartners = () => setMainView('partners');
   const handleShowPersonality = () => setMainView('personality');
   const handleShowMatrix = () => setMainView('matrix');
+  const handleShowMatrixTaskNew = () => setMainView('matrixTaskNew');
+  const handleShowMatrixTasks = () => setMainView('matrixTasks');
+  const handleShowMatrixRuns = () => setMainView('matrixRuns');
 
   return (
     <div className="relative h-screen overflow-hidden flex flex-col dark:bg-claude-darkSurfaceMuted bg-claude-surfaceMuted">
@@ -968,6 +971,9 @@ const App: React.FC = () => {
           onShowPersonality={handleShowPersonality}
           onShowPartners={handleShowPartners}
           onShowMatrix={handleShowMatrix}
+          onShowMatrixTaskNew={handleShowMatrixTaskNew}
+          onShowMatrixTasks={handleShowMatrixTasks}
+          onShowMatrixRuns={handleShowMatrixRuns}
           onNewChat={handleNewChat}
           isCollapsed={isSidebarCollapsed}
           onToggleCollapse={handleToggleSidebar}
@@ -1091,8 +1097,10 @@ const App: React.FC = () => {
                 onNewChat={handleNewChat}
                 updateBadge={isSidebarCollapsed ? updateBadge : null}
               />
-            ) : mainView === 'matrix' ? (
+            ) : (mainView === 'matrix' || mainView === 'matrixTaskNew' || mainView === 'matrixTasks' || mainView === 'matrixRuns') ? (
               <MatrixView
+                screen={mainView === 'matrixTaskNew' ? 'newTask' : mainView === 'matrixTasks' ? 'tasks' : mainView === 'matrixRuns' ? 'runs' : 'accounts'}
+                onNavigate={(s: string) => setMainView(s === 'newTask' ? 'matrixTaskNew' : s === 'tasks' ? 'matrixTasks' : s === 'runs' ? 'matrixRuns' : 'matrix')}
                 isSidebarCollapsed={isSidebarCollapsed}
                 onToggleSidebar={handleToggleSidebar}
               />

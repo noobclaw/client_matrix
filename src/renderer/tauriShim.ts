@@ -6,7 +6,7 @@
  * IMPORTANT: All return formats MUST match the Electron IPC handlers in main.ts.
  */
 
-const SIDECAR_PORT = 18800;
+const SIDECAR_PORT = 18801;
 const BASE_URL = `http://127.0.0.1:${SIDECAR_PORT}`;
 
 // ── Detect runtime mode ──
@@ -507,6 +507,7 @@ export function createTauriElectronShim(): typeof window.electron {
       updateAccountMeta: (args: unknown) => ipcInvoke('matrix:updateAccountMeta', args).then((r: any) => r ?? { ok: false }),
       runEngage: (args: unknown) => ipcInvoke('matrix:runEngage', args).then((r: any) => r ?? { ok: false }),
       listTasks: () => ipcInvoke('matrix:listTasks').then((r: any) => r ?? { ok: false }),
+      listRuns: (args?: unknown) => ipcInvoke('matrix:listRuns', args).then((r: any) => r ?? { ok: false }),
       saveTask: (args: unknown) => ipcInvoke('matrix:saveTask', args).then((r: any) => r ?? { ok: false }),
       removeTask: (args: unknown) => ipcInvoke('matrix:removeTask', args).then((r: any) => r ?? { ok: false }),
       setTaskEnabled: (args: unknown) => ipcInvoke('matrix:setTaskEnabled', args).then((r: any) => r ?? { ok: false }),

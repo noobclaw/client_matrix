@@ -134,7 +134,7 @@ export async function uploadFileToInput(opts: {
     fileName,
     ttlMs: ttl,
   });
-  const port = parseInt(process.env.NOOBCLAW_SIDECAR_PORT || '18800', 10);
+  const port = parseInt(process.env.NOOBCLAW_SIDECAR_PORT || '18801', 10);
   const fileUrl = buildUrl(token, port);
   try {
     const r: any = await sendBrowserCommand(
@@ -186,7 +186,7 @@ export async function uploadVideoToInputDeep(opts: {
   const mime = opts.mimeType || 'video/mp4';
   const ttl = opts.ttlMs || 10 * 60 * 1000;
   const token = registerFile(opts.filePath, { mimeType: mime, fileName, ttlMs: ttl });
-  const port = parseInt(process.env.NOOBCLAW_SIDECAR_PORT || '18800', 10);
+  const port = parseInt(process.env.NOOBCLAW_SIDECAR_PORT || '18801', 10);
   const fileUrl = buildUrl(token, port);
   // 三层深遍历底座(同生产 shipinhao_image_text 的 nbDeepAll)。
   const DEEP = 'function nbDeepAll(sel){var out=[];function walk(root,d){if(!root||d>6)return;'
