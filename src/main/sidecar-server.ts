@@ -1331,6 +1331,38 @@ const server = http.createServer(async (req, res) => {
               return writeJSON(res, 200, { ok: false, error: e?.message || String(e) });
             }
           }
+          case 'matrix:refreshIdentity': {
+            // 「刷新信息」:对任意账号(尤其已登录但没读过身份的),拉起内核→导航平台→读 昵称/平台号/头像
+            // (cookie 在持久 profile,自然登录态)→存+广播。读完若不是原本在跑的内核则关掉,不留窗。
+            try {
+              const { getAccount, setAccountStatus, setAccountIdentity } = await import('./libs/matrix/accountManager');
+              const { launchKernel, kernelNavigate, checkKernelLogin, kernelReadIdentity, closeKernel, getSession } = await import('./libs/matrix/kernelPool');
+              const a = args[0] as any;
+              const acc = getAccount(a?.accountId);
+              if (!acc) return writeJSON(res, 200, { ok: false, error: 'account_not_found' });
+              const wasRunning = !!getSession(acc.id);
+              await launchKernel({
+                accountId: acc.id, kernelPath: a?.kernelPath, kernelVersion: acc.kernelVersion,
+                userDataDir: acc.userDataDir, fingerprint: acc.fingerprint, proxy: acc.proxy,
+                label: acc.displayName + (acc.group ? ' · ' + acc.group : ''),
+              });
+              if (a?.homeUrl) await kernelNavigate(acc.id, a.homeUrl);
+              await new Promise((r) => setTimeout(r, 3500)); // 等页面/SSR 就绪
+              const loggedIn = await checkKernelLogin(acc.id, acc.platform);
+              let ident: any = {};
+              if (loggedIn) {
+                setAccountStatus(acc.id, 'idle');
+                try { ident = await kernelReadIdentity(acc.id, acc.platform); setAccountIdentity(acc.id, { nickname: ident.nickname, displayId: ident.displayId, avatar: ident.avatar, boundUid: ident.uid }); } catch { /* ignore */ }
+              } else {
+                setAccountStatus(acc.id, 'login_required');
+              }
+              broadcastSSE('matrix:account', { id: acc.id, status: loggedIn ? 'idle' : 'login_required', nickname: ident.nickname, displayId: ident.displayId, avatar: ident.avatar, boundUid: ident.uid });
+              if (!wasRunning) { try { closeKernel(acc.id); } catch { /* ignore */ } } // 临时拉起的读完关掉
+              return writeJSON(res, 200, { ok: true, loggedIn, nickname: ident.nickname, displayId: ident.displayId });
+            } catch (e: any) {
+              return writeJSON(res, 200, { ok: false, error: e?.message || String(e) });
+            }
+          }
           case 'matrix:runTask': {
             // Fire-and-forget(同 video:generate):任务跑数分钟,进度走 matrix:progress SSE。
             try {

@@ -157,7 +157,14 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate, onShowIn
     if (r?.ok) { await reload(); setNotice(thenLogin ? '已建号,正在打开指纹浏览器扫码…成功后状态自动变「已就绪」' : `已建号:${name}`); if (thenLogin && r.account) await m.openLogin({ accountId: r.account.id, kernelPath, loginUrl: LOGIN_URL[platform] || '' }); }
     else setNotice('创建失败:' + (r?.error || 'IPC 未响应'));
   };
-  const refreshLogin = async (a: MatrixAccount) => { const r = await M()?.checkLogin?.({ accountId: a.id, platform: a.platform }); if (r?.loggedIn) { setNotice(`${a.displayName} 已登录 ✓`); await reload(); } else setNotice(`${a.displayName} 还没检测到登录——确认扫码完成、窗口停在平台页`); };
+  // 刷新信息:对任意账号拉起内核读 昵称/平台号/头像(已登录但没读过身份的号用这个)。
+  const refreshIdentity = async (a: MatrixAccount) => {
+    if (!requireKernel()) return;
+    setNotice(`正在读取「${a.displayName}」的账号信息…(会短暂弹出浏览器)`);
+    const r = await M()?.refreshIdentity?.({ accountId: a.id, homeUrl: LOGIN_URL[a.platform] || '', kernelPath });
+    if (r?.ok) { await reload(); setNotice(r.loggedIn ? `已读取:${r.nickname || a.displayName}${r.displayId ? ' · ' + r.displayId : ''}` : `「${a.displayName}」未检测到登录,请扫码登录`); }
+    else setNotice('读取失败:' + (r?.error || '未知'));
+  };
   const openProxy = (a: MatrixAccount) => { setProxyForm({ protocol: a.proxy?.protocol || 'socks5', host: a.proxy?.host || '', port: a.proxy?.port ? String(a.proxy.port) : '', username: a.proxy?.username || '', password: a.proxy?.password || '', geo: a.proxy?.geo || '' }); setProxyFor(a.id); };
   const saveProxy = async () => {
     const host = proxyForm.host.trim(); const port = Number(proxyForm.port);
@@ -324,10 +331,11 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate, onShowIn
                         ? <button onClick={() => openProxy(a)} className="text-[11px] px-2.5 py-1 rounded-lg bg-blue-500 text-white hover:bg-blue-600">🌐 {a.proxy.geo || a.proxy.host}</button>
                         : <button onClick={() => openProxy(a)} className={`text-[11px] px-2.5 py-1 rounded-lg text-white ${idx === 0 ? 'bg-gray-500 hover:bg-gray-600' : 'bg-amber-500 hover:bg-amber-600'}`}>{idx === 0 ? '本地IP(默认)' : 'IP 未配·点配'}</button>}
                       <button onClick={() => openEdit(a)} className="text-xs px-2.5 py-1 rounded-lg bg-gray-600 text-white hover:bg-gray-700">编辑</button>
-                      {a.status === 'login_required' && (<>
+                      {/* 刷新信息:任意账号都能用,读真实 昵称/平台号/头像(已登录但没读过身份的号用它) */}
+                      <button onClick={() => refreshIdentity(a)} className="text-xs px-2.5 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">刷新信息</button>
+                      {a.status === 'login_required' && (
                         <button onClick={() => { if (!requireKernel()) return; setNotice(`正在为「${a.displayName}」打开指纹浏览器,扫码后状态自动刷新`); M()?.openLogin({ accountId: a.id, kernelPath, loginUrl: LOGIN_URL[a.platform] || '' }); }} className="text-xs px-2.5 py-1 rounded-lg bg-violet-500 text-white hover:bg-violet-600">扫码登录</button>
-                        <button onClick={() => refreshLogin(a)} className="text-xs px-2.5 py-1 rounded-lg bg-gray-600 text-white hover:bg-gray-700">刷新状态</button>
-                      </>)}
+                      )}
                     </div>
                   </div>
                   );
