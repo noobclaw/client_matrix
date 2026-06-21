@@ -29,7 +29,7 @@ const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, accounts, initialTas
   const editing = !!initialTask;
   const [step, setStep] = useState<WizardStep>(1);
 
-  const [name, setName] = useState<string>(initialTask?.name || `${platformLabel}互动`);
+  // 任务名不让用户填(对齐旧版):内部按平台+账号数自动命名。
   // 默认勾选所有「可用」账号(配了关键词 + 未封);编辑时用任务已存的账号。
   const [selected, setSelected] = useState<Set<string>>(() => {
     if (initialTask?.accountIds) return new Set(initialTask.accountIds);
@@ -72,7 +72,7 @@ const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, accounts, initialTas
     setSaving(true);
     try {
       await onSave({
-        name: name.trim() || `${platformLabel}互动`,
+        name: initialTask?.name || `${platformLabel}互动 · ${selected.size}号`,
         accountIds: [...selected],
         concurrency: selected.size,   // 选几个号就同时开几个窗(runner 内部有安全上限兜底)
         frequency: runInterval,
@@ -101,10 +101,6 @@ const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, accounts, initialTas
       <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
         {step === 1 && (
           <>
-            <div>
-              <label className="text-sm font-medium dark:text-gray-200 mb-1.5 block">任务名</label>
-              <input value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500/40" disabled={saving} />
-            </div>
             <div>
               <label className="text-sm font-medium dark:text-gray-200 mb-1.5 block">
                 选账号<span className="text-xs text-gray-400 font-normal ml-1">· 已登录且配了关键词;已选 {selected.size}</span>
