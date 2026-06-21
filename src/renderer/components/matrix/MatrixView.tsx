@@ -179,6 +179,18 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate }) => {
     </div>
   );
 
+  // 统计卡(照抄 TaskDetailPage 的 StatCard)
+  const stat = (label: string, value: string, onClick?: () => void, actionLabel?: string) => {
+    const Tag: any = onClick ? 'button' : 'div';
+    return (
+      <Tag type={onClick ? 'button' : undefined} onClick={onClick} className={`text-left w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-3 ${onClick ? 'hover:border-green-500/50 transition-colors cursor-pointer' : ''}`}>
+        <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">{label}</div>
+        <div className="font-bold dark:text-white text-sm">{value}</div>
+        {onClick && actionLabel && <div className="text-[10px] text-green-500 dark:text-green-400 mt-1 truncate">{actionLabel}</div>}
+      </Tag>
+    );
+  };
+
   const selectedTask = tasks.find((t) => t.id === selectedTaskId) || null;
   const SCREEN_TITLE: Record<string, string> = { accounts: '我的矩阵号', newTask: '新建矩阵涨粉任务', tasks: '我的矩阵涨粉任务', runs: '矩阵涨粉运行记录' };
 
@@ -372,6 +384,21 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate }) => {
               <div className="flex gap-3 text-xs"><span className="text-gray-500 dark:text-gray-400 w-20 shrink-0">配额/次</span><span className="text-gray-800 dark:text-gray-200">👍 {selectedTask.quota.daily_like_min}-{selectedTask.quota.daily_like_max} · ➕ {selectedTask.quota.daily_follow_min}-{selectedTask.quota.daily_follow_max} · 💬 {selectedTask.quota.daily_comment_min}-{selectedTask.quota.daily_comment_max} · 同时开窗 {selectedTask.concurrency || 3}</span></div>
               <div className="flex gap-3 text-xs"><span className="text-gray-500 dark:text-gray-400 w-20 shrink-0">账号({selectedTask.accountIds.length})</span><span className="text-gray-800 dark:text-gray-200 break-all">{selectedTask.accountIds.map((id) => accounts.find((a) => a.id === id)?.displayName || id).join('、')}</span></div>
             </div>
+            {(() => {
+              const tr = runs.filter((r) => r.taskId === selectedTask.id);
+              const cum = tr.reduce((a, r) => ({ like: a.like + (r.totals?.like || 0), follow: a.follow + (r.totals?.follow || 0), comment: a.comment + (r.totals?.comment || 0) }), { like: 0, follow: 0, comment: 0 });
+              const last = tr[0];
+              return (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
+                  {stat('累计完成', `👍 ${cum.like} · ➕ ${cum.follow} · 💬 ${cum.comment}`)}
+                  {stat('累计运行', `${tr.length} 次`)}
+                  {stat('上次完成', last ? `👍 ${last.totals.like} · ➕ ${last.totals.follow} · 💬 ${last.totals.comment}` : '—')}
+                  {stat('上次结果', last ? `成功 ${last.success} · 失败 ${last.failed}` : '—')}
+                  {stat('上次运行', last ? fmtTime(last.startedAt) : '尚未运行', () => onNavigate?.('runs'), '查看运行记录 →')}
+                  {selectedTask.frequency !== 'once' ? stat('下次运行', selectedTask.enabled ? fmtTime(selectedTask.nextPlannedRunAt) : '已停用') : stat('运行方式', '手动触发')}
+                </div>
+              );
+            })()}
             {(running || Object.keys(items).length > 0) && (
               <div className="rounded-xl border border-green-500/50 bg-green-500/5 p-4 mb-4 noobclaw-running-glow">
                 <div className="text-sm font-semibold text-green-600 dark:text-green-400 mb-1">本次运行进度</div>
