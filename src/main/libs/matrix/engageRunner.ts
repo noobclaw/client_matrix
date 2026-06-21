@@ -161,6 +161,14 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string): Pr
 
     const aiCall = makeAiCall(pack, authToken, log);
     const browserFn: any = (command: string, params?: any, timeout?: number) => matrixCmd(accountId, command, params, timeout);
+    // task-tab 对象:orchestrator 在 _activeTab 上调 browser/navigate/scroll/id。
+    // 内核单页,全部路由到本账号的 CDP(之前只返回 {id} 导致 _activeTab.navigate is not a function)。
+    const taskTab: any = {
+      id: 'main',
+      browser: browserFn,
+      navigate: async (url: string) => { await kernelNavigate(accountId, url); },
+      scroll: (amount?: number) => matrixCmd(accountId, 'scroll', { amount: amount || randInt(2, 4) }),
+    };
 
     const ctx: any = {
       task, config: pack?.config || {}, manifest: pack?.manifest || {},
@@ -171,8 +179,8 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string): Pr
       navigate: (url: string) => kernelNavigate(accountId, url),
       scroll: (amount?: number) => matrixCmd(accountId, 'scroll', { amount: amount || randInt(2, 4) }),
       // task-tab:内核单页,openTab=导航并返回伪 tab,getTaskTab 复用
-      openTab: async (o: any) => { if (o?.url) { await kernelNavigate(accountId, o.url); await sleep(1500); } return { id: 'main' }; },
-      getTaskTab: async () => ({ id: 'main' }),
+      openTab: async (o: any) => { if (o?.url) { await kernelNavigate(accountId, o.url); await sleep(1500); } return taskTab; },
+      getTaskTab: async () => taskTab,
       // 进度/日志
       report: (m: string) => log(m),
       stepStart: (s: number) => log('▶ 步骤 ' + s),
