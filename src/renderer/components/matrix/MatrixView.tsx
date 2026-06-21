@@ -359,13 +359,13 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate, onShowIn
                           <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${stChip}`}>{STATUS_LABEL[a.status]}</span>
                           <span className={`shrink-0 max-w-[9rem] truncate text-[10px] px-1.5 py-0.5 rounded-full ${a.proxy ? 'text-blue-600 dark:text-blue-400 bg-blue-500/15' : 'text-gray-500 bg-gray-500/15'}`}>代理IP:{a.proxy ? (a.proxy.geo || a.proxy.host) : '默认本地'}</span>
                         </div>
-                        <div className="text-[11px] truncate" title={a.boundUid ? `uid: ${a.boundUid}` : undefined}>
+                        <div className="text-[11px] space-y-0.5" title={a.boundUid ? `uid: ${a.boundUid}` : undefined}>
                           {a.status === 'login_required'
-                            ? <span className="text-amber-500">未关联 — 点「扫码关联」</span>
-                            : (<span className="text-gray-500 dark:text-gray-400">
-                                {a.displayId ? `${PLATFORM_LABEL[a.platform] || ''}号: ${a.displayId} · ` : ''}
-                                备注: {a.displayName}
-                              </span>)}
+                            ? <div className="text-amber-500 truncate">未关联 — 点「扫码关联」</div>
+                            : (<>
+                                {a.displayId && <div className="text-gray-600 dark:text-gray-300 truncate">{PLATFORM_LABEL[a.platform] || ''}号:{a.displayId}</div>}
+                                <div className="text-gray-500 dark:text-gray-400 truncate">备注:{a.displayName}</div>
+                              </>)}
                         </div>
                       </div>
                     </div>
