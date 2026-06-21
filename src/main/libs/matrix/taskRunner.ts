@@ -97,6 +97,7 @@ async function runOne(
       fingerprint: acc.fingerprint,
       proxy: acc.proxy,
       headless: opts.headless,
+      label: acc.displayName + (acc.group ? ' · ' + acc.group : ''),
     });
 
     // 发前登录检查(用 PUBLISHER_ANCHOR_URL,driver 内部也会再导航一次)。

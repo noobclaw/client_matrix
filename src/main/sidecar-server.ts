@@ -1148,6 +1148,7 @@ const server = http.createServer(async (req, res) => {
               await launchKernel({
                 accountId: acc.id, kernelPath: a?.kernelPath, kernelVersion: acc.kernelVersion,
                 userDataDir: acc.userDataDir, fingerprint: acc.fingerprint, proxy: acc.proxy,
+                label: acc.displayName + (acc.group ? ' · ' + acc.group : ''),
               });
               await kernelNavigate(acc.id, a?.loginUrl || 'about:blank');
               // 后台轮询登录态:扫码成功后自动把状态翻成 idle 并推 matrix:account SSE(最多 ~3min;窗口关了就停)。

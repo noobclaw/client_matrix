@@ -39,6 +39,8 @@ export interface KernelSession {
   pending: Map<number, { resolve: (d: any) => void; reject: (e: Error) => void }>;
   proxyAuth?: { username: string; password: string }; // 带 auth 代理:经 CDP 提供凭据
   fetchEnabled?: boolean;         // 是否正在 Fetch 拦截(拿到代理凭据后即关)
+  label?: string;                 // 账号标签(窗口左上角常驻角标,多窗区分用)
+  slot: number;                   // 第几个窗口(用于错开层叠位置)
 }
 
 export interface LaunchKernelOptions {
@@ -49,11 +51,19 @@ export interface LaunchKernelOptions {
   fingerprint: Fingerprint;
   proxy?: Proxy;
   headless?: boolean;
+  label?: string;                 // 窗口左上角常驻角标文案(一般是账号备注名 + 分组)
 }
 
 const sessions = new Map<string, KernelSession>();
 const launching = new Map<string, Promise<KernelSession>>(); // 启动去重
 let nextDebugPort = 9300;        // 每号一个端口,递增分配
+let nextSlot = 0;                // 第几个窗口(错开层叠位置用)
+
+/** 注入「账号角标」脚本:窗口左上角常驻绿色标签显示账号名,多窗叠在一起也能分清。 */
+function badgeScript(label: string): string {
+  const L = JSON.stringify(label);
+  return `(function(){var ID='__nb_acct_badge__';function m(){try{var root=document.body||document.documentElement;if(!root)return;if(document.getElementById(ID))return;var d=document.createElement('div');d.id=ID;d.textContent=${L};d.style.cssText='position:fixed;top:0;left:0;z-index:2147483647;background:#16a34a;color:#fff;font:bold 13px/1.5 system-ui,sans-serif;padding:3px 12px;border-bottom-right-radius:8px;pointer-events:none;box-shadow:0 1px 6px rgba(0,0,0,.35)';root.appendChild(d);}catch(e){}}m();try{new MutationObserver(m).observe(document.documentElement,{childList:true});}catch(e){}setInterval(m,1500);})();`;
+}
 
 // 内核缺失的统一错误标记:UI 据此弹「去下载内核」引导,不再回退系统 Chrome。
 export const NO_KERNEL_ERROR = 'NO_KERNEL';
@@ -149,6 +159,8 @@ async function doLaunch(opts: LaunchKernelOptions): Promise<KernelSession> {
     proxyAuth: (opts.proxy?.username && opts.proxy?.password)
       ? { username: opts.proxy.username, password: opts.proxy.password }
       : undefined,
+    label: opts.label,
+    slot: nextSlot++,
   };
   // 进程崩溃/退出 → 清 session + reject 挂起命令,避免后续复用死 session 卡满超时。
   proc.on('exit', () => {
@@ -193,6 +205,22 @@ async function doGetPage(s: KernelSession): Promise<KernelSession> {
   ws.on('error', () => failSession(s, 'page websocket error'));
 
   await send(s, 'Page.enable');
+  // 账号角标:窗口左上角常驻账号名,多窗叠在一起也能分清扫哪个码。
+  // addScriptToEvaluateOnNewDocument 让它跨整页导航也在;立即再注入一次给当前页。
+  if (s.label) {
+    try {
+      await send(s, 'Page.addScriptToEvaluateOnNewDocument', { source: badgeScript(s.label) });
+      await send(s, 'Runtime.evaluate', { expression: badgeScript(s.label) });
+    } catch { /* 角标非关键 */ }
+  }
+  // 错开窗口位置:多个号别完全重叠,便于分辨。
+  try {
+    const win = await send(s, 'Browser.getWindowForTarget', { targetId: s.pageTargetId });
+    if (win?.windowId != null) {
+      const off = (s.slot % 6) * 40;
+      await send(s, 'Browser.setWindowBounds', { windowId: win.windowId, bounds: { left: 60 + off, top: 60 + off, width: 1180, height: 820 } });
+    }
+  } catch { /* 窗口定位非关键 */ }
   // 带 auth 代理:开 Fetch 拦截以应答代理认证挑战;拿到凭据后立即 Fetch.disable
   // 止损(代理会缓存凭据),避免长期暂停全量请求拖慢/卡死页面。
   if (s.proxyAuth) {

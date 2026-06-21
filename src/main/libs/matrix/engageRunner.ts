@@ -143,6 +143,7 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string): Pr
     await launchKernel({
       accountId, kernelPath: opts.kernelPath, kernelVersion: acc.kernelVersion,
       userDataDir: acc.userDataDir, fingerprint: acc.fingerprint, proxy: acc.proxy,
+      label: acc.displayName + (acc.group ? ' · ' + acc.group : ''),
     });
     await kernelNavigate(accountId, 'https://www.douyin.com/');
     await sleep(2000);
