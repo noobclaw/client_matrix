@@ -53,6 +53,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate }) => {
   const [items, setItems] = useState<Record<string, ItemResult>>({});
   const [logs, setLogs] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
+  const [runningTaskId, setRunningTaskId] = useState<string | null>(null);
   const [doneReport, setDoneReport] = useState<any>(null);
 
   // 账号弹窗 + 通知
@@ -88,11 +89,11 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate }) => {
 
   useEffect(() => {
     const off = M()?.onProgress?.((p: any) => {
-      if (p?.type === 'taskStart') { setItems({}); setLogs([]); setDoneReport(null); setRunning(true); }
+      if (p?.type === 'taskStart') { setItems({}); setLogs([]); setDoneReport(null); setRunning(true); setRunningTaskId(p.taskId || null); }
       else if (p?.type === 'item') setItems((prev) => ({ ...prev, [p.accountId]: { accountId: p.accountId, state: p.state, reason: p.reason, counts: p.counts } }));
       else if (p?.type === 'log') setLogs((prev) => [`[${p.accountId}] ${p.msg}`, ...prev].slice(0, 200));
-      else if (p?.type === 'done') { setRunning(false); setDoneReport(p.report); reload(); reloadTasks(); reloadRuns(); }
-      else if (p?.type === 'error') { setRunning(false); setLogs((prev) => [`任务错误: ${p.error}`, ...prev]); reloadTasks(); }
+      else if (p?.type === 'done') { setRunning(false); setRunningTaskId(null); setDoneReport(p.report); reload(); reloadTasks(); reloadRuns(); }
+      else if (p?.type === 'error') { setRunning(false); setRunningTaskId(null); setLogs((prev) => [`任务错误: ${p.error}`, ...prev]); reloadTasks(); }
     });
     return () => { if (typeof off === 'function') off(); };
   }, [reload, reloadTasks, reloadRuns]);
@@ -210,37 +211,46 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate }) => {
       )}
 
       <div className="flex-1 overflow-auto p-5">
-        {/* 我的矩阵号 */}
+        {/* 我的矩阵号 —— 账号池(卡片样式对齐老客户端) */}
         {screen === 'accounts' && (
-          <div>
-            <div className="flex items-center mb-4">
-              <span className="text-sm opacity-70">平台</span>
-              <select value={platform} onChange={(e) => setPlatform(e.target.value)} className="ml-2 text-sm px-2 py-1 rounded border dark:border-white/15 border-black/15 bg-transparent">
-                {PLATFORMS.map((p) => <option key={p} value={p}>{PLATFORM_LABEL[p]}</option>)}
-              </select>
-              <button onClick={openAdd} className="ml-auto px-3 py-1.5 text-sm rounded-lg bg-claude-accent text-white">+ 添加账号</button>
+          <div className="max-w-6xl mx-auto">
+            <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+              <h2 className="text-lg font-bold dark:text-white">🧬 我的矩阵号</h2>
+              <div className="flex items-center gap-2">
+                <select value={platform} onChange={(e) => setPlatform(e.target.value)} className="text-sm px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 dark:text-white">
+                  {PLATFORMS.map((p) => <option key={p} value={p}>{PLATFORM_LABEL[p]}</option>)}
+                </select>
+                <button onClick={openAdd} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-white text-sm font-semibold bg-violet-500 hover:bg-violet-600 shadow-sm shadow-violet-500/25 active:scale-95 transition-all">+ 添加账号</button>
+              </div>
             </div>
-            <div className="space-y-2">
-              {platformAccounts.length === 0 && <div className="text-sm opacity-50 py-8 text-center">该平台还没有账号,点「添加账号」开始。</div>}
-              {platformAccounts.map((a, idx) => (
-                <div key={a.id} className="flex items-center gap-3 p-3 rounded-lg border dark:border-white/10 border-black/10">
-                  <span className={`w-2.5 h-2.5 rounded-full ${STATUS_DOT[a.status]}`} />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm">{a.displayName}{a.group ? ` · ${a.group}` : ''}{a.persona ? <span className="opacity-40"> · 人设✓</span> : ''}</div>
-                    <div className="text-xs opacity-50 truncate">{a.keywords && a.keywords.length ? `赛道词: ${a.keywords.join(' / ')}` : <span className="text-amber-500">未配关键词(互动需要)</span>}</div>
+            {platformAccounts.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 p-10 text-center">
+                <div className="text-4xl mb-2">📭</div>
+                <div className="text-sm text-gray-500 dark:text-gray-400 mb-4">该平台还没有账号</div>
+                <button onClick={openAdd} className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold bg-violet-500 hover:bg-violet-600 shadow-sm shadow-violet-500/25 active:scale-95">+ 添加{PLATFORM_LABEL[platform]}账号</button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {platformAccounts.map((a, idx) => (
+                  <div key={a.id} className="flex items-center gap-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4">
+                    <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${STATUS_DOT[a.status]}`} />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium dark:text-white">{a.displayName}{a.group ? <span className="text-gray-400 font-normal"> · {a.group}</span> : ''}{a.persona ? <span className="text-gray-400 font-normal"> · 人设✓</span> : ''}</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">{a.keywords && a.keywords.length ? `🏷️ ${a.keywords.join(' · ')}` : <span className="text-amber-500">未配关键词(互动需要)</span>}</div>
+                    </div>
+                    {a.proxy
+                      ? <button onClick={() => openProxy(a)} className="text-[11px] px-2 py-1 rounded-full border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300">🌐 {a.proxy.geo || a.proxy.host}</button>
+                      : <button onClick={() => openProxy(a)} className={`text-[11px] px-2 py-1 rounded-full border ${idx === 0 ? 'border-gray-300 dark:border-gray-700 text-gray-500' : 'text-amber-500 border-amber-500/40'}`}>{idx === 0 ? '本地IP(默认)' : 'IP 未配·点配'}</button>}
+                    <span className={`text-[11px] px-2 py-1 rounded-full border ${a.status === 'idle' ? 'text-green-500 border-green-500/30 bg-green-500/10' : a.status === 'login_required' ? 'text-amber-500 border-amber-500/30 bg-amber-500/10' : 'border-gray-300 dark:border-gray-700 text-gray-500'}`}>{STATUS_LABEL[a.status]}</span>
+                    <button onClick={() => openEdit(a)} className="text-xs px-2.5 py-1 rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800">编辑</button>
+                    {a.status === 'login_required' && (<>
+                      <button onClick={() => { if (!requireKernel()) return; setNotice(`正在为「${a.displayName}」打开指纹浏览器,扫码后状态自动刷新`); M()?.openLogin({ accountId: a.id, kernelPath, loginUrl: LOGIN_URL[a.platform] || '' }); }} className="text-xs px-2.5 py-1 rounded-lg bg-violet-500 text-white hover:bg-violet-600">扫码登录</button>
+                      <button onClick={() => refreshLogin(a)} className="text-xs px-2.5 py-1 rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800">刷新状态</button>
+                    </>)}
                   </div>
-                  {a.proxy
-                    ? <button onClick={() => openProxy(a)} className="text-xs px-2 py-0.5 rounded border bg-black/5 dark:bg-white/10 dark:border-white/15 border-black/15">IP {a.proxy.geo || a.proxy.host}</button>
-                    : <button onClick={() => openProxy(a)} className={`text-xs px-2 py-0.5 rounded border ${idx === 0 ? 'opacity-60 dark:border-white/15 border-black/15' : 'text-amber-500 border-amber-500/40'}`}>{idx === 0 ? '本地IP(默认)' : 'IP 未配·点配'}</button>}
-                  <span className="text-xs px-2 py-0.5 rounded bg-black/5 dark:bg-white/10">{STATUS_LABEL[a.status]}</span>
-                  <button onClick={() => openEdit(a)} className="text-xs px-2 py-1 rounded border dark:border-white/15 border-black/15">编辑</button>
-                  {a.status === 'login_required' && (<>
-                    <button onClick={() => { if (!requireKernel()) return; setNotice(`正在为「${a.displayName}」打开指纹浏览器,扫码后状态自动刷新`); M()?.openLogin({ accountId: a.id, kernelPath, loginUrl: LOGIN_URL[a.platform] || '' }); }} className="text-xs px-2 py-1 rounded border dark:border-white/15 border-black/15">扫码登录</button>
-                    <button onClick={() => refreshLogin(a)} className="text-xs px-2 py-1 rounded border dark:border-white/15 border-black/15">刷新状态</button>
-                  </>)}
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -258,86 +268,131 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate }) => {
           </div>
         )}
 
-        {/* 我的矩阵涨粉任务(列表 + 详情) */}
+        {/* 我的矩阵涨粉任务(列表)—— 卡片样式对齐老客户端 MyTasksPage */}
         {screen === 'tasks' && !selectedTask && (
-          <div>
-            <div className="flex items-center mb-4">
-              <span className="text-sm opacity-70">平台</span>
-              <select value={platform} onChange={(e) => setPlatform(e.target.value)} className="ml-2 text-sm px-2 py-1 rounded border dark:border-white/15 border-black/15 bg-transparent">
-                {PLATFORMS.map((p) => <option key={p} value={p}>{PLATFORM_LABEL[p]}</option>)}
-              </select>
-              <span className="ml-3 text-xs opacity-50">每平台≤5、同类型只1个;全局同时只跑一个</span>
-              <button onClick={() => onNavigate?.('newTask')} className="ml-auto px-3 py-1.5 text-sm rounded-lg bg-claude-accent text-white">+ 新建任务</button>
-            </div>
-            <div className="space-y-2">
-              {platformTasks.length === 0 && <div className="text-sm opacity-50 py-8 text-center">该平台还没有任务。点「新建任务」。</div>}
-              {platformTasks.map((t) => (
-                <div key={t.id} className="p-3 rounded-lg border dark:border-white/10 border-black/10 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" onClick={() => setSelectedTaskId(t.id)}>
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm font-medium">{t.name}</span>
-                    <span className="text-xs px-2 py-0.5 rounded bg-blue-500/15 text-blue-500">🔥 互动</span>
-                    <span className="text-xs px-2 py-0.5 rounded bg-black/5 dark:bg-white/10">{t.frequency === 'once' ? '手动' : (t.enabled ? '定时' : '已停用')}</span>
-                    <span className="text-xs opacity-50">{FREQ_LABEL[t.frequency] || t.frequency}</span>
-                    <button onClick={(e) => { e.stopPropagation(); runTaskNow(t); }} disabled={running} className="ml-auto text-xs px-3 py-1 rounded-lg bg-claude-accent text-white disabled:opacity-50">{running ? '运行中…' : '运行'}</button>
-                  </div>
-                  <div className="text-xs opacity-50 mt-1.5">账号 {t.accountIds.length} 个 · 赞{t.quota.daily_like_min}-{t.quota.daily_like_max}/关{t.quota.daily_follow_min}-{t.quota.daily_follow_max}/评{t.quota.daily_comment_min}-{t.quota.daily_comment_max}{t.frequency !== 'once' && t.enabled ? ` · 下次 ${fmtTime(t.nextPlannedRunAt)}` : ''}{t.lastRunAt ? ` · 上次 ${fmtTime(t.lastRunAt)}` : ''}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-        {/* 任务详情 */}
-        {screen === 'tasks' && selectedTask && (
-          <div className="max-w-3xl">
-            <button onClick={() => setSelectedTaskId(null)} className="text-xs opacity-60 mb-3">← 返回任务列表</button>
-            <div className="flex items-center gap-3 mb-3">
-              <h2 className="text-base font-medium">{selectedTask.name}</h2>
-              <span className="text-xs px-2 py-0.5 rounded bg-blue-500/15 text-blue-500">🔥 互动</span>
-              <div className="ml-auto flex gap-2">
-                <button onClick={() => runTaskNow(selectedTask)} disabled={running} className="text-xs px-3 py-1 rounded-lg bg-claude-accent text-white disabled:opacity-50">{running ? '运行中…' : '🎯 直接运行'}</button>
-                {selectedTask.frequency !== 'once' && <button onClick={() => toggleTask(selectedTask)} className="text-xs px-2 py-1 rounded border dark:border-white/15 border-black/15">{selectedTask.enabled ? '停用定时' : '启用定时'}</button>}
-                <button onClick={() => { setTaskEditId(selectedTask.id); setShowTaskEditModal(true); }} className="text-xs px-2 py-1 rounded border dark:border-white/15 border-black/15">编辑</button>
-                <button onClick={() => deleteTask(selectedTask)} className="text-xs px-2 py-1 rounded border border-red-500/40 text-red-500">删除</button>
+          <div className="max-w-6xl mx-auto">
+            <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+              <h2 className="text-lg font-bold dark:text-white">📋 我的{PLATFORM_LABEL[platform]}涨粉任务</h2>
+              <div className="flex items-center gap-2">
+                <select value={platform} onChange={(e) => setPlatform(e.target.value)} className="text-sm px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 dark:text-white">
+                  {PLATFORMS.map((p) => <option key={p} value={p}>{PLATFORM_LABEL[p]}</option>)}
+                </select>
+                <button onClick={() => onNavigate?.('newTask')} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-white text-sm font-semibold bg-violet-500 hover:bg-violet-600 shadow-sm shadow-violet-500/25 active:scale-95 transition-all">🎶 新建任务</button>
               </div>
             </div>
-            <div className="text-sm p-3 rounded-lg border dark:border-white/10 border-black/10 mb-3">
-              <div>频率:{FREQ_LABEL[selectedTask.frequency] || selectedTask.frequency}{selectedTask.frequency !== 'once' && selectedTask.enabled ? ` · 下次 ${fmtTime(selectedTask.nextPlannedRunAt)}` : ''}</div>
-              <div className="mt-1">配额(每号):赞 {selectedTask.quota.daily_like_min}-{selectedTask.quota.daily_like_max} / 关 {selectedTask.quota.daily_follow_min}-{selectedTask.quota.daily_follow_max} / 评 {selectedTask.quota.daily_comment_min}-{selectedTask.quota.daily_comment_max} · 同时开窗 {selectedTask.concurrency || 3}</div>
-              <div className="mt-1 opacity-70">账号({selectedTask.accountIds.length}):{selectedTask.accountIds.map((id) => accounts.find((a) => a.id === id)?.displayName || id).join('、')}</div>
+            {platformTasks.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 p-10 text-center">
+                <div className="text-4xl mb-2">📭</div>
+                <div className="text-sm text-gray-500 dark:text-gray-400 mb-4">还没有{PLATFORM_LABEL[platform]}涨粉任务</div>
+                <button onClick={() => onNavigate?.('newTask')} className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold bg-violet-500 hover:bg-violet-600 shadow-sm shadow-violet-500/25 active:scale-95">🎶 新建{PLATFORM_LABEL[platform]}互动任务</button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {platformTasks.map((t) => {
+                  const isRunning = runningTaskId === t.id;
+                  return (
+                    <button key={t.id} type="button" onClick={() => setSelectedTaskId(t.id)}
+                      className={`w-full text-left rounded-xl border p-4 transition-colors relative ${isRunning ? 'border-green-500 ring-2 ring-green-500/30 bg-white dark:bg-gray-900' : 'border-gray-200 dark:border-gray-700 hover:border-violet-500/50 dark:hover:border-violet-500/50 bg-white dark:bg-gray-900'}`}>
+                      <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <span className="shrink-0 inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300">🎵 {PLATFORM_LABEL[t.platform]}</span>
+                          <span className="shrink-0 inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border text-violet-500 bg-violet-500/10 border-violet-500/30">🎶 互动涨粉</span>
+                          <span className="font-medium dark:text-white truncate">{t.name}</span>
+                          <span className="text-[10px] text-gray-500 font-mono shrink-0">#{t.id.slice(0, 8)}</span>
+                        </div>
+                        <div className="shrink-0">
+                          {isRunning ? (
+                            <span className="text-xs px-2 py-1 rounded bg-green-500/10 text-green-500 border border-green-500/30 flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />运行中</span>
+                          ) : t.frequency === 'once' ? (
+                            <span className="text-xs px-2 py-1 rounded bg-purple-500/10 text-purple-500 border border-purple-500/30">✋ 手动运行</span>
+                          ) : t.enabled ? (
+                            <span className="text-xs px-2 py-1 rounded bg-blue-500/10 text-blue-500 border border-blue-500/30">⏰ {fmtTime(t.nextPlannedRunAt)}</span>
+                          ) : (
+                            <span className="text-xs px-2 py-1 rounded bg-gray-500/10 text-gray-500 border border-gray-500/30">⏸ 已停用</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-xs text-gray-600 dark:text-gray-300 mb-1">👥 账号 {t.accountIds.length} 个 · 各用自己的赛道关键词</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">⏰ {FREQ_LABEL[t.frequency] || t.frequency} · 👍 {t.quota.daily_like_min}-{t.quota.daily_like_max} · ➕ {t.quota.daily_follow_min}-{t.quota.daily_follow_max} · 💬 {t.quota.daily_comment_min}-{t.quota.daily_comment_max} / 次</div>
+                      <div className="text-[11px] text-gray-400 mt-1">{t.lastRunAt ? `上次运行 ${fmtTime(t.lastRunAt)}` : '尚未运行'}</div>
+                      <div className="mt-2 pt-2 border-t border-gray-100 dark:border-gray-800 flex items-center justify-end">
+                        <span onClick={(e) => { e.stopPropagation(); runTaskNow(t); }} className={`text-xs px-3 py-1 rounded-lg font-semibold ${running ? 'bg-gray-300 text-gray-500 dark:bg-gray-700' : 'bg-violet-500 text-white hover:bg-violet-600'}`}>{isRunning ? '运行中…' : '🎯 运行'}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+        {/* 任务详情 —— 对齐老客户端 TaskDetailPage(摘要卡 + 运行中 glow + 运行历史) */}
+        {screen === 'tasks' && selectedTask && (
+          <div className="max-w-3xl mx-auto">
+            <button onClick={() => setSelectedTaskId(null)} className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 mb-3">← 返回任务列表</button>
+            <div className="flex items-center gap-2 mb-4 flex-wrap">
+              <h2 className="text-lg font-bold dark:text-white">{selectedTask.name}</h2>
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border text-violet-500 bg-violet-500/10 border-violet-500/30">🎶 互动涨粉</span>
+              <div className="ml-auto flex gap-2">
+                <button onClick={() => runTaskNow(selectedTask)} disabled={running} className="px-4 py-2 rounded-lg text-sm font-semibold bg-violet-500 text-white hover:bg-violet-600 disabled:opacity-50">{running ? '运行中…' : '🎯 直接运行'}</button>
+                {selectedTask.frequency !== 'once' && <button onClick={() => toggleTask(selectedTask)} className="px-3 py-2 rounded-lg text-sm font-medium border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800">{selectedTask.enabled ? '停用定时' : '启用定时'}</button>}
+                <button onClick={() => { setTaskEditId(selectedTask.id); setShowTaskEditModal(true); }} className="px-3 py-2 rounded-lg text-sm font-medium border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800">编辑</button>
+                <button onClick={() => deleteTask(selectedTask)} className="px-3 py-2 rounded-lg text-sm font-medium border border-red-500/40 text-red-500 hover:bg-red-500/5">删除</button>
+              </div>
             </div>
-            {(running || Object.keys(items).length > 0) && <div><div className="text-sm font-medium">实时进度</div>{renderProgress()}</div>}
-            <div className="text-sm font-medium mt-4 mb-2">最近运行</div>
-            <div className="space-y-1.5">
-              {runs.filter((r) => r.taskId === selectedTask.id).slice(0, 10).map((r) => (
-                <div key={r.id} className="text-xs p-2 rounded border dark:border-white/10 border-black/10 flex items-center gap-3">
-                  <span className="opacity-60">{fmtTime(r.startedAt)}</span>
-                  <span className="text-green-500">成功{r.success}</span><span className="text-red-500">失败{r.failed}</span><span className="text-amber-500">跳过{r.skipped}</span>
-                  <span className="ml-auto opacity-60">赞{r.totals.like}/关{r.totals.follow}/评{r.totals.comment}</span>
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 px-4 py-3 text-sm space-y-1.5 mb-4">
+              <div className="font-semibold dark:text-gray-200 mb-1">📋 任务摘要</div>
+              <div className="flex gap-3 text-xs"><span className="text-gray-500 dark:text-gray-400 w-20 shrink-0">频率</span><span className="text-gray-800 dark:text-gray-200">{FREQ_LABEL[selectedTask.frequency] || selectedTask.frequency}{selectedTask.frequency !== 'once' && selectedTask.enabled ? ` · 下次 ${fmtTime(selectedTask.nextPlannedRunAt)}` : ''}</span></div>
+              <div className="flex gap-3 text-xs"><span className="text-gray-500 dark:text-gray-400 w-20 shrink-0">配额/次</span><span className="text-gray-800 dark:text-gray-200">👍 {selectedTask.quota.daily_like_min}-{selectedTask.quota.daily_like_max} · ➕ {selectedTask.quota.daily_follow_min}-{selectedTask.quota.daily_follow_max} · 💬 {selectedTask.quota.daily_comment_min}-{selectedTask.quota.daily_comment_max} · 同时开窗 {selectedTask.concurrency || 3}</span></div>
+              <div className="flex gap-3 text-xs"><span className="text-gray-500 dark:text-gray-400 w-20 shrink-0">账号({selectedTask.accountIds.length})</span><span className="text-gray-800 dark:text-gray-200 break-all">{selectedTask.accountIds.map((id) => accounts.find((a) => a.id === id)?.displayName || id).join('、')}</span></div>
+            </div>
+            {(running || Object.keys(items).length > 0) && (
+              <div className="rounded-xl border border-green-500/40 bg-green-500/5 p-4 mb-4">
+                <div className="text-sm font-semibold text-green-600 dark:text-green-400 mb-1">本次运行进度</div>
+                {renderProgress()}
+              </div>
+            )}
+            <h3 className="text-sm font-bold dark:text-white mb-2">🕑 运行历史</h3>
+            <div className="space-y-2">
+              {runs.filter((r) => r.taskId === selectedTask.id).slice(0, 20).map((r) => (
+                <div key={r.id} className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-xs flex items-center gap-3">
+                  <span className="text-gray-500">{fmtTime(r.startedAt)}</span>
+                  <span className="text-green-500">成功 {r.success}</span><span className="text-red-500">失败 {r.failed}</span><span className="text-amber-500">跳过 {r.skipped}</span>
+                  <span className="ml-auto text-gray-600 dark:text-gray-300">👍{r.totals.like} ➕{r.totals.follow} 💬{r.totals.comment}</span>
                 </div>
               ))}
-              {runs.filter((r) => r.taskId === selectedTask.id).length === 0 && <div className="text-xs opacity-50">还没有运行记录。</div>}
+              {runs.filter((r) => r.taskId === selectedTask.id).length === 0 && <div className="text-xs text-gray-400">还没有运行记录。</div>}
             </div>
           </div>
         )}
 
-        {/* 矩阵涨粉运行记录 */}
+        {/* 矩阵涨粉运行记录 —— 对齐老客户端 RunHistoryPage */}
         {screen === 'runs' && (
-          <div className="max-w-3xl">
-            <div className="flex items-center mb-3"><span className="text-sm opacity-70">全部运行记录(最新在前)</span><button onClick={reloadRuns} className="ml-auto text-xs px-2 py-1 rounded border dark:border-white/15 border-black/15">刷新</button></div>
-            <div className="space-y-2">
-              {runs.length === 0 && <div className="text-sm opacity-50 py-8 text-center">还没有运行记录。去「我的矩阵涨粉任务」跑一个任务。</div>}
-              {runs.map((r) => (
-                <div key={r.id} className="p-3 rounded-lg border dark:border-white/10 border-black/10">
-                  <div className="flex items-center gap-3 text-sm">
-                    <span className="font-medium">{r.taskName}</span>
-                    <span className="text-xs opacity-50">{PLATFORM_LABEL[r.platform] || r.platform}</span>
-                    <span className="text-xs opacity-60">{fmtTime(r.startedAt)}</span>
-                    <span className="ml-auto text-xs"><span className="text-green-500">成功{r.success}</span> · <span className="text-red-500">失败{r.failed}</span> · <span className="text-amber-500">跳过{r.skipped}</span></span>
-                  </div>
-                  <div className="text-xs opacity-50 mt-1">合计 赞{r.totals.like}/关{r.totals.follow}/评{r.totals.comment} · {r.items.map((it) => `${it.displayName || it.accountId}(${it.state})`).join('、')}</div>
-                </div>
-              ))}
+          <div className="max-w-4xl mx-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold dark:text-white">🕑 矩阵涨粉运行记录</h2>
+              <button onClick={reloadRuns} className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800">刷新</button>
             </div>
+            {runs.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 p-10 text-center">
+                <div className="text-4xl mb-2">📭</div>
+                <div className="text-sm text-gray-500 dark:text-gray-400">还没有运行记录。去「我的矩阵涨粉任务」跑一个任务。</div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {runs.map((r) => (
+                  <div key={r.id} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4">
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300">🎵 {PLATFORM_LABEL[r.platform] || r.platform}</span>
+                      <span className="font-medium dark:text-white">{r.taskName}</span>
+                      <span className="text-xs text-gray-500">{fmtTime(r.startedAt)}</span>
+                      <span className="ml-auto text-xs"><span className="text-green-500">成功 {r.success}</span> · <span className="text-red-500">失败 {r.failed}</span> · <span className="text-amber-500">跳过 {r.skipped}</span></span>
+                    </div>
+                    <div className="text-xs text-gray-600 dark:text-gray-300 mb-1">合计 👍 {r.totals.like} · ➕ {r.totals.follow} · 💬 {r.totals.comment}</div>
+                    <div className="text-[11px] text-gray-400 truncate">{r.items.map((it) => `${it.displayName || it.accountId}(${it.state === 'success' ? '成功' : it.state === 'skipped' ? '跳过' : '失败'})`).join('、')}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
