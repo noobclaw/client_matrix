@@ -28,6 +28,14 @@ const DEEP_FN =
 
 function s(v: string): string { return JSON.stringify(v); }
 
+// 找页面里最大的可滚动容器。⚠️ 真机验证(抖音搜索/feed):内容在内部 div 里滚,
+// window.scrollBy 完全不动(window scrollY 恒 0)。滚动命令必须找到这个容器滚它。
+const SCROLLER_FN =
+  'function nbScroller(){var best=null,bestH=0;var all=document.querySelectorAll("*");' +
+  'for(var i=0;i<all.length;i++){var e=all[i];var cs;try{cs=getComputedStyle(e);}catch(_e){continue;}' +
+  'if((cs.overflowY==="auto"||cs.overflowY==="scroll")&&e.scrollHeight>e.clientHeight+40){if(e.scrollHeight>bestH){bestH=e.scrollHeight;best=e;}}}' +
+  'return best;}';
+
 export async function matrixCmd(
   accountId: string,
   command: string,
@@ -62,12 +70,16 @@ export async function matrixCmd(
     }
 
     // 主世界 click(穿透 React 合成事件):CDP Runtime.evaluate 默认主世界。
+    // ⚠️ 真机验证(2026-06-21 抖音):element.click() 不会聚焦 input(activeElement 仍是 body),
+    // 导致剧本「nativeClick 搜索框 → type(走 activeElement)」主路径取不到框。点前先 focus,
+    // 让随后的 type 能命中(对 button 等无副作用)。
     case 'main_world_click': {
       const sel = String(params?.selector || '');
       const expr =
         '(function(){' + DEEP_FN +
         'var els=nbDeepAll(' + s(sel) + ');if(!els.length)return {ok:false,error:"not_found"};' +
-        'try{els[0].click();return {ok:true};}catch(e){return {ok:false,error:String(e&&e.message||e).slice(0,80)};}})()';
+        'var t=els[0];try{if(t.focus)t.focus();}catch(e){}' +
+        'try{t.click();return {ok:true};}catch(e){return {ok:false,error:String(e&&e.message||e).slice(0,80)};}})()';
       return await kernelEval(accountId, expr);
     }
 
@@ -128,13 +140,17 @@ export async function matrixCmd(
       return { ok: true, url: String(url || ''), value: url };
     }
 
-    // 滚动(抖音 feed)。amount=屏数,默认 3。
+    // 滚动(抖音 feed/搜索结果)。amount=屏数,默认 3。先找可滚容器滚它,没有才回落 window。
     case 'scroll': {
       const amount = Number(params?.amount) || 3;
       const dir = params?.direction === 'up' ? -1 : 1;
       const expr =
-        '(function(){try{window.scrollBy(0,' + (dir) + '*' + amount + '*Math.round(window.innerHeight*0.85));' +
-        'return {ok:true};}catch(e){return {ok:false,error:String(e&&e.message||e)};}})()';
+        '(function(){' + SCROLLER_FN + 'try{' +
+        'var step=' + dir + '*' + amount + '*Math.round((window.innerHeight||800)*0.85);' +
+        'var c=nbScroller();' +
+        'if(c){c.scrollTop+=step;return {ok:true,container:(c.className||c.tagName||"").toString().slice(0,40)};}' +
+        'window.scrollBy(0,step);return {ok:true,container:"window"};' +
+        '}catch(e){return {ok:false,error:String(e&&e.message||e)};}})()';
       return await kernelEval(accountId, expr);
     }
 
@@ -172,11 +188,15 @@ export async function matrixCmd(
     // 多个匹配时滚最后一个(剧本就是要滚到末尾触发加载更多)。没它候选池恒 0。
     case 'scroll_to': {
       const sel = String(params?.selector || '');
+      // scrollIntoView 把最后一个匹配滚进来;但若它本来就可见(常见),还要把可滚容器
+      // 再往下推一屏,强制触发懒加载(否则「最后一个已可见」时 scroll_to 原地不动)。
       const expr =
-        '(function(){' + DEEP_FN +
+        '(function(){' + DEEP_FN + SCROLLER_FN +
         'var els=nbDeepAll(' + s(sel) + ');if(!els.length)return {ok:false,error:"not_found"};' +
-        'var el=els[els.length-1];try{el.scrollIntoView({block:"center"});return {ok:true,count:els.length};}' +
-        'catch(e){try{el.scrollIntoView();return {ok:true};}catch(_e){return {ok:false,error:String(_e&&_e.message||_e).slice(0,80)}}}})()';
+        'var el=els[els.length-1];' +
+        'try{el.scrollIntoView({block:"center"});}catch(e){try{el.scrollIntoView();}catch(_e){}}' +
+        'try{var c=nbScroller();if(c)c.scrollTop+=Math.round((window.innerHeight||800)*0.8);}catch(e){}' +
+        'return {ok:true,count:els.length};})()';
       return await kernelEval(accountId, expr);
     }
 
