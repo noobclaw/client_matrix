@@ -193,6 +193,11 @@ export interface VideoCreationInput {
   publishTarget?: VideoPublishTarget;
   publishPlatforms?: string[];
   /**
+   * 矩阵号 edition:每个发布平台选定的矩阵账号 id(平台→accountId)。非空时发布走该号
+   * 的指纹内核 CDP(runMatrixDriver),不走扩展。空 / 非矩阵 → 仍走旧 runPublishStep(扩展)。
+   */
+  publishAccounts?: Record<string, string>;
+  /**
    * 平台发布文案(用户向导可选填,覆盖 AI 自动生成)。这三个是【配在视频下方钩人点击】
    * 的文案,跟口播稿 / 视频标题是不同产物 —— 详见 publishCaptionWriter.ts。
    * 都留空 → 出片时 AI 自动生成(generatePublishCaption);用户填了 → 用用户的。
@@ -2199,16 +2204,34 @@ async function runVideoPipeline(
         onLog: (m: string) => tracker.progress(m),
         onCost: (tk, usd) => tracker.addTokens(tk, usd),
       });
-      const { runPublishStep } = require('./publishers/runPublish');
-      const pubResult = await runPublishStep({
-        platforms: Array.isArray(input.publishPlatforms) ? input.publishPlatforms : [],
-        videoPath: outputPaths[0],
-        title: cap.title,
-        description: cap.description,
-        tags: cap.tags,
-        onLog: (msg: string) => tracker.progress(msg),
-        signal,
-      });
+      // 矩阵号 edition:发布走指纹内核 CDP(按平台→选定账号上传),不走扩展;
+      //   非矩阵 / 内核不可用时仍走旧 runPublishStep(扩展)。
+      const { MATRIX_EDITION } = require('../../matrixEdition');
+      let pubResult: { publishedCount: number; skippedCount: number; failedCount: number; details: any[] };
+      if (MATRIX_EDITION && wantPublish) {
+        const { runMatrixPublishStep } = require('./publishers/runMatrixPublish');
+        pubResult = await runMatrixPublishStep({
+          platforms: Array.isArray(input.publishPlatforms) ? input.publishPlatforms : [],
+          accounts: (input as any).publishAccounts || {},
+          videoPath: outputPaths[0],
+          title: cap.title,
+          description: cap.description,
+          tags: cap.tags,
+          onLog: (msg: string) => tracker.progress(msg),
+          signal,
+        });
+      } else {
+        const { runPublishStep } = require('./publishers/runPublish');
+        pubResult = await runPublishStep({
+          platforms: Array.isArray(input.publishPlatforms) ? input.publishPlatforms : [],
+          videoPath: outputPaths[0],
+          title: cap.title,
+          description: cap.description,
+          tags: cap.tags,
+          onLog: (msg: string) => tracker.progress(msg),
+          signal,
+        });
+      }
       // 热搜成片:把该选题记为【已用】(下次选题排除)——只在【至少一个平台发布成功】、或【仅存本地已出片】
       //   时才记;发布全失败 → 不记 → 下次还能重试同一热点。(用户要求:有一个平台上传成功才记录。)
       if (input.engine === 'hotspot' && hotspotTopic?.id) {

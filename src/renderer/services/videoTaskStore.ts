@@ -30,7 +30,6 @@ import {
   type VideoCreationProgress,
   type VideoCreationProgressStep,
 } from './videoCreation';
-import { MATRIX_EDITION } from '../matrixEdition';
 
 const TASKS_KEY = 'noobclaw_video_tasks';
 const RUNS_KEY = 'noobclaw_video_runs';
@@ -222,7 +221,7 @@ class VideoTaskStore {
    * —— 这对「本地出片」恰好合理(出片本来就要 app 在前台)。单任务串行,跟手动跑互斥。
    */
   private startScheduler() {
-    if (MATRIX_EDITION) return; // 矩阵 edition:不跑旧热搜成片定时,避免与矩阵任务冲突
+    // 矩阵 edition:热搜成片已迁入矩阵菜单,需要定点/手动运行 → 照常起定时调度。
     if (typeof setInterval === 'undefined' || this.schedulerTimer) return;
     // setInterval 首跳在 60s 后 —— 顺带给 app 启动留出缓冲,不在刚打开就突然开跑。
     this.schedulerTimer = setInterval(() => {

@@ -570,6 +570,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     if (currentPlatform === 'video') {
       return (
         <VideoWorkflowsPage
+          matrixMode={matrixMode}
           section={currentSection === 'create' ? 'create' : currentSection === 'history' ? 'history' : 'tasks'}
           onGoCreate={goVideoCreate}
           onBack={() => setView({ kind: 'main', section: 'tasks', platform: 'video' })}
@@ -1035,8 +1036,8 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
           active treatment. */}
       {view.kind === 'main' && !(currentPlatform === 'video' && videoInDetail) && (
         <div className="flex flex-wrap items-center gap-2 px-4 pt-3 pb-2 border-b dark:border-claude-darkBorder border-claude-border shrink-0">
-          {/* 矩阵号:只显示支持「互动涨粉」的平台(其余无 engage 剧本)。 */}
-          {(matrixMode ? PLATFORM_TABS.filter(t => MATRIX_ENGAGE_PLATFORMS.has(t.id)) : PLATFORM_TABS).map((tab) => {
+          {/* 矩阵号:显示「视频创作」(热搜成片)+ 支持「互动涨粉」的平台(其余无 engage 剧本)。 */}
+          {(matrixMode ? PLATFORM_TABS.filter(t => t.id === 'video' || MATRIX_ENGAGE_PLATFORMS.has(t.id)) : PLATFORM_TABS).map((tab) => {
             const active = currentPlatform === tab.id;
             return (
               <button

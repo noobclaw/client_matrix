@@ -102,6 +102,12 @@ export interface VideoCreationInput {
    */
   publishPlatforms?: string[];
   /**
+   * 矩阵号 edition 专用:每个发布平台选定的矩阵账号 id(平台→accountId)。
+   * 发布时按此映射用对应账号的指纹内核 CDP 上传(runMatrixDriver),每平台最多 1 个号。
+   * 非矩阵 edition 不写;矩阵 edition 走插件回退时也忽略。
+   */
+  publishAccounts?: Record<string, string>;
+  /**
    * 平台发布文案(向导可选填,覆盖 AI 自动生成):钩人标题 + 引导互动正文 + 话题标签。
    * 跟口播稿 / 视频标题是不同产物。都留空 → 出片时 AI 自动生成;填了 → 用用户的。
    */

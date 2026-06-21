@@ -585,6 +585,13 @@ const App: React.FC = () => {
     return () => window.removeEventListener('noobclaw:show-wallet', handler);
   }, []);
 
+  // 矩阵号:从深层组件(热搜成片向导「无可用账号」引导)跳到「我的矩阵账号」管理页。
+  useEffect(() => {
+    const handler = () => setMainView('matrix');
+    window.addEventListener('noobclaw:show-matrix-accounts', handler);
+    return () => window.removeEventListener('noobclaw:show-matrix-accounts', handler);
+  }, []);
+
   // Listen for command-bar submissions from the floating NSPanel window
   // (src/renderer/components/commandBar/CommandBarView.tsx). When the
   // user hits ⌘K / Ctrl+K and enters a prompt, the command bar uses a

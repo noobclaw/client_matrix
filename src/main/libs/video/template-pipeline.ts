@@ -504,16 +504,32 @@ export async function runTemplatePipeline(
         onLog: (m: string) => tracker.progress(m),
         onCost: (tk: number, usd: number) => tracker.addTokens(tk, usd),
       });
-      const { runPublishStep } = require('./publishers/runPublish');
-      await runPublishStep({
-        platforms: Array.isArray(input.publishPlatforms) ? input.publishPlatforms : [],
-        videoPath: outPath,
-        title: cap.title,
-        description: cap.description,
-        tags: cap.tags,
-        onLog: (msg: string) => tracker.progress(msg),
-        signal,
-      });
+      // 矩阵号 edition:发布走指纹内核 CDP(按平台→选定账号上传),不走扩展;非矩阵走旧 runPublishStep。
+      const { MATRIX_EDITION } = require('../../matrixEdition');
+      if (MATRIX_EDITION && wantPublish) {
+        const { runMatrixPublishStep } = require('./publishers/runMatrixPublish');
+        await runMatrixPublishStep({
+          platforms: Array.isArray(input.publishPlatforms) ? input.publishPlatforms : [],
+          accounts: (input as any).publishAccounts || {},
+          videoPath: outPath,
+          title: cap.title,
+          description: cap.description,
+          tags: cap.tags,
+          onLog: (msg: string) => tracker.progress(msg),
+          signal,
+        });
+      } else {
+        const { runPublishStep } = require('./publishers/runPublish');
+        await runPublishStep({
+          platforms: Array.isArray(input.publishPlatforms) ? input.publishPlatforms : [],
+          videoPath: outPath,
+          title: cap.title,
+          description: cap.description,
+          tags: cap.tags,
+          onLog: (msg: string) => tracker.progress(msg),
+          signal,
+        });
+      }
     } catch (e) {
       tracker.progress(`⚠️ 发布步骤异常:${String((e as Error)?.message || e).slice(0, 120)}`);
     }
