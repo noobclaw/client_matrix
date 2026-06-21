@@ -152,12 +152,25 @@ function mxProgressToScenario(taskId: string, resp: any): ScenarioRunProgress | 
     { name: '', status: running ? 'running' : status === 'error' ? 'error' : 'done', logs: mapped },
     { name: '', status: status === 'done' ? 'done' : 'waiting', logs: [] },
   ];
-  const action_progress: Record<string, { done: number; target: number }> = {};
-  const tg = p.targets || {}; const dn = p.done || {};
-  for (const k of ['like', 'follow', 'comment']) {
-    if ((tg as any)[k] > 0 || (dn as any)[k] > 0) action_progress[k] = { done: (dn as any)[k] || 0, target: (tg as any)[k] || 0 };
-  }
-  return { taskId, status, currentStep: status === 'done' ? 3 : 2, steps, error: p.error, action_progress };
+  const apOf = (tg: any, dn: any): Record<string, { done: number; target: number }> => {
+    const ap: Record<string, { done: number; target: number }> = {};
+    for (const k of ['like', 'follow', 'comment']) {
+      if ((tg || {})[k] > 0 || (dn || {})[k] > 0) ap[k] = { done: (dn || {})[k] || 0, target: (tg || {})[k] || 0 };
+    }
+    return ap;
+  };
+  const action_progress = apOf(p.targets, p.done);
+  // 每个账号独立进度(详情页聚合进度下方逐号展示)。
+  const pa = p.perAccount || {};
+  const accounts = Object.keys(pa).map((id) => {
+    const a = pa[id];
+    return {
+      id, name: a.displayName || id, status: a.status || 'running',
+      action_progress: apOf(a.targets, a.done),
+      logs: (a.logs || []).map((l: any, i: number) => ({ time: hhmmss(l.ts), status: (running && i === (a.logs.length - 1) ? 'running' : 'done') as any, message: l.msg })),
+    };
+  });
+  return { taskId, status, currentStep: status === 'done' ? 3 : 2, steps, error: p.error, action_progress, accounts };
 }
 
 class ScenarioService {

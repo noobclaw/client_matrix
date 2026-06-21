@@ -138,16 +138,28 @@ export async function matrixCmd(
       return await kernelEval(accountId, expr);
     }
 
-    // 输入框打字(搜索框):focus 后 execCommand insertText。
+    // 输入框打字(搜索框)。⚠️ 抖音搜索框是 React 受控 input —— execCommand insertText
+    // 不触发 React onChange,值进不去(搜索框看着空)。必须用【原生 value setter +
+    // 派 input/change】绕过 React 的 _valueTracker,跟 set_input_value 同法。
+    // input/textarea 走 setter;contentEditable 才回落 execCommand。
+    // 拿不到可写目标时返回 {ok:false} → 让剧本的 fill 兜底(显式 selector)接力。
     case 'type': {
       const sel = params?.selector ? String(params.selector) : '';
       const text = String(params?.text ?? '');
       const expr =
         '(function(){' + DEEP_FN +
         'var el=' + (sel ? 'nbDeepAll(' + s(sel) + ')[0]' : 'document.activeElement') + ';' +
-        'if(!el)return {ok:false,error:"no_target"};try{el.focus();' +
-        'document.execCommand("insertText",false,' + s(text) + ');return {ok:true};}' +
-        'catch(e){return {ok:false,error:String(e&&e.message||e).slice(0,80)};}})()';
+        'if(!el)return {ok:false,error:"no_target"};' +
+        'var tag=(el.tagName||"").toUpperCase();try{el.focus();}catch(e){}' +
+        'try{' +
+        'if(tag==="INPUT"||tag==="TEXTAREA"){' +
+        'var proto=tag==="TEXTAREA"?window.HTMLTextAreaElement.prototype:window.HTMLInputElement.prototype;' +
+        'var setter=Object.getOwnPropertyDescriptor(proto,"value").set;setter.call(el,' + s(text) + ');' +
+        'el.dispatchEvent(new Event("input",{bubbles:true}));el.dispatchEvent(new Event("change",{bubbles:true}));' +
+        'return {ok:true};}' +
+        'if(el.isContentEditable){document.execCommand("insertText",false,' + s(text) + ');return {ok:true};}' +
+        'return {ok:false,error:"not_editable:"+tag};' +
+        '}catch(e){return {ok:false,error:String(e&&e.message||e).slice(0,80)};}})()';
       return await kernelEval(accountId, expr);
     }
 

@@ -196,6 +196,8 @@ interface MatrixLiveProgress {
   targets: { like: number; follow: number; comment: number };
   done: { like: number; follow: number; comment: number };
   perAccountTargets: Record<string, { like: number; follow: number; comment: number }>;
+  // 每个账号独立进度(详情页可切换查看):各号目标/完成/状态/日志互不影响。
+  perAccount: Record<string, { displayName: string; status: string; targets: { like: number; follow: number; comment: number }; done: { like: number; follow: number; comment: number }; logs: Array<{ ts: number; msg: string }> }>;
   logs: Array<{ ts: number; accountId: string; msg: string }>;
   error?: string;
 }
@@ -225,41 +227,68 @@ async function runMatrixTaskById(taskId: string, kernelPath?: string): Promise<{
     matrixAbort = new AbortController();
     // 进度初值:target 先按配额上限×账号数兜底(没收到 setActionTargets 前也有个分母);
     // 收到每号真实 target 后用 perAccountTargets 求和覆盖,进度条能跑满。
-    const accN = (task.accountIds || []).length || 1;
+    const accIds: string[] = task.accountIds || [];
+    const accN = accIds.length || 1;
     const q: any = task.quota || {};
+    const zero = () => ({ like: 0, follow: 0, comment: 0 });
+    const perAccount: MatrixLiveProgress['perAccount'] = {};
+    for (const aid of accIds) {
+      perAccount[aid] = {
+        displayName: getAccount(aid)?.displayName || aid,
+        status: 'running',
+        targets: { like: q.daily_like_max || 0, follow: q.daily_follow_max || 0, comment: q.daily_comment_max || 0 }, // 收到真实 setActionTargets 前用配额上限兜底
+        done: zero(), logs: [],
+      };
+    }
     matrixLiveProgress = {
       taskId: task.id, status: 'running', startedAt,
       targets: { like: (q.daily_like_max || 0) * accN, follow: (q.daily_follow_max || 0) * accN, comment: (q.daily_comment_max || 0) * accN },
-      done: { like: 0, follow: 0, comment: 0 },
-      perAccountTargets: {}, logs: [],
+      done: zero(),
+      perAccountTargets: {}, perAccount, logs: [],
     };
     const pushLog = (accountId: string, msg: string) => {
-      if (matrixLiveProgress) { matrixLiveProgress.logs.push({ ts: Date.now(), accountId, msg }); if (matrixLiveProgress.logs.length > 400) matrixLiveProgress.logs.splice(0, matrixLiveProgress.logs.length - 400); }
+      if (!matrixLiveProgress) return;
+      matrixLiveProgress.logs.push({ ts: Date.now(), accountId, msg });
+      if (matrixLiveProgress.logs.length > 400) matrixLiveProgress.logs.splice(0, matrixLiveProgress.logs.length - 400);
+      const pa = matrixLiveProgress.perAccount[accountId];
+      if (pa) { pa.logs.push({ ts: Date.now(), msg }); if (pa.logs.length > 200) pa.logs.splice(0, pa.logs.length - 200); }
     };
     const recomputeTargets = () => {
       if (!matrixLiveProgress) return;
       const pa = matrixLiveProgress.perAccountTargets;
       if (!Object.keys(pa).length) return;
-      const sum = { like: 0, follow: 0, comment: 0 };
+      const sum = zero();
       for (const t of Object.values(pa)) { sum.like += t.like || 0; sum.follow += t.follow || 0; sum.comment += t.comment || 0; }
       matrixLiveProgress.targets = sum;
     };
     broadcastSSE('matrix:progress', { type: 'taskStart', taskId: task.id });
     runEngageTask({
-      platform: task.platform, accountIds: task.accountIds || [], quota: task.quota, concurrency: task.concurrency, kernelPath, signal: matrixAbort.signal,
+      platform: task.platform, accountIds: accIds, quota: task.quota, concurrency: task.concurrency, kernelPath, signal: matrixAbort.signal,
       onLog: (accountId, msg) => { pushLog(accountId, msg); broadcastSSE('matrix:progress', { type: 'log', accountId, msg }); },
-      onTargets: (accountId, t) => { if (matrixLiveProgress) { matrixLiveProgress.perAccountTargets[accountId] = { like: t.like || 0, follow: t.follow || 0, comment: t.comment || 0 }; recomputeTargets(); } },
+      onTargets: (accountId, t) => {
+        if (!matrixLiveProgress) return;
+        const tg = { like: t.like || 0, follow: t.follow || 0, comment: t.comment || 0 };
+        matrixLiveProgress.perAccountTargets[accountId] = tg;
+        if (matrixLiveProgress.perAccount[accountId]) matrixLiveProgress.perAccount[accountId].targets = tg; // 该号真实随机配额覆盖兜底
+        recomputeTargets();
+      },
       onItem: (item) => {
         collected.set(item.accountId, item);
-        // done = 各号最新累计 counts 之和(onItem 抛的 counts 是该号到目前的累计)。
         if (matrixLiveProgress) {
-          const sum = { like: 0, follow: 0, comment: 0 };
+          // 聚合 done = 各号最新累计 counts 之和;同时记每号自己的 done(详情页切换看)。
+          const sum = zero();
           for (const it of collected.values()) { sum.like += it.counts?.like || 0; sum.follow += it.counts?.follow || 0; sum.comment += it.counts?.comment || 0; }
           matrixLiveProgress.done = sum;
+          const pa = matrixLiveProgress.perAccount[item.accountId];
+          if (pa && item.counts) pa.done = { like: item.counts.like || 0, follow: item.counts.follow || 0, comment: item.counts.comment || 0 };
         }
         broadcastSSE('matrix:progress', { type: 'item', accountId: item.accountId, state: item.state, reason: item.reason, counts: item.counts });
       },
     }).then((report) => {
+      // 收尾:把每号最终状态(success/failed/skipped)写回 perAccount。
+      if (matrixLiveProgress && matrixLiveProgress.taskId === task.id) {
+        for (const it of (report?.items || [])) { const pa = matrixLiveProgress.perAccount[it.accountId]; if (pa) pa.status = it.state; }
+      }
       if (matrixLiveProgress && matrixLiveProgress.taskId === task.id) matrixLiveProgress.status = 'done';
       setTaskLastRun(task.id, Date.now());
       // 存运行记录(供「矩阵涨粉运行记录」页)

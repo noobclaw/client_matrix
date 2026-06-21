@@ -300,6 +300,15 @@ export interface ScenarioRunProgress {
    *  TaskDetailPage; only present while status === 'running'. */
   tokens_used?: number;
   cost_usd?: number;
+  /** 矩阵号专用:每个账号独立进度(详情页在聚合进度下方逐号展示,各号互不影响)。
+   *  非矩阵任务不带此字段 → 详情页那段 per-account 区块不渲染,零影响。 */
+  accounts?: Array<{
+    id: string;
+    name: string;
+    status: string;
+    action_progress: Record<string, { done: number; target: number }>;
+    logs: ScenarioProgressLog[];
+  }>;
 }
 
 export interface XhsLoginStatus {

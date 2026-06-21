@@ -589,6 +589,8 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
   const [toast, setToast] = useState<{ kind: 'ok' | 'warn' | 'err'; text: string } | null>(null);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // 矩阵号:选中查看哪个账号的单独明细(null = 只看聚合)。
+  const [acctTab, setAcctTab] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
@@ -1557,6 +1559,48 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
             </div>
           </div>
         )
+      )}
+
+      {/* 矩阵号:各账号独立进度。聚合卡在上方(所有账号配额总和),这里逐号展示
+          每个账号自己随机到的配额 + 完成数 + 状态,点一个号可展开它独立的运行明细。
+          非矩阵任务 progress.accounts 为空 → 整块不渲染,零影响。 */}
+      {progress?.accounts && progress.accounts.length > 0 && (
+        <div className="mb-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3">
+          <div className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-2">
+            🧬 {isZh ? `各账号独立进度（${progress.accounts.length} 个,点账号看它单独的运行明细）` : `Per-account progress (${progress.accounts.length})`}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {progress.accounts.map(a => {
+              const ap = a.action_progress || {};
+              const active = acctTab === a.id;
+              const dot = (a.status === 'success' || a.status === 'done') ? 'bg-green-500'
+                : (a.status === 'failed' || a.status === 'error') ? 'bg-red-500'
+                : a.status === 'skipped' ? 'bg-gray-400'
+                : 'bg-blue-500 animate-pulse';
+              return (
+                <button key={a.id} type="button" onClick={() => setAcctTab(active ? null : a.id)}
+                  className={`text-left rounded-lg border px-3 py-2 text-xs transition-colors ${active ? 'border-green-500 bg-green-500/10' : 'border-gray-200 dark:border-gray-700 hover:border-green-500/50'}`}>
+                  <div className="flex items-center gap-1.5 font-medium dark:text-gray-200">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${dot}`} />{a.name}
+                  </div>
+                  <div className="mt-1 font-mono text-gray-600 dark:text-gray-300">
+                    👍 {ap.like?.done ?? 0}/{ap.like?.target ?? 0} · ➕ {ap.follow?.done ?? 0}/{ap.follow?.target ?? 0} · 💬 {ap.comment?.done ?? 0}/{ap.comment?.target ?? 0}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          {acctTab && (() => {
+            const a = progress.accounts!.find(x => x.id === acctTab);
+            if (!a) return null;
+            return (
+              <div className="mt-3 rounded-lg border border-gray-200 dark:border-gray-700">
+                <div className="px-3 py-1.5 text-[11px] text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">{a.name} · {isZh ? '运行明细' : 'Run detail'}</div>
+                <StepLogBox logs={a.logs} isActive={progress.status === 'running'} renderLogMessage={renderLogMessage} />
+              </div>
+            );
+          })()}
+        </div>
       )}
 
       {/* Stats — link-mode tasks AND run_interval='once' tasks are one-shot
