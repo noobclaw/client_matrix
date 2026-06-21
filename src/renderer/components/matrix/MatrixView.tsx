@@ -13,7 +13,7 @@ type AccountStatus = 'idle' | 'running' | 'login_required' | 'limited' | 'banned
 interface MatrixAccount {
   id: string; platform: string; displayName: string; group?: string; persona?: string; status: AccountStatus;
   proxy?: { protocol?: string; host: string; port: number; username?: string; password?: string; geo?: string; health?: string };
-  keywords?: string[]; kernelVersion?: string; nickname?: string; boundUid?: string;
+  keywords?: string[]; kernelVersion?: string; nickname?: string; displayId?: string; avatar?: string; boundUid?: string;
 }
 interface MatrixTask {
   id: string; platform: string; type: 'engage'; name: string; enabled: boolean; accountIds: string[];
@@ -295,13 +295,27 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate, onShowIn
                     : 'text-gray-500 bg-gray-500/15';
                   return (
                   <div key={a.id} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4 flex flex-col gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${STATUS_DOT[a.status]}`} />
-                      <span className="text-sm font-medium dark:text-white shrink-0">{a.displayName}</span>
-                      {a.nickname && <span className="text-xs text-gray-400 truncate min-w-0" title={a.boundUid ? `uid: ${a.boundUid}` : undefined}>@{a.nickname}</span>}
-                      <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${stChip}`}>{STATUS_LABEL[a.status]}</span>
-                      {a.group && <span className="shrink-0 text-xs text-gray-400">· {a.group}</span>}
-                      {a.persona && <span className="shrink-0 text-xs text-gray-400">· 人设✓</span>}
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      {/* 头像 + 状态点角标 */}
+                      <div className="relative shrink-0">
+                        {a.avatar
+                          ? <img src={a.avatar} referrerPolicy="no-referrer" alt="" className="w-9 h-9 rounded-full object-cover bg-gray-200 dark:bg-gray-700" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+                          : <div className="w-9 h-9 rounded-full bg-violet-500/20 text-violet-500 flex items-center justify-center text-sm font-bold">{(a.nickname || a.displayName || '?').slice(0, 1)}</div>}
+                        <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white dark:border-gray-900 ${STATUS_DOT[a.status]}`} />
+                      </div>
+                      {/* 昵称(真实)+ 平台号 + 备注 */}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-sm font-semibold dark:text-white truncate">{a.nickname || a.displayName}</span>
+                          <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${stChip}`}>{STATUS_LABEL[a.status]}</span>
+                          {a.persona && <span className="shrink-0 text-[10px] text-gray-400">人设✓</span>}
+                        </div>
+                        <div className="text-[11px] text-gray-500 dark:text-gray-400 truncate" title={a.boundUid ? `uid: ${a.boundUid}` : undefined}>
+                          {a.displayId ? `${PLATFORM_LABEL[a.platform] || ''}号: ${a.displayId}` : (a.nickname ? '' : '未读取到平台号')}
+                          {a.nickname && a.displayName && a.displayName !== a.nickname ? `${a.displayId ? ' · ' : ''}备注: ${a.displayName}` : ''}
+                          {a.group ? ` · ${a.group}` : ''}
+                        </div>
+                      </div>
                     </div>
                     <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{a.keywords && a.keywords.length ? `🏷️ ${a.keywords.join(' · ')}` : <span className="text-amber-500">未配关键词(互动需要)</span>}</div>
                     {/* 右侧可点击按钮:全色按钮 */}

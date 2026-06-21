@@ -403,64 +403,81 @@ export async function kernelSetFileInput(accountId: string, selector: string, fi
 
 // ── 登录态检测(读 cookie;httpOnly 也能经 CDP 读到,document.cookie 读不到) ──
 
-// 各平台「已登录」的标志性 cookie(命中任一即视为已登录)。
+// 各平台「已登录」的标志性 cookie(命中任一即视为已登录)。2026-06-21 全平台真机 CDP 实测核对:
+//   kuaishou 原 web_st 是错的 → 真实 webday7_st;binance/youtube 原本没有 → 补上。
 const LOGIN_COOKIES: Record<string, string[]> = {
   douyin: ['sessionid', 'sessionid_ss', 'sid_guard', 'passport_auth_status'],
   xhs: ['web_session'],
   bilibili: ['SESSDATA', 'DedeUserID'],
   shipinhao: ['sessionid', 'wxuin'],
-  kuaishou: ['userId', 'kuaishou.server.web_st'],
+  kuaishou: ['userId', 'kuaishou.server.webday7_st'],   // ⚠️ 实测:是 webday7_st 不是 web_st
   toutiao: ['sessionid', 'sso_uid_tt'],
   tiktok: ['sessionid', 'sid_tt'],
   x: ['auth_token'],
+  binance: ['logined', 'p20t'],                          // 新增(实测)
+  youtube: ['SID', 'SAPISID', 'LOGIN_INFO'],             // 新增(实测)
 };
 
-/** 该号当前是否已登录对应平台(按标志性 cookie 判断)。session 不在/读失败返回 false。 */
+/** 该号当前是否已登录对应平台(按标志性 cookie 判断)。session 不在/读失败返回 false。
+ *  ⚠️ 用 getAllCookies(读 profile 里【所有域】的 cookie),而不是当前页域 —— 否则在创作者中心
+ *  子域(creator./member./cp./mp.toutiao 等)判断时会漏掉挂在主站父域的登录 cookie。 */
 export async function checkKernelLogin(accountId: string, platform: string): Promise<boolean> {
   if (!sessions.get(accountId)) return false;
   try {
     const s = await getPage(accountId);
-    const r = await send(s, 'Network.getCookies', {}); // 当前页 cookie(已导航到平台站)
-    const names = new Set<string>((r?.cookies || []).map((c: any) => String(c.name)));
+    let cookies: any[] = [];
+    try { const r = await send(s, 'Network.getAllCookies', {}); cookies = r?.cookies || []; } catch { /* fallback below */ }
+    if (!cookies.length) { const r2 = await send(s, 'Network.getCookies', {}); cookies = r2?.cookies || []; }
+    const names = new Set<string>(cookies.map((c: any) => String(c.name)));
     const need = LOGIN_COOKIES[platform] || [];
     return need.some((n) => names.has(n));
   } catch { return false; }
 }
 
-// 读登录后的真实身份(昵称 + uid)。昵称【不在 cookie】(登录 cookie 是 httpOnly 令牌),
-// 要从页面 SSR/接口读;uid 部分平台在 cookie 里(明文),部分要从页面读。各平台来源不同。
-// 抖音已真机验证:RENDER_DATA(SSR JSON)里有 nickname + uid。其它平台 nickname 待逐个真机补。
-export async function kernelReadIdentity(accountId: string, platform: string): Promise<{ uid?: string; nickname?: string }> {
+// 读登录后的真实身份(昵称 / 平台号 / uid / 头像)。【昵称不在 cookie】—— 登录 cookie 是 httpOnly
+// 令牌;昵称要从各平台的页面 SSR / 接口读,uid 部分在明文 cookie、部分在页面。来源全部 2026-06-21
+// 真机 CDP 实测确定(见 reference_matrix_account_identity_sources)。
+export interface KernelIdentity { uid?: string; nickname?: string; displayId?: string; avatar?: string }
+
+// 各平台「读身份」的页面表达式(在内核页里 eval;async 的靠 awaitPromise 兜)。返回 JSON 字符串。
+const IDENTITY_EXPR: Record<string, string> = {
+  // 抖音:RENDER_DATA(SSR JSON)。nickname/uid/抖音号(unique_id)/头像。
+  douyin: '(function(){try{var el=document.getElementById("RENDER_DATA");var d="";try{d=decodeURIComponent((el&&el.textContent)||"");}catch(e){d=(el&&el.textContent)||"";}var n=d.match(/"nickname":"([^"]{1,40})"/),u=d.match(/"uid":"(\\d{6,25})"/),s=d.match(/"unique_id":"([^"]{1,40})"/),a=d.match(/"avatar_thumb":\\{"uri":"[^"]*","url_list":\\["([^"]+)"/)||d.match(/"avatarUrl":"([^"]+)"/);return JSON.stringify({nickname:n&&n[1],uid:u&&u[1],displayId:s&&s[1]||null,avatar:a&&(a[1]||"").replace(/\\\\u002F/g,"/")});}catch(e){return "{}";}})()',
+  // 小红书:/me 接口(edith 子域,带 cred 可跨子域)。nickname/小红书号(red_id)/uid(user_id)/头像。
+  xhs: '(async function(){try{var r=await fetch("https://edith.xiaohongshu.com/api/sns/web/v2/user/me",{credentials:"include"});var j=await r.json();var d=(j&&j.data)||{};if(d.guest)return "{}";return JSON.stringify({nickname:d.nickname,displayId:d.red_id,uid:d.user_id,avatar:d.images||d.imageb});}catch(e){return "{}";}})()',
+  // B站:nav 接口最干净。uname/mid/face。
+  bilibili: '(async function(){try{var r=await fetch("https://api.bilibili.com/x/web-interface/nav",{credentials:"include"});var j=await r.json();var d=(j&&j.data)||{};if(!d.isLogin)return "{}";return JSON.stringify({nickname:d.uname,uid:String(d.mid||""),avatar:d.face});}catch(e){return "{}";}})()',
+  // TikTok:app-context.user;不行回落 user-detail(在自己主页时)。nickname/uniqueId(handle)/secUid/头像。
+  tiktok: '(function(){try{var U=window.__UNIVERSAL_DATA_FOR_REHYDRATION__,u={};if(U){var sc=U.__DEFAULT_SCOPE__||{};u=(sc["webapp.app-context"]&&sc["webapp.app-context"].user)||{};if((!u||!u.uniqueId)&&sc["webapp.user-detail"]&&sc["webapp.user-detail"].userInfo)u=sc["webapp.user-detail"].userInfo.user||u;}return JSON.stringify({nickname:u.nickname||u.nickName||null,displayId:u.uniqueId||null,uid:u.uid||u.secUid||null,avatar:u.avatarThumb||u.avatarLarger||null});}catch(e){return "{}";}})()',
+  // 快手:页面 state(自己主页最准)。user_name/快手号(kwaiId)/头像;uid 另从 userId cookie 补。
+  kuaishou: '(function(){try{var h=document.documentElement.innerHTML;var n=h.match(/"user_name":"([^"]{1,40})"/)||h.match(/"userName":"([^"]{1,40})"/);var k=h.match(/"kwaiId":"([^"]{1,40})"/);var a=h.match(/"headurl":"([^"]+)"/)||h.match(/"headUrl":"([^"]+)"/);return JSON.stringify({nickname:n&&n[1],displayId:k&&k[1]||null,avatar:a&&a[1]||null});}catch(e){return "{}";}})()',
+  // 头条:创作端页 screen_name;uid 从 sso_uid_tt cookie 补。
+  toutiao: '(function(){try{var h=document.documentElement.innerHTML;var n=h.match(/"screen_name":"([^"]{1,40})"/)||h.match(/"nick_name":"([^"]{1,40})"/)||h.match(/"name":"([^"]{1,40})"/);var a=h.match(/"avatar_url":"([^"]+)"/);return JSON.stringify({nickname:n&&n[1],avatar:a&&a[1]||null});}catch(e){return "{}";}})()',
+  // 视频号:助手页 finder 信息。nickname/视频号ID(finderUsername)/头像。
+  shipinhao: '(function(){try{var h=document.documentElement.innerHTML;var n=h.match(/"nickname":"([^"]{1,40})"/);var f=h.match(/"finderUsername":"([^"]{1,60})"/)||h.match(/"username":"(v2_[^"]{1,60})"/)||h.match(/视频号ID[^A-Za-z0-9]*([A-Za-z0-9]{10,30})/);var a=h.match(/"headImgUrl":"([^"]+)"/)||h.match(/"headUrl":"([^"]+)"/);return JSON.stringify({nickname:n&&n[1]||null,displayId:f&&f[1]||null,avatar:a&&a[1]||null});}catch(e){return "{}";}})()',
+  // 币安广场:localStorage uid + 主页 URL handle + 标题昵称。
+  binance: '(function(){try{var uid=null;try{uid=localStorage.getItem("operation_list_user_id");}catch(e){}var nm=(document.title.match(/(.+?)的个人资料/)||[])[1]||null;var hd=(location.href.match(/square\\/profile\\/([A-Za-z0-9_.\\-]+)/)||[])[1]||null;return JSON.stringify({uid:uid,nickname:nm,displayId:hd});}catch(e){return "{}";}})()',
+  // YouTube:头像从 masthead 取;昵称/handle 待用频道页补(account_menu 结构刁钻,先给头像)。
+  youtube: '(function(){try{var img=document.querySelector("#avatar-btn img, button#avatar-btn img, ytd-topbar-menu-button-renderer img");return JSON.stringify({avatar:img&&img.src||null});}catch(e){return "{}";}})()',
+};
+// uid 在明文 cookie 里的平台(页面 expr 拿不到 uid 时,从 cookie 补)。
+const UID_COOKIE: Record<string, string> = { kuaishou: 'userId', toutiao: 'sso_uid_tt', bilibili: 'DedeUserID' };
+
+export async function kernelReadIdentity(accountId: string, platform: string): Promise<KernelIdentity> {
   try {
     const s = await getPage(accountId);
-    // 1) 抖音:从 #RENDER_DATA 抠 nickname + uid(已验证)。
-    if (platform === 'douyin') {
-      const expr = '(function(){try{var el=document.getElementById("RENDER_DATA");var raw=el?el.textContent:"";var d="";try{d=decodeURIComponent(raw||"");}catch(e){d=raw||"";}var n=d.match(/"nickname":"([^"]{1,40})"/);var u=d.match(/"uid":"(\\d{5,25})"/);return JSON.stringify({nickname:n?n[1]:null,uid:u?u[1]:null});}catch(e){return "{}";}})()';
-      const r = await kernelEval(accountId, expr);
-      try { const o = JSON.parse(r || '{}'); return { uid: o.uid || undefined, nickname: o.nickname || undefined }; } catch { return {}; }
+    const out: KernelIdentity = {};
+    const expr = IDENTITY_EXPR[platform];
+    if (expr) {
+      try { const o = JSON.parse((await kernelEval(accountId, expr)) || '{}'); if (o && typeof o === 'object') { out.uid = o.uid || undefined; out.nickname = o.nickname || undefined; out.displayId = o.displayId || undefined; out.avatar = o.avatar || undefined; } } catch { /* ignore */ }
     }
-    // 2) 部分平台 uid 在明文 cookie 里(CDP 读得到 httpOnly 也读得到普通)。nickname 待补。
-    const UID_COOKIE: Record<string, string> = { bilibili: 'DedeUserID', kuaishou: 'userId', toutiao: 'sso_uid_tt' };
-    const cookieName = UID_COOKIE[platform];
-    if (cookieName) {
-      const cr = await send(s, 'Network.getCookies', {});
-      const c = (cr?.cookies || []).find((x: any) => String(x.name) === cookieName);
-      return { uid: c ? String(c.value) : undefined };
+    // uid 兜底:从明文 cookie 取(getAllCookies 跨域)。
+    if (!out.uid && UID_COOKIE[platform]) {
+      try { const cr = await send(s, 'Network.getAllCookies', {}); const c = (cr?.cookies || []).find((x: any) => String(x.name) === UID_COOKIE[platform]); if (c) out.uid = String(c.value); } catch { /* ignore */ }
     }
-    // 3) 其它平台(xhs/x/tiktok/binance/youtube):身份来源未逐个验证。
-    //    先做【诊断 dump】:CDP 读全部真实 cookie 名 + 页面探测昵称来源,写 cowork.log,
-    //    用户每个平台登一个号刷新一次 → 我据真实日志逐个补准确的提取逻辑(不靠猜)。
-    try {
-      const cr = await send(s, 'Network.getCookies', {});
-      const cookieNames = (cr?.cookies || []).map((c: any) => String(c.name));
-      const probeExpr = '(function(){var r={globals:[],nick:null,uidGuess:null};' +
-        "['__INITIAL_STATE__','__INIT_PROPS__','SIGI_STATE','__UNIVERSAL_DATA_FOR_REHYDRATION__','__NUXT__','__APOLLO_STATE__','ytInitialData','ytcfg','RENDER_DATA','__BiliUser__'].forEach(function(k){try{if(window[k])r.globals.push(k);}catch(e){}});" +
-        'try{var h=document.documentElement.innerHTML;var m=h.match(/"nickname":"([^"]{1,40})"/)||h.match(/"name":"([^"]{1,40})"/);if(m)r.nick=m[1];var u=h.match(/"(uid|userId|user_id|mid)":"?(\\d{5,25})"?/);if(u)r.uidGuess=u[2];}catch(e){}' +
-        'return JSON.stringify(r);})()';
-      const probe = await kernelEval(accountId, probeExpr);
-      coworkLog('INFO', 'matrix-identity', `probe ${platform}`, { cookieNames, probe });
-      try { const o = JSON.parse(probe || '{}'); return { uid: o.uidGuess || undefined, nickname: o.nick || undefined }; } catch { return {}; }
-    } catch { return {}; }
+    // 读不到任何身份 → 记一条诊断(便于后续按真实结构补),不影响登录。
+    if (!out.nickname && !out.uid) coworkLog('INFO', 'matrix-identity', `identity empty for ${platform}`, {});
+    return out;
   } catch { return {}; }
 }
 

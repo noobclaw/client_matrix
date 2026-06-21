@@ -54,8 +54,11 @@ export interface MatrixAccount {
   track?: string;
   // 绑定的指纹内核版本(指纹稳定:一号长期用固定版本)。空 = 用任意已装版本。
   kernelVersion?: string;
-  // 登录后从平台页面/接口读到的真实身份(昵称展示;uid 用于「换号告警」绑定校验)。
+  // 登录后从平台页面/接口读到的真实身份。nickname 昵称展示;displayId 平台号(抖音号/小红书号/
+  // 快手号/@handle/视频号ID 等,用户可辨识);avatar 头像 URL;boundUid 内部 uid(「换号告警」绑定校验)。
   nickname?: string;
+  displayId?: string;
+  avatar?: string;
   boundUid?: string;
 }
 

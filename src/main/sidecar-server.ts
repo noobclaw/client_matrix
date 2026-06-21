@@ -1299,9 +1299,9 @@ const server = http.createServer(async (req, res) => {
                       const { kernelReadIdentity } = await import('./libs/matrix/kernelPool');
                       const { setAccountIdentity } = await import('./libs/matrix/accountManager');
                       ident = await kernelReadIdentity(acc.id, acc.platform);
-                      setAccountIdentity(acc.id, { nickname: ident.nickname, boundUid: ident.uid });
+                      setAccountIdentity(acc.id, { nickname: ident.nickname, displayId: ident.displayId, avatar: ident.avatar, boundUid: ident.uid });
                     } catch { /* 身份读取失败不影响登录 */ }
-                    broadcastSSE('matrix:account', { id: acc.id, status: 'idle', nickname: ident.nickname, boundUid: ident.uid });
+                    broadcastSSE('matrix:account', { id: acc.id, status: 'idle', nickname: ident.nickname, displayId: ident.displayId, avatar: ident.avatar, boundUid: ident.uid });
                     break;
                   }
                 }
@@ -1323,8 +1323,8 @@ const server = http.createServer(async (req, res) => {
               let ident: any = {};
               if (loggedIn) {
                 setAccountStatus(acc.id, 'idle');
-                try { ident = await kernelReadIdentity(acc.id, acc.platform); setAccountIdentity(acc.id, { nickname: ident.nickname, boundUid: ident.uid }); } catch { /* ignore */ }
-                broadcastSSE('matrix:account', { id: acc.id, status: 'idle', nickname: ident.nickname, boundUid: ident.uid });
+                try { ident = await kernelReadIdentity(acc.id, acc.platform); setAccountIdentity(acc.id, { nickname: ident.nickname, displayId: ident.displayId, avatar: ident.avatar, boundUid: ident.uid }); } catch { /* ignore */ }
+                broadcastSSE('matrix:account', { id: acc.id, status: 'idle', nickname: ident.nickname, displayId: ident.displayId, avatar: ident.avatar, boundUid: ident.uid });
               }
               return writeJSON(res, 200, { ok: true, loggedIn, nickname: ident.nickname });
             } catch (e: any) {
