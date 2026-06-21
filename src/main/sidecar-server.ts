@@ -1293,7 +1293,15 @@ const server = http.createServer(async (req, res) => {
                   try { ok = await checkKernelLogin(acc.id, acc.platform); } catch { ok = false; }
                   if (ok) {
                     setAccountStatus(acc.id, 'idle');
-                    broadcastSSE('matrix:account', { id: acc.id, status: 'idle' });
+                    // 读真实身份(昵称 + uid)写回账号,推给 UI 显示。
+                    let ident: any = {};
+                    try {
+                      const { kernelReadIdentity } = await import('./libs/matrix/kernelPool');
+                      const { setAccountIdentity } = await import('./libs/matrix/accountManager');
+                      ident = await kernelReadIdentity(acc.id, acc.platform);
+                      setAccountIdentity(acc.id, { nickname: ident.nickname, boundUid: ident.uid });
+                    } catch { /* 身份读取失败不影响登录 */ }
+                    broadcastSSE('matrix:account', { id: acc.id, status: 'idle', nickname: ident.nickname, boundUid: ident.uid });
                     break;
                   }
                 }
@@ -1306,14 +1314,19 @@ const server = http.createServer(async (req, res) => {
           case 'matrix:checkLogin': {
             // 手动「刷新登录态」:立即查一次 cookie,登了就翻 idle + 推 SSE。
             try {
-              const { getAccount, setAccountStatus } = await import('./libs/matrix/accountManager');
-              const { checkKernelLogin } = await import('./libs/matrix/kernelPool');
+              const { getAccount, setAccountStatus, setAccountIdentity } = await import('./libs/matrix/accountManager');
+              const { checkKernelLogin, kernelReadIdentity } = await import('./libs/matrix/kernelPool');
               const a = args[0] as any;
               const acc = getAccount(a?.accountId);
               if (!acc) return writeJSON(res, 200, { ok: false, error: 'account_not_found' });
               const loggedIn = await checkKernelLogin(acc.id, acc.platform);
-              if (loggedIn) { setAccountStatus(acc.id, 'idle'); broadcastSSE('matrix:account', { id: acc.id, status: 'idle' }); }
-              return writeJSON(res, 200, { ok: true, loggedIn });
+              let ident: any = {};
+              if (loggedIn) {
+                setAccountStatus(acc.id, 'idle');
+                try { ident = await kernelReadIdentity(acc.id, acc.platform); setAccountIdentity(acc.id, { nickname: ident.nickname, boundUid: ident.uid }); } catch { /* ignore */ }
+                broadcastSSE('matrix:account', { id: acc.id, status: 'idle', nickname: ident.nickname, boundUid: ident.uid });
+              }
+              return writeJSON(res, 200, { ok: true, loggedIn, nickname: ident.nickname });
             } catch (e: any) {
               return writeJSON(res, 200, { ok: false, error: e?.message || String(e) });
             }

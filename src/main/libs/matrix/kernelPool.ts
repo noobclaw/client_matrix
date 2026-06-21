@@ -427,6 +427,31 @@ export async function checkKernelLogin(accountId: string, platform: string): Pro
   } catch { return false; }
 }
 
+// 读登录后的真实身份(昵称 + uid)。昵称【不在 cookie】(登录 cookie 是 httpOnly 令牌),
+// 要从页面 SSR/接口读;uid 部分平台在 cookie 里(明文),部分要从页面读。各平台来源不同。
+// 抖音已真机验证:RENDER_DATA(SSR JSON)里有 nickname + uid。其它平台 nickname 待逐个真机补。
+export async function kernelReadIdentity(accountId: string, platform: string): Promise<{ uid?: string; nickname?: string }> {
+  try {
+    const s = await getPage(accountId);
+    // 1) 抖音:从 #RENDER_DATA 抠 nickname + uid(已验证)。
+    if (platform === 'douyin') {
+      const expr = '(function(){try{var el=document.getElementById("RENDER_DATA");var raw=el?el.textContent:"";var d="";try{d=decodeURIComponent(raw||"");}catch(e){d=raw||"";}var n=d.match(/"nickname":"([^"]{1,40})"/);var u=d.match(/"uid":"(\\d{5,25})"/);return JSON.stringify({nickname:n?n[1]:null,uid:u?u[1]:null});}catch(e){return "{}";}})()';
+      const r = await kernelEval(accountId, expr);
+      try { const o = JSON.parse(r || '{}'); return { uid: o.uid || undefined, nickname: o.nickname || undefined }; } catch { return {}; }
+    }
+    // 2) 部分平台 uid 在明文 cookie 里(CDP 读得到 httpOnly 也读得到普通)。nickname 待补。
+    const UID_COOKIE: Record<string, string> = { bilibili: 'DedeUserID', kuaishou: 'userId', toutiao: 'sso_uid_tt' };
+    const cookieName = UID_COOKIE[platform];
+    if (cookieName) {
+      const cr = await send(s, 'Network.getCookies', {});
+      const c = (cr?.cookies || []).find((x: any) => String(x.name) === cookieName);
+      return { uid: c ? String(c.value) : undefined };
+    }
+    // 3) 其它平台(xhs/x/tiktok/binance/youtube):暂未实现身份读取(需各自真机验证来源)。
+    return {};
+  } catch { return {}; }
+}
+
 // ── 生命周期 ──
 
 export function getSession(accountId: string): KernelSession | undefined {

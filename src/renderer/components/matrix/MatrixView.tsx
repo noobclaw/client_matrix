@@ -13,7 +13,7 @@ type AccountStatus = 'idle' | 'running' | 'login_required' | 'limited' | 'banned
 interface MatrixAccount {
   id: string; platform: string; displayName: string; group?: string; persona?: string; status: AccountStatus;
   proxy?: { protocol?: string; host: string; port: number; username?: string; password?: string; geo?: string; health?: string };
-  keywords?: string[]; kernelVersion?: string;
+  keywords?: string[]; kernelVersion?: string; nickname?: string; boundUid?: string;
 }
 interface MatrixTask {
   id: string; platform: string; type: 'engage'; name: string; enabled: boolean; accountIds: string[];
@@ -297,7 +297,8 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate, onShowIn
                   <div key={a.id} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4 flex flex-col gap-2">
                     <div className="flex items-center gap-2 min-w-0">
                       <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${STATUS_DOT[a.status]}`} />
-                      <span className="text-sm font-medium dark:text-white truncate">{a.displayName}</span>
+                      <span className="text-sm font-medium dark:text-white shrink-0">{a.displayName}</span>
+                      {a.nickname && <span className="text-xs text-gray-400 truncate min-w-0" title={a.boundUid ? `uid: ${a.boundUid}` : undefined}>@{a.nickname}</span>}
                       <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${stChip}`}>{STATUS_LABEL[a.status]}</span>
                       {a.group && <span className="shrink-0 text-xs text-gray-400">· {a.group}</span>}
                       {a.persona && <span className="shrink-0 text-xs text-gray-400">· 人设✓</span>}

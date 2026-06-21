@@ -149,6 +149,15 @@ export function updateAccountMeta(id: string, patch: { displayName?: string; gro
   persist();
 }
 
+/** 登录后写入真实身份(昵称展示 + uid 绑定);只更新传入的字段。 */
+export function setAccountIdentity(id: string, ident: { nickname?: string; boundUid?: string }): void {
+  const a = getAccount(id);
+  if (!a) return;
+  if (ident.nickname !== undefined && ident.nickname) a.nickname = ident.nickname;
+  if (ident.boundUid !== undefined && ident.boundUid) a.boundUid = ident.boundUid;
+  persist();
+}
+
 export function markPosted(id: string): void {
   const a = getAccount(id);
   if (!a) return;

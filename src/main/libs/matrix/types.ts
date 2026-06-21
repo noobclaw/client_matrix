@@ -54,6 +54,9 @@ export interface MatrixAccount {
   track?: string;
   // 绑定的指纹内核版本(指纹稳定:一号长期用固定版本)。空 = 用任意已装版本。
   kernelVersion?: string;
+  // 登录后从平台页面/接口读到的真实身份(昵称展示;uid 用于「换号告警」绑定校验)。
+  nickname?: string;
+  boundUid?: string;
 }
 
 /** 互动配额区间(各项在 [min,max] 内随机)。 */
