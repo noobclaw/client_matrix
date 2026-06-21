@@ -378,6 +378,13 @@ export async function kernelClick(accountId: string, x: number, y: number): Prom
   await send(s, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
 }
 
+// 可信滚轮(CDP Input.dispatchMouseEvent mouseWheel):部分平台(小红书/快手创作中心)懒加载
+// 只认真实 wheel,JS scrollTop/scrollIntoView 触发不了。
+export async function kernelWheel(accountId: string, x: number, y: number, deltaX: number, deltaY: number): Promise<void> {
+  const s = await getPage(accountId);
+  await send(s, 'Input.dispatchMouseEvent', { type: 'mouseWheel', x: x || 400, y: y || 400, deltaX: deltaX || 0, deltaY: deltaY || 0 });
+}
+
 /**
  * 原生文件注入 —— 把本地文件直接灌进 file input(CDP DOM.setFileInputFiles)。
  * 比扩展的 upload_file_from_url 干净:CDP 直接给元素 objectId + 本地路径,内核侧零网络。

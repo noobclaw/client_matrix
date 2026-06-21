@@ -1031,8 +1031,14 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
               // 自动回复粉丝(各平台 *_reply_fans_comment,track=reply_fan_comment):
               //   配置只有 引流语 + 引流概率,没有 赛道/人设/关键词 —— 详情页对齐 wizard,
               //   隐藏 赛道行 + 空关键词,改展示 引流语 / 概率。
+              // 引流语只属于「回复粉丝评论」场景。原来用 workflow_type==='auto_reply' 判断过宽:
+              // 互动涨粉(douyin_auto_engage / xhs_auto_reply_universal 等)也是 auto_reply 类型,
+              // 会被误判成回复粉丝 → 错误显示引流语。改成只认真正的 *_reply_fans_comment 场景 + track 标记。
               const isReplyFan = task.track === 'reply_fan_comment'
-                || (scenario?.workflow_type as any) === 'auto_reply';
+                || /_reply_fans_comment$/.test(scenario?.id || '');
+              // 矩阵号互动任务:赛道/关键词/人设在各账号上,task 不带 → 展示账号数而非「赛道: matrix」+ 空关键词。
+              const matrixAccountIds: string[] = Array.isArray((task as any).account_ids) ? (task as any).account_ids : [];
+              const isMatrix = task.track === 'matrix' || matrixAccountIds.length > 0;
               const sourceSegments: string[] = Array.isArray((task as any).source_segments) ? (task as any).source_segments : [];
               // v1.x: 配图配置 — 两个图文场景共用同一组字段,详情页统一渲染。
               const useRealPhotos = !!(task as any).use_real_photos;
@@ -1058,13 +1064,21 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
               })();
               return (
                 <>
+                  {/* 矩阵号:展示账号数(各账号自有赛道/关键词/人设),不显示「赛道: matrix」+ 空关键词 */}
+                  {isMatrix && (
+                    <div className="flex items-center gap-3">
+                      <span className="text-gray-400">{isZh ? '账号:' : 'Accounts:'}</span>
+                      <span className="dark:text-white font-medium">{isZh ? `${matrixAccountIds.length} 个(各用自己的赛道关键词)` : `${matrixAccountIds.length} (each uses its own keywords)`}</span>
+                      <span className="text-[10px] text-gray-500 font-mono">#{task.id.slice(0, 8)}</span>
+                    </div>
+                  )}
                   {/* v4.28.x: 链接仿写场景(XHS link mode / x_link_rewrite / binance_from_x_link)
                       隐藏「赛道/人设: 🔗 ...」整行 —— 上面已经有 type badge 标明任务类型,
                       这一行的 link-mode label 跟 badge 完全重复,#ID 也已在标题区显示;
                       用户根本没填 track / persona,展示出来纯属噪音。
                       v5.x+: douyin_image_text 同理 — 只有参考文案,没赛道没人设。
                       v6.x: binance 源平台 viral 搬运 — 人设是固定模板,这一行也跳过。 */}
-                  {!isLinkMode && !isImageTextTask && !isBinanceSourceViral && !isReplyFan && (
+                  {!isMatrix && !isLinkMode && !isImageTextTask && !isBinanceSourceViral && !isReplyFan && (
                     <div className="flex items-center gap-3">
                       <span className="text-gray-400">
                         {(isXTask || /^binance/.test(task.scenario_id)) ? (isZh ? '人设:' : 'Persona:') : (isZh ? '赛道:' : 'Track:')}
@@ -1191,7 +1205,7 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
                           </>
                         );
                       })()}
-                      {!isXTask && !isImageTextTask && !isReplyFan && (() => {
+                      {!isMatrix && !isXTask && !isImageTextTask && !isReplyFan && (() => {
                         const sid = task.scenario_id;
                         const isSourceViral = sid === 'binance_from_xhs_viral'
                                             || sid === 'binance_from_douyin_viral'

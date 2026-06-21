@@ -11,7 +11,7 @@
  * 不打包 client;③ 22 个剧本一行不改。
  */
 
-import { kernelEval, kernelExec, kernelKeypress, kernelClick } from './kernelPool';
+import { kernelEval, kernelExec, kernelKeypress, kernelClick, kernelWheel } from './kernelPool';
 
 export async function matrixCmd(
   accountId: string,
@@ -44,6 +44,13 @@ export async function matrixCmd(
       const x = Number(params?.x), y = Number(params?.y);
       if (!Number.isFinite(x) || !Number.isFinite(y)) return { ok: false, error: 'cdp_click_needs_xy' };
       try { await kernelClick(accountId, x, y); return { ok: true }; }
+      catch (e: any) { return { ok: false, error: String(e?.message || e).slice(0, 80) }; }
+    }
+    // 可信滚轮(CDP):懒加载只认真实 wheel 的页面(小红书/快手创作中心)。
+    case 'cdp_wheel': {
+      const x = Number(params?.x) || 400, y = Number(params?.y) || 400;
+      const dx = Number(params?.deltaX) || 0, dy = Number(params?.deltaY ?? params?.dy) || 0;
+      try { await kernelWheel(accountId, x, y, dx, dy); return { ok: true }; }
       catch (e: any) { return { ok: false, error: String(e?.message || e).slice(0, 80) }; }
     }
     // 当前页 URL(轻量,直接 eval,不依赖执行器在位)。
