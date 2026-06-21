@@ -38,6 +38,22 @@ const STATUS_DOT: Record<AccountStatus, string> = { idle: 'bg-green-500', runnin
 const STATUS_LABEL: Record<AccountStatus, string> = { idle: '已就绪', running: '运行中', login_required: '需登录', limited: '限流冷却', banned: '已封' };
 const FREQ_LABEL: Record<string, string> = { once: '不重复(手动)', '30min': '每30分钟', '1h': '每小时', '3h': '每3小时', '6h': '每6小时', daily_random: '每日随机一次' };
 
+// 赛道预设(下拉可选):选了自动填关键词 + 人设建议(用户仍可在下面微调)。
+const TRACK_PRESETS: Array<{ name: string; keywords: string[]; persona: string }> = [
+  { name: '美食探店', keywords: ['美食探店', '本地美食', '街边小吃', '网红餐厅', '探店打卡', '吃播', '家常菜谱', '减脂餐', '烘焙教程', '地方菜系'], persona: '爱吃会做的美食博主,评论真诚接地气、带点烟火气' },
+  { name: '日常vlog', keywords: ['vlog', '日常分享', '生活记录', '一人居', '上班族日常', '周末vlog', '晨间routine', '搬家', '装修日记', '学生日常'], persona: '记录真实生活的 vlogger,评论亲切自然' },
+  { name: '宠物', keywords: ['宠物日常', '猫咪', '狗子', '萌宠', '养宠新手', '金毛', '橘猫', '柯基', '宠物搞笑', '猫狗日常'], persona: '资深铲屎官,评论暖心有爱' },
+  { name: '音乐舞蹈', keywords: ['翻唱', '抖音神曲', '舞蹈翻跳', '吉他弹唱', '钢琴', '街舞', '原创歌曲', '民谣', '古风', '现代舞'], persona: '热爱音乐舞蹈的创作者,评论有共鸣有热情' },
+  { name: '知识科普', keywords: ['知识分享', '科普', '冷知识', '历史', '心理学', '健康知识', '财经科普', '科技', 'AI科普', '育儿知识'], persona: '爱分享干货的知识博主,评论有理有据、不卖弄' },
+  { name: '搞笑', keywords: ['搞笑', '段子', '反转', '沙雕日常', '剧情', '情景剧', '神回复', '脱口秀', '迷惑行为', '翻车现场'], persona: '幽默风趣的段子手,评论接梗会玩、轻松不尬' },
+  { name: '母婴育儿', keywords: ['宝宝日常', '亲子', '辅食', '育儿', '早教', '萌娃', '带娃', '宝妈日常', '孕期', '亲子游戏'], persona: '过来人宝妈/宝爸,评论温柔实用、有共情' },
+  { name: '游戏', keywords: ['游戏直播', '王者荣耀', '原神', '和平精英', '手游推荐', '游戏攻略', '游戏剪辑', '英雄联盟', '电竞解说', '单机游戏'], persona: '硬核游戏玩家,评论懂行、热血' },
+  { name: '影视短剧', keywords: ['电影解说', '电视剧推荐', '影评', '影视剪辑', '高分电影', '热播剧', '短剧', '反转剧情', '悬疑片', '综艺'], persona: '影视剧爱好者,评论有梗会安利、带分寸' },
+  { name: '体育健身', keywords: ['篮球', '足球', '健身', '跑步', '运动技巧', 'NBA', '减脂', '增肌', '马拉松', '极限运动'], persona: '热爱运动的健身达人,评论阳光有干货、爱鼓励' },
+  { name: '旅行', keywords: ['旅行vlog', '国内旅游', '自驾游', '民宿推荐', '景点打卡', '小众目的地', 'citywalk', '露营', '穷游攻略', '美食旅行'], persona: '走南闯北的旅行达人,评论种草、有攻略感' },
+  { name: '美妆穿搭', keywords: ['美妆教程', '穿搭', '护肤', '口红试色', '平价好物', '通勤穿搭', 'ootd', '彩妆', '发型', '复古风'], persona: '会变美爱分享的美妆穿搭博主,评论真诚种草、不浮夸' },
+];
+
 const M = () => (window as any).electron?.matrix;
 const fmtTime = (ts?: number) => { if (!ts || ts >= Number.MAX_SAFE_INTEGER) return '—'; const d = new Date(ts); return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 
@@ -120,7 +136,13 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate }) => {
   const requireKernel = (): boolean => { if (kernelReady) return true; setShowKernelModal(true); return false; };
 
   // ── 账号 ──
-  const openAdd = () => { if (!requireKernel()) return; setEditId(null); setNewName(''); setNewGroup(''); setNewPersona(''); setNewKeywords(''); setNotice(''); setShowAdd(true); };
+  const openAdd = () => { if (!requireKernel()) return; setEditId(null); setNewName(`账号${platformAccounts.length + 1}-`); setNewGroup(''); setNewPersona(''); setNewKeywords(''); setNotice(''); setShowAdd(true); };
+  // 选赛道 → 关键词 + 人设跟着填(人设为空才填,不覆盖用户已写的)。
+  const pickTrack = (name: string) => {
+    setNewGroup(name);
+    const p = TRACK_PRESETS.find((t) => t.name === name);
+    if (p) { setNewKeywords(p.keywords.join(' ')); setNewPersona((prev) => prev.trim() ? prev : p.persona); }
+  };
   const openEdit = (a: MatrixAccount) => { setEditId(a.id); setNewName(a.displayName); setNewGroup(a.group || ''); setNewPersona(a.persona || ''); setNewKeywords((a.keywords || []).join(' ')); setNotice(''); setShowAdd(true); };
   const confirmAdd = async (thenLogin: boolean) => {
     const m = M(); if (!m) { setNotice('matrix 接口未就绪'); return; }
@@ -237,25 +259,38 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate }) => {
                 <button onClick={openAdd} className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold bg-violet-500 hover:bg-violet-600 shadow-sm shadow-violet-500/25 active:scale-95">+ 添加{PLATFORM_LABEL[platform]}账号</button>
               </div>
             ) : (
-              <div className="space-y-3">
-                {platformAccounts.map((a, idx) => (
-                  <div key={a.id} className="flex items-center gap-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4">
-                    <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${STATUS_DOT[a.status]}`} />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium dark:text-white">{a.displayName}{a.group ? <span className="text-gray-400 font-normal"> · {a.group}</span> : ''}{a.persona ? <span className="text-gray-400 font-normal"> · 人设✓</span> : ''}</div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">{a.keywords && a.keywords.length ? `🏷️ ${a.keywords.join(' · ')}` : <span className="text-amber-500">未配关键词(互动需要)</span>}</div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {platformAccounts.map((a, idx) => {
+                  // 状态小标签(挪到名字后边,表示状态;不放右侧按钮区)。
+                  const stChip = a.status === 'idle' ? 'text-green-600 dark:text-green-400 bg-green-500/15'
+                    : a.status === 'login_required' ? 'text-amber-600 dark:text-amber-400 bg-amber-500/15'
+                    : a.status === 'running' ? 'text-blue-600 dark:text-blue-400 bg-blue-500/15'
+                    : a.status === 'banned' ? 'text-red-600 dark:text-red-400 bg-red-500/15'
+                    : 'text-gray-500 bg-gray-500/15';
+                  return (
+                  <div key={a.id} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4 flex flex-col gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${STATUS_DOT[a.status]}`} />
+                      <span className="text-sm font-medium dark:text-white truncate">{a.displayName}</span>
+                      <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${stChip}`}>{STATUS_LABEL[a.status]}</span>
+                      {a.group && <span className="shrink-0 text-xs text-gray-400">· {a.group}</span>}
+                      {a.persona && <span className="shrink-0 text-xs text-gray-400">· 人设✓</span>}
                     </div>
-                    {a.proxy
-                      ? <button onClick={() => openProxy(a)} className="text-[11px] px-2 py-1 rounded-full border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300">🌐 {a.proxy.geo || a.proxy.host}</button>
-                      : <button onClick={() => openProxy(a)} className={`text-[11px] px-2 py-1 rounded-full border ${idx === 0 ? 'border-gray-300 dark:border-gray-700 text-gray-500' : 'text-amber-500 border-amber-500/40'}`}>{idx === 0 ? '本地IP(默认)' : 'IP 未配·点配'}</button>}
-                    <span className={`text-[11px] px-2 py-1 rounded-full border ${a.status === 'idle' ? 'text-green-500 border-green-500/30 bg-green-500/10' : a.status === 'login_required' ? 'text-amber-500 border-amber-500/30 bg-amber-500/10' : 'border-gray-300 dark:border-gray-700 text-gray-500'}`}>{STATUS_LABEL[a.status]}</span>
-                    <button onClick={() => openEdit(a)} className="text-xs px-2.5 py-1 rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800">编辑</button>
-                    {a.status === 'login_required' && (<>
-                      <button onClick={() => { if (!requireKernel()) return; setNotice(`正在为「${a.displayName}」打开指纹浏览器,扫码后状态自动刷新`); M()?.openLogin({ accountId: a.id, kernelPath, loginUrl: LOGIN_URL[a.platform] || '' }); }} className="text-xs px-2.5 py-1 rounded-lg bg-violet-500 text-white hover:bg-violet-600">扫码登录</button>
-                      <button onClick={() => refreshLogin(a)} className="text-xs px-2.5 py-1 rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800">刷新状态</button>
-                    </>)}
+                    <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{a.keywords && a.keywords.length ? `🏷️ ${a.keywords.join(' · ')}` : <span className="text-amber-500">未配关键词(互动需要)</span>}</div>
+                    {/* 右侧可点击按钮:全色按钮 */}
+                    <div className="flex items-center gap-2 flex-wrap pt-1">
+                      {a.proxy
+                        ? <button onClick={() => openProxy(a)} className="text-[11px] px-2.5 py-1 rounded-lg bg-blue-500 text-white hover:bg-blue-600">🌐 {a.proxy.geo || a.proxy.host}</button>
+                        : <button onClick={() => openProxy(a)} className={`text-[11px] px-2.5 py-1 rounded-lg text-white ${idx === 0 ? 'bg-gray-500 hover:bg-gray-600' : 'bg-amber-500 hover:bg-amber-600'}`}>{idx === 0 ? '本地IP(默认)' : 'IP 未配·点配'}</button>}
+                      <button onClick={() => openEdit(a)} className="text-xs px-2.5 py-1 rounded-lg bg-gray-600 text-white hover:bg-gray-700">编辑</button>
+                      {a.status === 'login_required' && (<>
+                        <button onClick={() => { if (!requireKernel()) return; setNotice(`正在为「${a.displayName}」打开指纹浏览器,扫码后状态自动刷新`); M()?.openLogin({ accountId: a.id, kernelPath, loginUrl: LOGIN_URL[a.platform] || '' }); }} className="text-xs px-2.5 py-1 rounded-lg bg-violet-500 text-white hover:bg-violet-600">扫码登录</button>
+                        <button onClick={() => refreshLogin(a)} className="text-xs px-2.5 py-1 rounded-lg bg-gray-600 text-white hover:bg-gray-700">刷新状态</button>
+                      </>)}
+                    </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -456,13 +491,20 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate }) => {
 
       {/* 添加/编辑账号 */}
       {showAdd && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="w-[26rem] rounded-xl p-5 dark:bg-claude-darkBg bg-white border dark:border-white/10 border-black/10">
-            <div className="text-sm font-medium mb-3">{editId ? '编辑账号' : `添加 ${PLATFORM_LABEL[platform]} 账号`}</div>
-            <input autoFocus={!editId} value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="账号备注名(如:美食1号)" className="w-full text-sm px-3 py-2 rounded border dark:border-white/15 border-black/15 bg-transparent mb-2" />
-            <input value={newGroup} onChange={(e) => setNewGroup(e.target.value)} placeholder="赛道/分组(如:美食,可选)" className="w-full text-sm px-3 py-2 rounded border dark:border-white/15 border-black/15 bg-transparent mb-2" />
-            <textarea value={newPersona} onChange={(e) => setNewPersona(e.target.value)} placeholder="人设(可选)—— 自动评论时 AI 按这个口吻写" rows={2} className="w-full text-sm px-3 py-2 rounded border dark:border-white/15 border-black/15 bg-transparent mb-2" />
-            <textarea value={newKeywords} onChange={(e) => setNewKeywords(e.target.value)} placeholder="赛道关键词,空格/逗号分隔(如:美食 探店 家常菜)" rows={2} className="w-full text-sm px-3 py-2 rounded border dark:border-white/15 border-black/15 bg-transparent mb-3" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-[40rem] max-w-full max-h-[88vh] overflow-y-auto rounded-2xl p-6 dark:bg-claude-darkBg bg-white border dark:border-white/10 border-black/10 shadow-xl">
+            <div className="text-base font-semibold mb-4">{editId ? '编辑账号' : `添加 ${PLATFORM_LABEL[platform]} 账号`}</div>
+            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">账号备注名</label>
+            <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="如:账号1-美食号" className="w-full text-sm px-3 py-2.5 rounded-lg border dark:border-white/15 border-black/15 bg-transparent mb-3" />
+            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">赛道(选了自动填关键词 + 人设建议)</label>
+            <select value={TRACK_PRESETS.some((t) => t.name === newGroup) ? newGroup : ''} onChange={(e) => pickTrack(e.target.value)} className="w-full text-sm px-3 py-2.5 rounded-lg border dark:border-white/15 border-black/15 bg-transparent dark:bg-gray-800 mb-3">
+              <option value="">自定义 / 其他(下面自己填关键词)</option>
+              {TRACK_PRESETS.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}
+            </select>
+            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">赛道关键词(空格/逗号分隔,互动时按这些搜)</label>
+            <textarea value={newKeywords} onChange={(e) => setNewKeywords(e.target.value)} placeholder="如:美食 探店 家常菜" rows={4} className="w-full text-sm px-3 py-2.5 rounded-lg border dark:border-white/15 border-black/15 bg-transparent mb-3" />
+            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">人设(可选)—— 自动评论时 AI 按这个口吻写</label>
+            <textarea value={newPersona} onChange={(e) => setNewPersona(e.target.value)} placeholder="如:爱吃会做的美食博主,评论真诚接地气" rows={3} className="w-full text-sm px-3 py-2.5 rounded-lg border dark:border-white/15 border-black/15 bg-transparent mb-4" />
             <div className="flex justify-end gap-2">
               <button onClick={() => setShowAdd(false)} className="px-3 py-1.5 text-sm rounded-lg border dark:border-white/15 border-black/15">取消</button>
               {editId ? <button onClick={() => confirmAdd(false)} className="px-3 py-1.5 text-sm rounded-lg bg-claude-accent text-white">保存</button>
