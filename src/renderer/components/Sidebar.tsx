@@ -240,11 +240,8 @@ const Sidebar: React.FC<SidebarProps> = ({
           )}
           </>)}
 
-          {/* 矩阵号 — 收纳分组:我的矩阵号 / 新建涨粉任务 / 我的涨粉任务 / 运行记录 */}
-          <div className="inline-flex items-center gap-2 px-2.5 pt-2 pb-1 text-xs font-semibold opacity-50">
-            <span className="text-sm">{'🧬'}</span>矩阵号
-          </div>
-          <div className="space-y-1 pl-3">
+          {/* 矩阵号导航:我的矩阵号 / 新建涨粉任务 / 我的涨粉任务 / 运行记录(矩阵 edition 整个 app 就这一组,不再加组头) */}
+          <div className="space-y-1">
             {([
               ['matrix', '我的矩阵号', onShowMatrix],
               ['matrixTaskNew', '新建矩阵涨粉任务', onShowMatrixTaskNew],
