@@ -1097,12 +1097,30 @@ const App: React.FC = () => {
                 onNewChat={handleNewChat}
                 updateBadge={isSidebarCollapsed ? updateBadge : null}
               />
-            ) : (mainView === 'matrix' || mainView === 'matrixTaskNew' || mainView === 'matrixTasks' || mainView === 'matrixRuns') ? (
+            ) : (mainView === 'matrix' || mainView === 'matrixTaskNew') ? (
+              // 「我的矩阵号」(账号管理)+「新建矩阵涨粉任务」(卡片→向导)仍走 MatrixView;
+              // 列表/详情/运行记录改用下面真 ScenarioView(matrixMode)。
               <MatrixView
-                screen={mainView === 'matrixTaskNew' ? 'newTask' : mainView === 'matrixTasks' ? 'tasks' : mainView === 'matrixRuns' ? 'runs' : 'accounts'}
+                screen={mainView === 'matrixTaskNew' ? 'newTask' : 'accounts'}
                 onNavigate={(s: string) => setMainView(s === 'newTask' ? 'matrixTaskNew' : s === 'tasks' ? 'matrixTasks' : s === 'runs' ? 'matrixRuns' : 'matrix')}
                 isSidebarCollapsed={isSidebarCollapsed}
                 onToggleSidebar={handleToggleSidebar}
+              />
+            ) : (mainView === 'matrixTasks' || mainView === 'matrixRuns') ? (
+              // 矩阵「我的涨粉任务 / 运行记录」= 真 ScenarioView(锁死抖音、隐藏平台 tab、
+              // 标题改矩阵)。数据经 scenarioService 的 MATRIX 适配层接到矩阵后端。
+              <ScenarioView
+                matrixMode
+                mode={mainView === 'matrixRuns' ? 'runs' : 'manage'}
+                initialPlatform="douyin"
+                onSwitchToCreate={() => setMainView('matrixTaskNew')}
+                onSwitchToManage={() => setMainView('matrixTasks')}
+                onInDetailChange={setScenarioInDetail}
+                navNonce={scenarioNavNonce}
+                isSidebarCollapsed={isSidebarCollapsed}
+                onToggleSidebar={handleToggleSidebar}
+                onNewChat={handleNewChat}
+                updateBadge={isSidebarCollapsed ? updateBadge : null}
               />
             ) : (
               <CoworkView

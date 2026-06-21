@@ -173,6 +173,10 @@ export interface ScenarioTaskIPC {
   /** v6.x: binance_from_x_repost + 3 viral 搬运 media type filter.
    *  'all' | 'image_only' | 'video_only' (TikTok forced video_only). */
   media_filter?: string;
+  /** 矩阵号(MATRIX_EDITION):本任务要驱动的已登录账号 id 列表。每个账号在各自
+   *  指纹内核里跑,关键词/赛道/人设取自该账号(不读 task.keywords)。选几个号就
+   *  同时开几个窗。非矩阵任务为空/缺省。 */
+  account_ids?: string[];
   created_at: number;
   updated_at: number;
 }

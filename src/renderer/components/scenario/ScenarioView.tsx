@@ -89,6 +89,9 @@ interface ScenarioViewProps {
   /** 侧栏每次点同一/任一涨粉菜单时 App 递增此值 → 本组件退回列表(修:在运行记录/任务详情里点
    *  侧栏菜单,setMainView 同值是 no-op、退不出详情)。 */
   navNonce?: number;
+  /** 矩阵号 edition:锁死抖音平台、隐藏平台 tab、标题改「矩阵涨粉」、新建/编辑走
+   *  MatrixView(matrixTaskNew)。数据经 scenarioService 的 MATRIX 适配层接矩阵后端。 */
+  matrixMode?: boolean;
 }
 
 const PLATFORM_TABS: Array<{ id: PlatformId; labelKey: string; icon: string; enabled: boolean }> = [
@@ -122,6 +125,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   onSwitchToManage,
   onInDetailChange,
   navNonce,
+  matrixMode,
 }) => {
   const isMac = window.electron.platform === 'darwin';
   // v6.x: 菜单拆分后,本实例的「主页/落地段」由 mode 决定:
@@ -528,7 +532,8 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
           task={task}
           scenario={scenario || null}
           onBack={goBack}
-          onEdit={() => scenario && openWizardEdit(task, scenario)}
+          /* 矩阵号:编辑走 MatrixView 新建/编辑页(账号多选向导),不开原版 ConfigWizard */
+          onEdit={() => { if (matrixMode) { onSwitchToCreate?.(undefined); return; } if (scenario) openWizardEdit(task, scenario); }}
           onChanged={refreshAll}
           onOpenHistory={() => openHistoryForTask(task.id)}
         />
@@ -789,13 +794,19 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
           <h1 className="text-lg font-semibold dark:text-claude-darkText text-claude-text">
             {/* 下钻到任务/运行记录详情时,标题归到「我的涨粉任务」(详情逻辑上属于该菜单),
                 不再停在「新建涨粉任务 / 涨粉运行记录」。 */}
-            {inDetailView
-              ? i18nService.t('myFanTasks')
-              : mode === 'create'
-                ? i18nService.t('quickUse')
-                : mode === 'runs'
-                  ? (i18nService.currentLanguage === 'zh' ? '涨粉运行记录' : 'Run History')
-                  : i18nService.t('myFanTasks')}
+            {matrixMode
+              ? (inDetailView
+                  ? '🧬 我的矩阵涨粉任务'
+                  : mode === 'runs'
+                    ? '🧬 矩阵涨粉运行记录'
+                    : '🧬 我的矩阵涨粉任务')
+              : inDetailView
+                ? i18nService.t('myFanTasks')
+                : mode === 'create'
+                  ? i18nService.t('quickUse')
+                  : mode === 'runs'
+                    ? (i18nService.currentLanguage === 'zh' ? '涨粉运行记录' : 'Run History')
+                    : i18nService.t('myFanTasks')}
           </h1>
           {/* v1.x: 钱包余额 + 充值入口紧跟标题,跟 CoworkView 顶栏一致 */}
           <div className="non-draggable">
@@ -966,7 +977,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
           visible frame; the active one differentiates only by green tint
           + green border + slight glow shadow, matching the L1 section tabs'
           active treatment. */}
-      {view.kind === 'main' && !(currentPlatform === 'video' && videoInDetail) && (
+      {view.kind === 'main' && !matrixMode && !(currentPlatform === 'video' && videoInDetail) && (
         <div className="flex flex-wrap items-center gap-2 px-4 pt-3 pb-2 border-b dark:border-claude-darkBorder border-claude-border shrink-0">
           {PLATFORM_TABS.map((tab) => {
             const active = currentPlatform === tab.id;

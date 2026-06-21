@@ -44,6 +44,9 @@ export interface EngageTaskOptions {
   signal?: AbortSignal;            // 停止任务:已开始的号靠 ctx.aborted() 中途退,未开始的号跳过
   onLog?: (accountId: string, msg: string) => void;
   onItem?: (item: EngageItemResult) => void;
+  // 该账号本次随机选定的动作目标(orchestrator ctx.setActionTargets 抛出)。
+  // 进度面板靠它聚合 action_progress 的 target(N 账号求和),没有则回落配额上限。
+  onTargets?: (accountId: string, targets: { like?: number; follow?: number; comment?: number }) => void;
 }
 
 export interface EngageItemResult {
@@ -190,7 +193,7 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string): Pr
       stepDone: (_s: number) => {},
       startAction: (..._a: any[]) => {},
       stepResetAll: () => {},
-      setActionTargets: (t: any) => log(`🎯 配额 赞${t.like}/关${t.follow}/评${t.comment}`),
+      setActionTargets: (t: any) => { log(`🎯 配额 赞${t.like}/关${t.follow}/评${t.comment}`); try { opts.onTargets?.(accountId, { like: t.like, follow: t.follow, comment: t.comment }); } catch { /* ignore */ } },
       addActionCount: (type: string, n: number) => { if (type in counts) (counts as any)[type] += n; opts.onItem?.({ accountId, state: 'success', counts: { ...counts } }); },
       finish: (status: string, error?: string) => { finished = { status, error }; },
       // 计费 / AI / 去重

@@ -187,6 +187,20 @@ const activeVideoRuns = new Map<string, AbortController>();
 let matrixRunning = false;
 let matrixAbort: AbortController | null = null; // 当前运行的停止句柄(matrix:stopTask 用)
 
+// 实时进度(供 matrix:getRunProgress 轮询 → 适配成 ScenarioRunProgress 给真 TaskDetailPage)。
+// 老 scenario 进度面板是「轮询」不是 SSE,所以这里把运行态聚合存成模块变量;N 账号求和。
+interface MatrixLiveProgress {
+  taskId: string;
+  status: 'running' | 'done' | 'error';
+  startedAt: number;
+  targets: { like: number; follow: number; comment: number };
+  done: { like: number; follow: number; comment: number };
+  perAccountTargets: Record<string, { like: number; follow: number; comment: number }>;
+  logs: Array<{ ts: number; accountId: string; msg: string }>;
+  error?: string;
+}
+let matrixLiveProgress: MatrixLiveProgress | null = null;
+
 function broadcastSSE(event: string, data: unknown): void {
   const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const client of sseClients) {
@@ -209,12 +223,44 @@ async function runMatrixTaskById(taskId: string, kernelPath?: string): Promise<{
     const startedAt = Date.now();
     const collected = new Map<string, any>(); // 每号最后一条结果(用于运行记录)
     matrixAbort = new AbortController();
+    // 进度初值:target 先按配额上限×账号数兜底(没收到 setActionTargets 前也有个分母);
+    // 收到每号真实 target 后用 perAccountTargets 求和覆盖,进度条能跑满。
+    const accN = (task.accountIds || []).length || 1;
+    const q: any = task.quota || {};
+    matrixLiveProgress = {
+      taskId: task.id, status: 'running', startedAt,
+      targets: { like: (q.daily_like_max || 0) * accN, follow: (q.daily_follow_max || 0) * accN, comment: (q.daily_comment_max || 0) * accN },
+      done: { like: 0, follow: 0, comment: 0 },
+      perAccountTargets: {}, logs: [],
+    };
+    const pushLog = (accountId: string, msg: string) => {
+      if (matrixLiveProgress) { matrixLiveProgress.logs.push({ ts: Date.now(), accountId, msg }); if (matrixLiveProgress.logs.length > 400) matrixLiveProgress.logs.splice(0, matrixLiveProgress.logs.length - 400); }
+    };
+    const recomputeTargets = () => {
+      if (!matrixLiveProgress) return;
+      const pa = matrixLiveProgress.perAccountTargets;
+      if (!Object.keys(pa).length) return;
+      const sum = { like: 0, follow: 0, comment: 0 };
+      for (const t of Object.values(pa)) { sum.like += t.like || 0; sum.follow += t.follow || 0; sum.comment += t.comment || 0; }
+      matrixLiveProgress.targets = sum;
+    };
     broadcastSSE('matrix:progress', { type: 'taskStart', taskId: task.id });
     runEngageTask({
       platform: task.platform, accountIds: task.accountIds || [], quota: task.quota, concurrency: task.concurrency, kernelPath, signal: matrixAbort.signal,
-      onLog: (accountId, msg) => broadcastSSE('matrix:progress', { type: 'log', accountId, msg }),
-      onItem: (item) => { collected.set(item.accountId, item); broadcastSSE('matrix:progress', { type: 'item', accountId: item.accountId, state: item.state, reason: item.reason, counts: item.counts }); },
+      onLog: (accountId, msg) => { pushLog(accountId, msg); broadcastSSE('matrix:progress', { type: 'log', accountId, msg }); },
+      onTargets: (accountId, t) => { if (matrixLiveProgress) { matrixLiveProgress.perAccountTargets[accountId] = { like: t.like || 0, follow: t.follow || 0, comment: t.comment || 0 }; recomputeTargets(); } },
+      onItem: (item) => {
+        collected.set(item.accountId, item);
+        // done = 各号最新累计 counts 之和(onItem 抛的 counts 是该号到目前的累计)。
+        if (matrixLiveProgress) {
+          const sum = { like: 0, follow: 0, comment: 0 };
+          for (const it of collected.values()) { sum.like += it.counts?.like || 0; sum.follow += it.counts?.follow || 0; sum.comment += it.counts?.comment || 0; }
+          matrixLiveProgress.done = sum;
+        }
+        broadcastSSE('matrix:progress', { type: 'item', accountId: item.accountId, state: item.state, reason: item.reason, counts: item.counts });
+      },
     }).then((report) => {
+      if (matrixLiveProgress && matrixLiveProgress.taskId === task.id) matrixLiveProgress.status = 'done';
       setTaskLastRun(task.id, Date.now());
       // 存运行记录(供「矩阵涨粉运行记录」页)
       try {
@@ -224,7 +270,7 @@ async function runMatrixTaskById(taskId: string, kernelPath?: string): Promise<{
       } catch (e) { coworkLog('WARN', 'sidecar-server', 'addRun failed', { err: String(e) }); }
       broadcastSSE('matrix:progress', { type: 'done', report, taskId: task.id });
     })
-      .catch((e: any) => broadcastSSE('matrix:progress', { type: 'error', error: e?.message || String(e) }))
+      .catch((e: any) => { if (matrixLiveProgress && matrixLiveProgress.taskId === task.id) { matrixLiveProgress.status = 'error'; matrixLiveProgress.error = e?.message || String(e); } broadcastSSE('matrix:progress', { type: 'error', error: e?.message || String(e) }); })
       .finally(() => { matrixRunning = false; matrixAbort = null; });
     return { ok: true };
   } catch (e: any) {
@@ -1325,6 +1371,10 @@ const server = http.createServer(async (req, res) => {
           case 'matrix:listRuns': {
             const { listRuns } = await import('./libs/matrix/runStore');
             return writeJSON(res, 200, { ok: true, runs: listRuns((args[0] as any)?.taskId) });
+          }
+          case 'matrix:getRunProgress': {
+            // 实时进度轮询(真 TaskDetailPage 每 2s 拉一次)。返回原始聚合,渲染端 scenario.ts 适配成 ScenarioRunProgress。
+            return writeJSON(res, 200, { ok: true, running: matrixRunning, progress: matrixLiveProgress });
           }
           case 'matrix:saveTask': {
             const { saveTask } = await import('./libs/matrix/taskStore');

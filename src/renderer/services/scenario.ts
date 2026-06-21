@@ -18,16 +18,154 @@ import type {
   ScenarioRunProgress,
   XhsLoginStatus,
 } from '../types/scenario';
+import { MATRIX_EDITION } from '../matrixEdition';
+import { DEFAULT_SCENARIOS } from '../data/defaultScenarios';
 
 export type Scenario = ScenarioManifestIPC;
 export type Task = ScenarioTaskIPC;
 export type Draft = ScenarioDraftIPC;
 export type RunOutcome = ScenarioRunOutcome;
 
+// ─────────────────────────────────────────────────────────────────────────
+// 矩阵号(MATRIX_EDITION)适配层
+//
+// 真 ScenarioView 那套页面(列表/详情/进度/运行记录)全靠 scenarioService 这层
+// 取数。矩阵号自成运行时(指纹内核池 + engageRunner + 本地 taskStore/runStore),
+// 接口在 window.electron.matrix.*。这里把矩阵的数据形状【转换】成旧页面期望的
+// ScenarioTaskIPC / ScenarioRunProgress / 运行记录,使真页面一行不改即可渲染矩阵
+// 数据。详见记忆 project_matrix_reuse_scenario_pages。
+// ─────────────────────────────────────────────────────────────────────────
+
+const MX = (): any => (window as any).electron?.matrix;
+const pad2 = (n: number) => String(n).padStart(2, '0');
+const hhmmss = (ts: number) => { const d = new Date(ts); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`; };
+
+/** 矩阵任务 → 旧 ScenarioTaskIPC(赛道/关键词在账号上,task 这两个字段留空;
+ *  配额映射到 daily_*_min/max 这套 douyin_auto_engage 字段)。 */
+function mxTaskToScenario(t: any): ScenarioTaskIPC {
+  const q = t?.quota || {};
+  return {
+    id: t.id,
+    scenario_id: 'douyin_auto_engage',
+    track: 'matrix',
+    keywords: [],
+    persona: '',
+    daily_count: 1,
+    variants_per_post: 1,
+    daily_time: '',
+    run_interval: t.frequency,
+    enabled: !!t.enabled,
+    active: !!t.enabled,
+    next_planned_run_at: t.nextPlannedRunAt,
+    daily_like_min: q.daily_like_min, daily_like_max: q.daily_like_max,
+    daily_follow_min: q.daily_follow_min, daily_follow_max: q.daily_follow_max,
+    daily_comment_min: q.daily_comment_min, daily_comment_max: q.daily_comment_max,
+    account_ids: t.accountIds || [],
+    created_at: t.createdAt || 0,
+    updated_at: t.createdAt || 0,
+  } as any;
+}
+
+/** 旧 createTask/updateTask 入参(ScenarioTaskIPC 形状)→ 矩阵 saveTask 入参。 */
+function scenarioInputToMxSave(input: any, id?: string): any {
+  const accountIds: string[] = input.account_ids || [];
+  return {
+    id,
+    platform: 'douyin',
+    type: 'engage',
+    name: input.name || (accountIds.length ? `抖音互动 · ${accountIds.length} 个号` : '抖音互动'),
+    accountIds,
+    quota: {
+      daily_like_min: input.daily_like_min, daily_like_max: input.daily_like_max,
+      daily_follow_min: input.daily_follow_min, daily_follow_max: input.daily_follow_max,
+      daily_comment_min: input.daily_comment_min, daily_comment_max: input.daily_comment_max,
+    },
+    concurrency: accountIds.length,
+    frequency: input.run_interval || 'daily_random',
+    enabled: input.enabled !== false,
+  };
+}
+
+function mxRunStatusOf(r: any): ScenarioTaskRun['status'] {
+  if (r.success > 0) return 'ok';        // 全成/部分成功都按 ok 计入累计
+  if (r.failed > 0) return 'failed';
+  return 'skipped';
+}
+
+/** 矩阵运行记录 → 旧 ScenarioTaskRun(getTaskStats / runStatus 用,驱动累计统计)。 */
+function mxRunToTaskRun(r: any): ScenarioTaskRun {
+  const t = r.totals || {};
+  return {
+    task_id: r.taskId,
+    started_at: r.startedAt,
+    ended_at: r.finishedAt,
+    status: mxRunStatusOf(r),
+    action_counts: { like: t.like || 0, follow: t.follow || 0, comment: t.comment || 0 },
+    tokens_used: 0,
+    cost_usd: 0,
+  };
+}
+
+/** 矩阵运行记录 → 旧「富运行记录」(RunHistoryPage / RunRecordDetailPage 用)。 */
+function mxRunToRecord(r: any): any {
+  const t = r.totals || {};
+  const status = r.failed > 0 && r.success === 0 ? 'error' : r.failed > 0 ? 'partial' : 'done';
+  const items: any[] = Array.isArray(r.items) ? r.items : [];
+  const step_logs = items.map((it) => ({
+    time: hhmmss(r.finishedAt || r.startedAt),
+    status: it.state === 'success' ? 'done' : it.state === 'failed' ? 'error' : 'running',
+    message: `[${it.displayName || it.accountId}] ${it.state}${it.counts ? ` 赞${it.counts.like || 0}/关${it.counts.follow || 0}/评${it.counts.comment || 0}` : ''}${it.reason ? ` (${it.reason})` : ''}`,
+  }));
+  return {
+    id: r.id,
+    task_id: r.taskId,
+    scenario_snapshot: { id: 'douyin_auto_engage', name_zh: '抖音 · 互动涨粉', name_en: 'Douyin Engage & Grow', icon: '🎵', platform: 'douyin' },
+    task_snapshot: { track: 'matrix', name: r.taskName, account_ids: items.map((it) => it.accountId) },
+    started_at: r.startedAt,
+    finished_at: r.finishedAt,
+    status,
+    result: {
+      action_counts: { like: t.like || 0, follow: t.follow || 0, comment: t.comment || 0 },
+      action_targets: {},
+      tokens_used: 0, cost_usd: 0, collected_count: 0, draft_count: 0,
+    },
+    summary: `成功 ${r.success || 0} · 失败 ${r.failed || 0} · 跳过 ${r.skipped || 0}（共 ${items.length} 个号）`,
+    step_logs,
+  };
+}
+
+/** 矩阵实时进度 → 旧 ScenarioRunProgress(真 TaskDetailPage 每 2s 轮询渲染)。 */
+function mxProgressToScenario(taskId: string, resp: any): ScenarioRunProgress | null {
+  const p = resp?.progress;
+  if (!p || p.taskId !== taskId) return null;
+  const status: ScenarioRunProgress['status'] = p.status === 'running' ? 'running' : p.status === 'error' ? 'error' : p.status === 'done' ? 'done' : 'idle';
+  const running = status === 'running';
+  const allLogs: Array<{ ts: number; accountId: string; msg: string }> = Array.isArray(p.logs) ? p.logs : [];
+  const mapped = allLogs.map((l, i) => ({
+    time: hhmmss(l.ts),
+    status: (running && i === allLogs.length - 1) ? ('running' as const) : ('done' as const),
+    message: `[${l.accountId}] ${l.msg}`,
+  }));
+  // 3 步与 STEP_NAMES_DOUYIN_AUTO_ENGAGE 对齐;互动全过程归到第 2 步(逐个互动)。
+  const steps: any[] = [
+    { name: '', status: 'done', logs: [] },
+    { name: '', status: running ? 'running' : status === 'error' ? 'error' : 'done', logs: mapped },
+    { name: '', status: status === 'done' ? 'done' : 'waiting', logs: [] },
+  ];
+  const action_progress: Record<string, { done: number; target: number }> = {};
+  const tg = p.targets || {}; const dn = p.done || {};
+  for (const k of ['like', 'follow', 'comment']) {
+    if ((tg as any)[k] > 0 || (dn as any)[k] > 0) action_progress[k] = { done: (dn as any)[k] || 0, target: (tg as any)[k] || 0 };
+  }
+  return { taskId, status, currentStep: status === 'done' ? 3 : 2, steps, error: p.error, action_progress };
+}
+
 class ScenarioService {
   // ── Catalogue ──
 
   async listScenarios(): Promise<Scenario[]> {
+    // 矩阵号:用打包内置的场景快照(只关心 douyin_auto_engage 的 manifest/STEP 名)。
+    if (MATRIX_EDITION) return DEFAULT_SCENARIOS as Scenario[];
     try {
       const res = await window.electron.scenario.listScenarios();
       return res?.scenarios || [];
@@ -47,6 +185,9 @@ class ScenarioService {
   // ── Tasks ──
 
   async listTasks(): Promise<Task[]> {
+    if (MATRIX_EDITION) {
+      try { const r = await MX()?.listTasks?.(); return r?.ok && Array.isArray(r.tasks) ? r.tasks.map(mxTaskToScenario) : []; } catch { return []; }
+    }
     try {
       const r = await window.electron.scenario.listTasks();
       return Array.isArray(r) ? r : [];
@@ -61,23 +202,43 @@ class ScenarioService {
     return tasks.filter(t => scenarioById.get(t.scenario_id)?.platform === platform);
   }
 
-  getTask(id: string): Promise<Task | null> {
+  async getTask(id: string): Promise<Task | null> {
+    if (MATRIX_EDITION) { const all = await this.listTasks(); return all.find(t => t.id === id) || null; }
     return window.electron.scenario.getTask(id);
   }
 
-  createTask(input: Omit<Task, 'id' | 'created_at' | 'updated_at'>): Promise<Task> {
+  async createTask(input: Omit<Task, 'id' | 'created_at' | 'updated_at'>): Promise<Task> {
+    if (MATRIX_EDITION) {
+      const r = await MX()?.saveTask?.(scenarioInputToMxSave(input));
+      if (!r?.ok) throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限', duplicate_type: '该平台已有同类型(互动)任务,直接编辑它即可', task_not_found: '任务不存在' } as any)[r?.error] || r?.error || '保存失败');
+      return mxTaskToScenario(r.task);
+    }
     return window.electron.scenario.createTask(input);
   }
 
-  updateTask(id: string, patch: Partial<Task>): Promise<Task | null> {
+  async updateTask(id: string, patch: Partial<Task>): Promise<Task | null> {
+    if (MATRIX_EDITION) {
+      // 把现有任务读出来合并 patch(矩阵 saveTask 是整体 upsert)。
+      const cur = await this.getTask(id);
+      if (!cur) return null;
+      const merged: any = { ...cur, ...patch };
+      const r = await MX()?.saveTask?.(scenarioInputToMxSave(merged, id));
+      return r?.ok ? mxTaskToScenario(r.task) : null;
+    }
     return window.electron.scenario.updateTask(id, patch);
   }
 
-  deleteTask(id: string): Promise<boolean> {
+  async deleteTask(id: string): Promise<boolean> {
+    if (MATRIX_EDITION) { const r = await MX()?.removeTask?.({ id }); return !!r?.ok; }
     return window.electron.scenario.deleteTask(id);
   }
 
-  runTaskNow(id: string): Promise<RunOutcome> {
+  async runTaskNow(id: string): Promise<RunOutcome> {
+    if (MATRIX_EDITION) {
+      const r = await MX()?.runTaskById?.({ taskId: id });
+      if (r?.ok) return { status: 'started' };
+      return { status: 'skipped', reason: r?.error === 'another_task_running' ? 'concurrency_limit_reached' : (r?.error || 'unknown') };
+    }
     return window.electron.scenario.runTaskNow(id);
   }
 
@@ -87,13 +248,17 @@ class ScenarioService {
     return (window.electron.scenario as any).uploadDraft(taskId, draftId);
   }
 
-  runStatus(id: string): Promise<{ runs: ScenarioTaskRun[]; cooldown_ends_at: number }> {
+  async runStatus(id: string): Promise<{ runs: ScenarioTaskRun[]; cooldown_ends_at: number }> {
+    if (MATRIX_EDITION) {
+      try { const r = await MX()?.listRuns?.({ taskId: id }); const runs = r?.ok && Array.isArray(r.runs) ? r.runs.map(mxRunToTaskRun) : []; return { runs, cooldown_ends_at: 0 }; } catch { return { runs: [], cooldown_ends_at: 0 }; }
+    }
     return window.electron.scenario.runStatus(id);
   }
 
   // ── Drafts ──
 
   async listDrafts(taskId?: string): Promise<Draft[]> {
+    if (MATRIX_EDITION) return [];   // 互动涨粉无草稿概念
     try {
       const r = await window.electron.scenario.listDrafts(taskId);
       return Array.isArray(r) ? r : [];
@@ -127,6 +292,7 @@ class ScenarioService {
   // ── Running state ──
 
   async getRunningTaskId(): Promise<string | null> {
+    if (MATRIX_EDITION) { const ids = await this.getRunningTaskIds(); return ids[0] || null; }
     try {
       const r = await window.electron.scenario.getRunningTaskId();
       return r?.runningTaskId || null;
@@ -138,6 +304,9 @@ class ScenarioService {
   /** Multi-tab concurrency (Twitter v1): returns ALL running task ids —
    *  can be > 1 when XHS task + Twitter task are both in flight. */
   async getRunningTaskIds(): Promise<string[]> {
+    if (MATRIX_EDITION) {
+      try { const r = await MX()?.getRunProgress?.(); return r?.running && r?.progress?.taskId && r.progress.status === 'running' ? [r.progress.taskId] : []; } catch { return []; }
+    }
     try {
       const r = await window.electron.scenario.getRunningTaskIds();
       return Array.isArray(r?.runningTaskIds) ? r.runningTaskIds : [];
@@ -153,6 +322,7 @@ class ScenarioService {
    *  connected for > 5s without sending hello (older versions don't
    *  send it at all). */
   async getConnectedExtensions(): Promise<Array<{ id: string; version: string; tabCount: number; connectedAt: number }>> {
+    if (MATRIX_EDITION) return [];   // 矩阵走指纹内核,不用扩展
     try {
       const r = await window.electron.scenario.getConnectedExtensions();
       return Array.isArray(r?.extensions) ? r.extensions : [];
@@ -172,6 +342,9 @@ class ScenarioService {
     collected_count?: number;
     draft_count?: number;
   }>> {
+    if (MATRIX_EDITION) {
+      try { const r = await MX()?.listRuns?.(); return r?.ok && Array.isArray(r.runs) ? r.runs.map((x: any) => ({ task_id: x.taskId, started_at: x.startedAt, finished_at: x.finishedAt, status: (x.failed > 0 && x.success === 0 ? 'failure' : 'success') as any, collected_count: 0, draft_count: 0 })) : []; } catch { return []; }
+    }
     try {
       const r = await window.electron.scenario.getAllRuns();
       return Array.isArray(r?.runs) ? r.runs : [];
@@ -183,6 +356,9 @@ class ScenarioService {
   /** Rich run records (v2.4.22+) — full task snapshot + step logs +
    *  output dir. Replaces getAllRuns for the Run History UI. */
   async listRunRecords(filter?: { task_id?: string; platform?: string; light?: boolean }): Promise<Array<any>> {
+    if (MATRIX_EDITION) {
+      try { const r = await MX()?.listRuns?.(filter?.task_id ? { taskId: filter.task_id } : undefined); return r?.ok && Array.isArray(r.runs) ? r.runs.map(mxRunToRecord) : []; } catch { return []; }
+    }
     try {
       const r = await window.electron.scenario.listRunRecords(filter);
       return Array.isArray(r?.records) ? r.records : [];
@@ -193,6 +369,9 @@ class ScenarioService {
 
   /** Single record lookup, for the read-only detail page. */
   async getRunRecord(id: string): Promise<any | null> {
+    if (MATRIX_EDITION) {
+      try { const r = await MX()?.listRuns?.(); const rec = r?.ok && Array.isArray(r.runs) ? r.runs.find((x: any) => x.id === id) : null; return rec ? mxRunToRecord(rec) : null; } catch { return null; }
+    }
     try {
       const r = await window.electron.scenario.getRunRecord(id);
       return r?.record || null;
@@ -202,6 +381,10 @@ class ScenarioService {
   }
 
   async getRunProgress(taskId?: string): Promise<ScenarioRunProgress | null> {
+    if (MATRIX_EDITION) {
+      if (!taskId) return null;
+      try { const r = await MX()?.getRunProgress?.(); return mxProgressToScenario(taskId, r); } catch { return null; }
+    }
     try {
       return await window.electron.scenario.getRunProgress(taskId) || null;
     } catch {
@@ -214,6 +397,9 @@ class ScenarioService {
    *  UI mounts: read latest record, show its step_logs as a baseline; live
    *  polling overlays in-memory progress when task is actively running. */
   async getLatestRunRecord(taskId: string): Promise<any | null> {
+    if (MATRIX_EDITION) {
+      try { const r = await MX()?.listRuns?.({ taskId }); const recs = r?.ok && Array.isArray(r.runs) ? r.runs : []; return recs.length ? mxRunToRecord(recs[0]) : null; } catch { return null; }
+    }
     try {
       return await (window.electron.scenario as any).getLatestRunRecord(taskId) || null;
     } catch {
@@ -221,15 +407,19 @@ class ScenarioService {
     }
   }
 
-  async requestAbort(taskId?: string): Promise<void> {
+  async requestAbort(_taskId?: string): Promise<void> {
+    if (MATRIX_EDITION) { try { await MX()?.stopTask?.(); } catch {} return; }
     try {
-      await window.electron.scenario.requestAbort(taskId);
+      await window.electron.scenario.requestAbort(_taskId);
     } catch {}
   }
 
   // ── XHS login gate ──
 
   async checkXhsLogin(platform: 'xhs' | 'x' | 'binance' | 'tiktok' | 'youtube' | 'douyin' | 'kuaishou' | 'bilibili' | 'shipinhao' | 'toutiao' = 'xhs'): Promise<XhsLoginStatus> {
+    // 矩阵号:登录是【每个账号在各自指纹内核里】扫码完成的(在「我的矩阵号」里),
+    // 不存在「一个浏览器登录态」这回事 → 运行前登录门禁恒通过(没登录的号跑时自动跳过)。
+    if (MATRIX_EDITION) return { loggedIn: true };
     try {
       return await window.electron.scenario.checkXhsLogin(platform as any);
     } catch (err) {
@@ -238,6 +428,7 @@ class ScenarioService {
   }
 
   async openXhsLogin(platform: 'xhs' | 'x' | 'binance' | 'tiktok' | 'youtube' | 'douyin' | 'kuaishou' | 'bilibili' | 'shipinhao' | 'toutiao' = 'xhs'): Promise<{ ok: boolean; reason?: string }> {
+    if (MATRIX_EDITION) return { ok: true };
     try {
       return await window.electron.scenario.openXhsLogin(platform as any);
     } catch (err) {
