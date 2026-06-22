@@ -4219,7 +4219,7 @@ export const HotspotVideoModal: React.FC<{
     if (matrixMode) {
       if (!materialAccountReady) {
         setStep(2);
-        setErr(isZh ? '请为「画面素材来源」选择一个已关联的取材账号' : 'Pick a linked account for footage source');
+        setErr(isZh ? '请先选择一个已关联的取材账号(未关联的账号已置灰、不可选)' : 'Pick a linked footage-source account first (unlinked ones are greyed out)');
         return;
       }
       if (outputMode === 'upload' && !matrixAccountsReady) {
@@ -4240,7 +4240,7 @@ export const HotspotVideoModal: React.FC<{
   const goNext = () => {
     if (step === 1 && selectedSources.length === 0) { setErr(isZh ? '请至少勾选一个热点源' : 'Pick at least one source'); return; }
     if (step === 2 && !materialAccountReady) {
-      setErr(isZh ? '请为「画面素材来源」选择一个已关联的取材账号(未关联的已置灰)' : 'Pick a linked account for footage source');
+      setErr(isZh ? '请先选择一个已关联的取材账号(未关联的账号已置灰、不可选)' : 'Pick a linked footage-source account first (unlinked ones are greyed out)');
       return;
     }
     if (step === PUBLISH_STEP && outputMode === 'upload' && selectedPlatformIds.length === 0) {
@@ -4364,7 +4364,7 @@ export const HotspotVideoModal: React.FC<{
                 </div>
               </Field>
               {/* 画面素材来源平台 + 取材账号:运行时用该账号的指纹浏览器做【全网搜索 + 下载素材】,绝不发帖/改动账号。 */}
-              <Field label={isZh ? '画面素材来源' : 'Footage source'} hint={isZh ? '用该平台一个已关联账号做全网搜索 + 下载' : 'search & download via a linked account'}>
+              <Field label={isZh ? '画面素材来源' : 'Footage source'} hint={isZh ? `仅用一个已关联${materialPlatform === 'tiktok' ? 'TikTok' : '抖音'}账号做全网搜索 + 下载素材` : `search & download via a linked ${materialPlatform === 'tiktok' ? 'TikTok' : 'Douyin'} account`}>
                 <div className="flex gap-2 mb-2">
                   {([{ v: 'douyin', zh: '🎵 抖音', en: '🎵 Douyin' }, { v: 'tiktok', zh: '🎬 TikTok', en: '🎬 TikTok' }] as const).map((p) => (
                     <button key={p.v} type="button" onClick={() => { setMaterialPlatform(p.v); setMaterialAccountId(''); }}
@@ -4382,11 +4382,6 @@ export const HotspotVideoModal: React.FC<{
                     onChange={setMaterialAccountId}
                     onAddAccount={() => { window.dispatchEvent(new CustomEvent('noobclaw:show-matrix-accounts')); onClose(); }}
                   />
-                </div>
-                <div className="mt-2 text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed">
-                  {isZh
-                    ? `ⓘ 仅用该账号在${materialPlatform === 'tiktok' ? 'TikTok' : '抖音'}做全网搜索 + 下载素材`
-                    : `ⓘ Only used to search & download footage on ${materialPlatform === 'tiktok' ? 'TikTok' : 'Douyin'}`}
                 </div>
               </Field>
               <label className="flex items-center gap-2 text-sm dark:text-gray-200 cursor-pointer">
@@ -4588,24 +4583,31 @@ export const HotspotVideoModal: React.FC<{
             </PublishPlatformPicker>
           )}
 
-          {err && <p className="text-sm text-rose-500">{err}</p>}
         </div>
 
-        <div className="sticky bottom-0 flex gap-3 px-6 py-3.5 border-t dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 backdrop-blur">
-          <button onClick={goBack} className="px-4 py-2.5 rounded-lg text-sm border dark:border-gray-700 dark:text-gray-300">
-            {step === 1 ? (isZh ? '取消' : 'Cancel') : (isZh ? '上一步' : 'Back')}
-          </button>
-          {step < MAX_STEP ? (
-            <button onClick={goNext}
-              className="flex-1 py-2.5 rounded-lg text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600">
-              {isZh ? '下一步' : 'Next'}
-            </button>
-          ) : (
-            <button onClick={onSubmitClick} disabled={submitting}
-              className="flex-1 py-2.5 rounded-lg text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50">
-              {submitting ? (isZh ? '创建中…' : 'Creating…') : isEdit ? `💾 ${isZh ? '保存' : 'Save'}` : `🔥 ${isZh ? '创建任务' : 'Create'}`}
-            </button>
+        {/* 底部固定区:校验提示钉在按钮正上方(sticky),不再埋在可滚动内容最底部被字幕样式顶出视野。 */}
+        <div className="sticky bottom-0 px-6 py-3.5 border-t dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 backdrop-blur">
+          {err && (
+            <p className="mb-2.5 rounded-lg border border-rose-300 dark:border-rose-500/40 bg-rose-50 dark:bg-rose-500/10 px-3 py-2 text-sm font-medium text-rose-600 dark:text-rose-400">
+              {err}
+            </p>
           )}
+          <div className="flex gap-3">
+            <button onClick={goBack} className="px-4 py-2.5 rounded-lg text-sm border dark:border-gray-700 dark:text-gray-300">
+              {step === 1 ? (isZh ? '取消' : 'Cancel') : (isZh ? '上一步' : 'Back')}
+            </button>
+            {step < MAX_STEP ? (
+              <button onClick={goNext}
+                className="flex-1 py-2.5 rounded-lg text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600">
+                {isZh ? '下一步' : 'Next'}
+              </button>
+            ) : (
+              <button onClick={onSubmitClick} disabled={submitting}
+                className="flex-1 py-2.5 rounded-lg text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50">
+                {submitting ? (isZh ? '创建中…' : 'Creating…') : isEdit ? `💾 ${isZh ? '保存' : 'Save'}` : `🔥 ${isZh ? '创建任务' : 'Create'}`}
+              </button>
+            )}
+          </div>
         </div>
 
         {showLoginCheck && (
