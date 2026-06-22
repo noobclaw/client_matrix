@@ -549,8 +549,11 @@ const IDENTITY_EXPR: Record<string, string> = {
   //   [data-testid="UserAvatar-Container-<handle>"] 的 img.alt=昵称、img.src=头像(pbs.twimg.com,https);
   //   uid 从 twid=u%3D<id> cookie。找不到导航时回落第一个头像容器。
   x: '(function(){try{var prof=document.querySelector(\'[data-testid="AppTabBar_Profile_Link"]\');var handle=prof?((prof.getAttribute("href")||"").replace(/^\\//,"")||null):null;var avc=handle?document.querySelector(\'[data-testid="UserAvatar-Container-\'+handle+\'"]\'):null;if(!avc)avc=document.querySelector(\'[data-testid^="UserAvatar-Container-"]\');var avatar=null,nickname=null;if(avc){if(!handle)handle=((avc.getAttribute("data-testid")||"").match(/UserAvatar-Container-(.+)/)||[])[1]||null;var img=avc.querySelector("img");if(img){avatar=img.src||null;nickname=img.getAttribute("alt")||null;}if(!avatar){var nn=avc.querySelectorAll("*");for(var i=0;i<nn.length;i++){var bg=getComputedStyle(nn[i]).backgroundImage;var m=bg&&bg.match(/url\\((.+?)\\)/);if(m){avatar=m[1].replace(/[\\x22\\x27]/g,"");break;}}}}var uid=(document.cookie.match(/twid=u%3D(\\d+)/)||[])[1]||null;return JSON.stringify({nickname:nickname,displayId:handle?("@"+handle):null,uid:uid,avatar:avatar});}catch(e){return "{}";}})()',
-  // TikTok:app-context.user;不行回落 user-detail(在自己主页时)。nickname/uniqueId(handle)/secUid/头像。
-  tiktok: '(function(){try{var U=window.__UNIVERSAL_DATA_FOR_REHYDRATION__,u={};if(U){var sc=U.__DEFAULT_SCOPE__||{};u=(sc["webapp.app-context"]&&sc["webapp.app-context"].user)||{};if((!u||!u.uniqueId)&&sc["webapp.user-detail"]&&sc["webapp.user-detail"].userInfo)u=sc["webapp.user-detail"].userInfo.user||u;}return JSON.stringify({nickname:u.nickname||u.nickName||null,displayId:u.uniqueId||null,uid:u.uid||u.secUid||null,avatar:u.avatarThumb||u.avatarLarger||null});}catch(e){return "{}";}})()',
+  // TikTok(真机实测 2026-06-22):__UNIVERSAL_DATA__ 的 SSR scope 现在恒空(旧 app-context 法已废)。
+  //   改读【个人主页 DOM】(由 IDENTITY_NAV_HINT 先跳 /@<号>):data-e2e="user-title"=昵称(如"Mochi Monkey")、
+  //   "user-subtitle"=TikTok号(如 mochimonkeyton)、"user-avatar" img=头像。兜底读左侧导航 nav-profile(任何页都在,
+  //   含号+头像,但无昵称)。uid 用 uniqueId(TikTok 数字 uid 要签名接口,不取;uniqueId 已足够做去重键)。
+  tiktok: '(function(){try{var nick=null,uniq=null,av=null;var t=document.querySelector(\'[data-e2e="user-title"]\');if(t)nick=(t.textContent||"").trim()||null;var s=document.querySelector(\'[data-e2e="user-subtitle"]\');if(s)uniq=(s.textContent||"").trim()||null;var a1=document.querySelector(\'[data-e2e="user-avatar"] img\');if(a1)av=a1.src||null;var p=document.querySelector(\'[data-e2e="nav-profile"]\')||document.querySelector(\'a[href^="/@"]\');if(p){if(!uniq){var h=p.getAttribute("href")||"";uniq=(h.match(/\\/@([^\\/?#]+)/)||[])[1]||null;}var ni=p.querySelector("img");if(!av&&ni)av=ni.src||null;}return JSON.stringify({nickname:nick,displayId:uniq?("@"+uniq):null,uid:uniq,avatar:av});}catch(e){return "{}";}})()',
   // 快手:window.INIT_STATE 里的 profile 对象(信息流页 /new-reco 就有,真机实测 2026-06-22)。
   //   userName=昵称, userDefineId=快手号, userId=uid, userHead=头像。(键名被 +1 凯撒位移混淆,靠值里有 userName+userId 定位。)
   kuaishou: '(function(){try{var s=window.INIT_STATE||{};for(var k in s){var v=s[k];if(v&&typeof v==="object"&&v.userName&&v.userId){return JSON.stringify({nickname:v.userName,displayId:v.userDefineId||null,uid:String(v.userId),avatar:v.userHead||null});}}return "{}";}catch(e){return "{}";}})()',
@@ -575,10 +578,17 @@ const UID_COOKIE: Record<string, string> = { kuaishou: 'userId', toutiao: 'sso_u
 
 // 有些平台首页 feed 上【没有本人信息】(乱扫 nickname 会抓到推荐流里别人的号 → 见 reference 的血泪教训),
 // 必须先导航到「自己主页」再读身份。URL 用明文 cookie 里的 uid 拼。这是对齐抖音「在带本人 SSR 的页面读」
-// 的统一做法:抖音/小红书/B站/YouTube/TikTok 的源(RENDER_DATA / /me / /nav / account_menu / app-context)
-// 本身就含本人,无需跳;快手 feed 不含本人 → 跳 profile/<uid>。
+// 的统一做法:抖音/小红书/B站/YouTube 的源(RENDER_DATA / /me / /nav / account_menu)本身就含本人,无需跳;
+// 快手 feed 不含本人 → 跳 profile/<uid>(cookie 有 uid);TikTok 首页 SSR 已空、昵称只在主页 DOM → 见 IDENTITY_NAV_HINT。
 const IDENTITY_SELF_URL: Record<string, (uid: string) => string> = {
   kuaishou: (uid) => `https://www.kuaishou.com/profile/${uid}`,
+};
+
+// 同上,但「自己主页 URL」cookie 里没有、要【从当前页面读】出来(如 TikTok 的号在左侧导航栏链接里)。
+// 这个 expr 在当前页跑、返回要跳的完整 URL(读不到返回空串 → 不跳,按当前页读)。跳过去后同样轮询 expr。
+const IDENTITY_NAV_HINT: Record<string, string> = {
+  // TikTok:左侧导航「主页」链接 = /@<号> → 跳过去才有 user-title(昵称)等 profile DOM(首页 feed 没有)。
+  tiktok: '(function(){try{var p=document.querySelector(\'[data-e2e="nav-profile"]\')||document.querySelector(\'a[href^="/@"]\');var h=p?(p.getAttribute("href")||""):"";return (h.indexOf("/@")===0)?("https://www.tiktok.com"+h):"";}catch(e){return "";}})()',
 };
 
 export async function kernelReadIdentity(accountId: string, platform: string): Promise<KernelIdentity> {
@@ -600,6 +610,20 @@ export async function kernelReadIdentity(accountId: string, platform: string): P
         await sleep(1500);
         try { const probe = JSON.parse((await kernelEval(accountId, expr)) || '{}'); if (probe && (probe.nickname || probe.displayId || probe.avatar)) break; } catch { /* 还没渲染好,继续等 */ }
       }
+    }
+    // 自己主页 URL 不在 cookie、要从当前页读出来的平台(TikTok):先读导航栏拿到 /@号 → 跳过去 → 轮询到昵称出来。
+    const navHint = IDENTITY_NAV_HINT[platform];
+    if (navHint && expr && !(selfUrl && cookieUid)) {
+      try {
+        const url = await kernelEval(accountId, navHint);
+        if (url && typeof url === 'string') {
+          await kernelNavigate(accountId, url);
+          for (let i = 0; i < 6; i++) {
+            await sleep(1500);
+            try { const probe = JSON.parse((await kernelEval(accountId, expr)) || '{}'); if (probe && probe.nickname) break; } catch { /* 还没渲染好,继续等 */ }
+          }
+        }
+      } catch { /* 读不到导航/导航失败 → 按当前页读,不阻塞 */ }
     }
     if (expr) {
       try { const o = JSON.parse((await kernelEval(accountId, expr)) || '{}'); if (o && typeof o === 'object') { out.uid = o.uid || undefined; out.nickname = o.nickname || undefined; out.displayId = o.displayId || undefined; out.avatar = o.avatar || undefined; } } catch { /* ignore */ }
