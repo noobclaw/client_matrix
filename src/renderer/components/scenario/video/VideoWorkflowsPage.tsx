@@ -4082,6 +4082,8 @@ export const HotspotVideoModal: React.FC<{
   const [count, setCount] = useState<number>(Math.max(1, Math.min(HOTSPOT_COUNT_CAP, Math.round(ei.videoCount ?? (ei as any).videoCountMax ?? (ei as any).videoCountMin ?? 1))));
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState('');
+  // 校验提示 5s 后自动消失,不一直挂在那。
+  useEffect(() => { if (!err) return; const t = setTimeout(() => setErr(''), 5000); return () => clearTimeout(t); }, [err]);
   const [showLoginCheck, setShowLoginCheck] = useState(false);
   // 分步向导:① 热点源 → ② 内容 → ③ 配音 → ④ 成片去向 → ⑤ 运行频率。
   // 矩阵号在「去向」后多插一步「账号」(step 5),频率顺延到 step 6。
@@ -4220,7 +4222,7 @@ export const HotspotVideoModal: React.FC<{
     if (matrixMode) {
       if (!materialAccountReady) {
         setStep(2);
-        setErr(isZh ? '请先选择一个已关联的取材账号(未关联的账号已置灰、不可选)' : 'Pick a linked footage-source account first (unlinked ones are greyed out)');
+        setErr(isZh ? '请先选择一个取材账号,用全网查询取材' : 'Pick a footage-source account first');
         return;
       }
       if (outputMode === 'upload' && !matrixAccountsReady) {
@@ -4241,7 +4243,7 @@ export const HotspotVideoModal: React.FC<{
   const goNext = () => {
     if (step === 1 && selectedSources.length === 0) { setErr(isZh ? '请至少勾选一个热点源' : 'Pick at least one source'); return; }
     if (step === 2 && !materialAccountReady) {
-      setErr(isZh ? '请先选择一个已关联的取材账号(未关联的账号已置灰、不可选)' : 'Pick a linked footage-source account first (unlinked ones are greyed out)');
+      setErr(isZh ? '请先选择一个取材账号,用全网查询取材' : 'Pick a footage-source account first');
       return;
     }
     if (step === PUBLISH_STEP && outputMode === 'upload' && selectedPlatformIds.length === 0) {
