@@ -539,8 +539,10 @@ const IDENTITY_EXPR: Record<string, string> = {
   // 快手:window.INIT_STATE 里的 profile 对象(信息流页 /new-reco 就有,真机实测 2026-06-22)。
   //   userName=昵称, userDefineId=快手号, userId=uid, userHead=头像。(键名被 +1 凯撒位移混淆,靠值里有 userName+userId 定位。)
   kuaishou: '(function(){try{var s=window.INIT_STATE||{};for(var k in s){var v=s[k];if(v&&typeof v==="object"&&v.userName&&v.userId){return JSON.stringify({nickname:v.userName,displayId:v.userDefineId||null,uid:String(v.userId),avatar:v.userHead||null});}}return "{}";}catch(e){return "{}";}})()',
-  // 头条:创作端页 screen_name;uid 从 sso_uid_tt cookie 补。
-  toutiao: '(function(){try{var h=document.documentElement.innerHTML;var n=h.match(/"screen_name":"([^"]{1,40})"/)||h.match(/"nick_name":"([^"]{1,40})"/)||h.match(/"name":"([^"]{1,40})"/);var a=h.match(/"avatar_url":"([^"]+)"/);return JSON.stringify({nickname:n&&n[1],avatar:a&&a[1]||null});}catch(e){return "{}";}})()',
+  // 头条:mp.toutiao.com 创作端 SSR script JSON 里的账号对象(真机实测 2026-06-22)。
+  //   页面有多个用户对象(feed 作者等),必须锚定【同时含 screen_name + https_avatar_url + id_str】的账号块,
+  //   否则乱扫抓到别人。nickname=screen_name, avatar=https_avatar_url, 头条号ID/uid=id_str。
+  toutiao: '(function(){try{var h=document.documentElement.innerHTML;var re=/"screen_name":"([^"]{1,40})"/g,m,best=null;while((m=re.exec(h))){var s=m.index;var blk=h.slice(Math.max(0,s-700),s+200);if(/https_avatar_url/.test(blk)){var a=(blk.match(/"https_avatar_url":"([^"]+?)"/)||blk.match(/"avatar_url":"([^"]+?)"/)||[])[1]||null;var id=(blk.match(/"id_str":"(\\d{6,25})"/)||[])[1]||null;best={nickname:m[1],avatar:a,id:id};break;}}if(!best){var n=(h.match(/"screen_name":"([^"]{1,40})"/)||[])[1];best={nickname:n||null,avatar:null,id:null};}return JSON.stringify({nickname:best.nickname,displayId:best.id,uid:best.id,avatar:best.avatar});}catch(e){return "{}";}})()',
   // 视频号:助手页(channels.weixin.qq.com)调 auth_data 接口拿当前 finder(真机实测 2026-06-22)。
   //   finderUser.nickname=昵称, uniqId=视频号ID(sph...), headImgUrl=头像, finderUsername=内部 v2_..@finder。
   shipinhao: '(async function(){try{var r=await fetch("/cgi-bin/mmfinderassistant-bin/auth/auth_data",{method:"POST",headers:{"content-type":"application/json"},credentials:"include",body:JSON.stringify({scene:7,timestamp:Date.now()})});var j=await r.json();var f=(j&&j.data&&j.data.finderUser)||{};if(!f.nickname&&!f.uniqId)return "{}";return JSON.stringify({nickname:f.nickname||null,displayId:f.uniqId||null,uid:f.uniqId||f.finderUsername||null,avatar:f.headImgUrl||null});}catch(e){return "{}";}})()',
