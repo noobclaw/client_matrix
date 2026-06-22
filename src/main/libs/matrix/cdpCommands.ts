@@ -53,6 +53,21 @@ export async function matrixCmd(
       try { await kernelWheel(accountId, x, y, dx, dy); return { ok: true }; }
       catch (e: any) { return { ok: false, error: String(e?.message || e).slice(0, 80) }; }
     }
+    // 主世界 fetch(CDP Runtime.evaluate 默认就在页面主世界跑):复用页面已劫持的 fetch
+    // 自动签 msToken / X-Bogus,等同用户自己 fetch。取材 driver 调 aweme detail 拿 play_addr 用。
+    // 返回 { ok, status, body }(body 为解析后的 JSON 或文本;responseType:'base64' 时为 base64)。
+    case 'main_world_fetch_api': {
+      const url = String(params?.url || '');
+      if (!url) return { ok: false, error: 'url required' };
+      const expr = `(async function(){try{`
+        + `var r=await fetch(${JSON.stringify(url)},{method:${JSON.stringify(String(params?.method || 'GET'))},credentials:${JSON.stringify(params?.credentials || 'include')},headers:${JSON.stringify(params?.headers || {})},body:${params?.body != null ? JSON.stringify(String(params.body)) : 'null'}});`
+        + `var st=r.status;`
+        + `if(${JSON.stringify(String(params?.responseType || 'text'))}==='base64'){var ab=await r.arrayBuffer();var by=new Uint8Array(ab),bin='';for(var i=0;i<by.length;i++)bin+=String.fromCharCode(by[i]);return JSON.stringify({ok:true,status:st,body:btoa(bin)});}`
+        + `var t=await r.text();var b;try{b=JSON.parse(t);}catch(e){b=t;}return JSON.stringify({ok:true,status:st,body:b});`
+        + `}catch(e){return JSON.stringify({ok:false,error:String(e&&e.message||e)});}})()`;
+      try { const raw = await kernelEval(accountId, expr); return JSON.parse(String(raw || '{}')); }
+      catch (e: any) { return { ok: false, error: 'main_world_fetch_failed:' + String(e?.message || e).slice(0, 80) }; }
+    }
     // 整页导航(CDP Page.navigate):取材 driver 搜索/进详情页要用;执行器在页面里做不了真导航。
     case 'navigate': {
       const url = String(params?.url || '');
