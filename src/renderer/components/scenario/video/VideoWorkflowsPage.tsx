@@ -4088,11 +4088,11 @@ export const HotspotVideoModal: React.FC<{
   const [showLoginCheck, setShowLoginCheck] = useState(false);
   // 分步向导:① 热点源 → ② 内容 → ③ 配音 → ④ 成片去向 → ⑤ 运行频率。
   // 矩阵号在「去向」后多插一步「账号」(step 5),频率顺延到 step 6。
-  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1);
+  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5 | 6>(1);
   // 账号步只在矩阵 edition 存在;频率步在矩阵下是 6、非矩阵是 5。
-  // 步骤:1热点源 2内容 3配音 4去向(出片后+频率) 5发布(发布平台+账号)。
-  const PUBLISH_STEP = 5 as const;     // 「发布」步:发布平台多选 + 每平台选号(matrix)
-  const MAX_STEP = 5;
+  // 步骤:1热点源 2内容 3字幕 4配音 5去向(出片后+频率) 6发布(发布平台+账号)。
+  const PUBLISH_STEP = 6 as const;     // 「发布」步:发布平台多选 + 每平台选号(matrix)
+  const MAX_STEP = 6;
 
   // 热点源预览:每个榜当前 top-3 实时条目,挂在卡片下方,让用户选前就知道会选中什么内容。
   // 拉失败不影响选择(静默)。打开向导时拉一次。
@@ -4256,12 +4256,12 @@ export const HotspotVideoModal: React.FC<{
       return;
     }
     setErr('');
-    setStep((s) => (s < MAX_STEP ? ((s + 1) as 1 | 2 | 3 | 4 | 5) : s));
+    setStep((s) => (s < MAX_STEP ? ((s + 1) as 1 | 2 | 3 | 4 | 5 | 6) : s));
   };
   const goBack = () => {
     setErr('');
     if (step === 1) { onClose(); return; }
-    setStep((s) => ((s - 1) as 1 | 2 | 3 | 4 | 5));
+    setStep((s) => ((s - 1) as 1 | 2 | 3 | 4 | 5 | 6));
   };
 
   const DUR = [30, 45, 60, 90, 120];
@@ -4292,11 +4292,13 @@ export const HotspotVideoModal: React.FC<{
               <div className={`h-px w-3 ${step > 1 ? 'bg-rose-500' : 'bg-gray-200 dark:bg-gray-700'}`} />
               <StepDot n={2} active={step === 2} done={step > 2} label={isZh ? '内容' : 'Content'} />
               <div className={`h-px w-3 ${step > 2 ? 'bg-rose-500' : 'bg-gray-200 dark:bg-gray-700'}`} />
-              <StepDot n={3} active={step === 3} done={step > 3} label={isZh ? '配音' : 'Audio'} />
+              <StepDot n={3} active={step === 3} done={step > 3} label={isZh ? '字幕' : 'Subtitle'} />
               <div className={`h-px w-3 ${step > 3 ? 'bg-rose-500' : 'bg-gray-200 dark:bg-gray-700'}`} />
-              <StepDot n={4} active={step === 4} done={step > 4} label={isZh ? '去向' : 'Output'} />
+              <StepDot n={4} active={step === 4} done={step > 4} label={isZh ? '配音' : 'Audio'} />
               <div className={`h-px w-3 ${step > 4 ? 'bg-rose-500' : 'bg-gray-200 dark:bg-gray-700'}`} />
-              <StepDot n={5} active={step === 5} done={false} label={isZh ? '发布' : 'Publish'} />
+              <StepDot n={5} active={step === 5} done={step > 5} label={isZh ? '去向' : 'Output'} />
+              <div className={`h-px w-3 ${step > 5 ? 'bg-rose-500' : 'bg-gray-200 dark:bg-gray-700'}`} />
+              <StepDot n={6} active={step === 6} done={false} label={isZh ? '发布' : 'Publish'} />
             </div>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
@@ -4342,7 +4344,7 @@ export const HotspotVideoModal: React.FC<{
             </>
           )}
 
-          {/* ── Step 2:内容(时长 + 字幕 + 配音) ── */}
+          {/* ── Step 2:内容(目标时长 + 画面素材 + 来源平台 + 取材账号) ── */}
           {step === 2 && (
             <>
               <Field label={isZh ? '目标时长' : 'Target length'}>
@@ -4388,6 +4390,12 @@ export const HotspotVideoModal: React.FC<{
                   />
                 </div>
               </Field>
+            </>
+          )}
+
+          {/* ── Step 3:字幕(烧录开关 + 样式)—— 单独成步,不挤在「内容」步 ── */}
+          {step === 3 && (
+            <>
               <label className="flex items-center gap-2 text-sm dark:text-gray-200 cursor-pointer">
                 <input type="checkbox" checked={subtitleEnabled} onChange={(e) => setSubtitleEnabled(e.target.checked)} className="w-4 h-4 accent-amber-500" />
                 {isZh ? '烧录字幕' : 'Burn subtitles'}
@@ -4459,8 +4467,8 @@ export const HotspotVideoModal: React.FC<{
             </>
           )}
 
-          {/* ── Step 3:配音 + 背景音乐 ── */}
-          {step === 3 && (
+          {/* ── Step 4:配音 + 背景音乐 ── */}
+          {step === 4 && (
             <>
               <Field label={isZh ? '配音音色' : 'Voice'}>
                 <select value={voice} onChange={(e) => setVoice(e.target.value)}
@@ -4501,8 +4509,8 @@ export const HotspotVideoModal: React.FC<{
             </>
           )}
 
-          {/* ── Step 4:出片后(本地/上传)+ 运行频率 + 每次条数(出片后与频率合并到一步)── */}
-          {step === 4 && (
+          {/* ── Step 5:出片后(本地/上传)+ 运行频率 + 每次条数(出片后与频率合并到一步)── */}
+          {step === 5 && (
             <>
               <OutputModeToggle isZh={isZh} outputMode={outputMode} setOutputMode={setOutputMode} />
               <Field label={isZh ? '运行频率' : 'Frequency'} hint={isZh ? '到点自动按上面配置重跑' : 'auto-rerun on schedule'}>
@@ -4545,7 +4553,7 @@ export const HotspotVideoModal: React.FC<{
             </>
           )}
 
-          {/* ── Step 5:发布平台 + 发布账号(平台与账号合并到一步)── */}
+          {/* ── Step 6:发布平台 + 发布账号(平台与账号合并到一步)── */}
           {step === PUBLISH_STEP && (
             <PublishPlatformPicker
               isZh={isZh}
