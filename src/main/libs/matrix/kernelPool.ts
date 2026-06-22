@@ -559,17 +559,22 @@ export async function kernelReadIdentity(accountId: string, platform: string): P
   try {
     const s = await getPage(accountId);
     const out: KernelIdentity = {};
+    const expr = IDENTITY_EXPR[platform];
     // 先取明文 cookie 里的 uid(快手等要用它拼自己主页 URL;也作 uid 兜底)。
     let cookieUid: string | undefined;
     if (UID_COOKIE[platform]) {
       try { const cr = await send(s, 'Network.getAllCookies', {}); const c = (cr?.cookies || []).find((x: any) => String(x.name) === UID_COOKIE[platform]); if (c) cookieUid = String(c.value); } catch { /* ignore */ }
     }
     // 首页无本人信息的平台(快手):先跳到 profile/<uid> 那页再读 —— 否则在推荐 feed 上读到空/别人的号。
+    // 主页是 SPA,本人信息【异步渲染】,固定等待不稳 → 轮询到读出昵称/平台号/头像再停(最多 ~9s)。
     const selfUrl = IDENTITY_SELF_URL[platform];
-    if (selfUrl && cookieUid) {
-      try { await kernelNavigate(accountId, selfUrl(cookieUid)); await sleep(2800); } catch { /* 导航失败就按当前页读,不阻塞 */ }
+    if (selfUrl && cookieUid && expr) {
+      try { await kernelNavigate(accountId, selfUrl(cookieUid)); } catch { /* 导航失败就按当前页读,不阻塞 */ }
+      for (let i = 0; i < 6; i++) {
+        await sleep(1500);
+        try { const probe = JSON.parse((await kernelEval(accountId, expr)) || '{}'); if (probe && (probe.nickname || probe.displayId || probe.avatar)) break; } catch { /* 还没渲染好,继续等 */ }
+      }
     }
-    const expr = IDENTITY_EXPR[platform];
     if (expr) {
       try { const o = JSON.parse((await kernelEval(accountId, expr)) || '{}'); if (o && typeof o === 'object') { out.uid = o.uid || undefined; out.nickname = o.nickname || undefined; out.displayId = o.displayId || undefined; out.avatar = o.avatar || undefined; } } catch { /* ignore */ }
     }
