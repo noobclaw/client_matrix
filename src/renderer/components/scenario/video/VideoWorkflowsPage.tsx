@@ -17,6 +17,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { i18nService } from '../../../services/i18n';
 import { CardActionRow } from '../CardActionRow';
 import { VideoLoginCheckModal } from './VideoLoginCheckModal';
+import { MATRIX_EDITION } from '../../../matrixEdition';
 import { noobClawAuth } from '../../../services/noobclawAuth';
 import { noobClawApi } from '../../../services/noobclawApi';
 import { getBackendApiUrl } from '../../../services/endpoints';
@@ -1438,7 +1439,9 @@ const VideoTaskDetail: React.FC<{
   })();
   // 手动运行前的登录校验:发布平台(创作者中心口径)∪ 取材平台(主站口径)。任一非空就先弹,
   // 全绿(插件已连 + 各平台登录)才开跑。定时调度不走这里(无人值守靠运行期超时兜底)。
-  const loginCheckList = Array.from(new Set([...publishPlatforms, ...materialLoginPlatforms]));
+  // 矩阵 edition:发布走指纹内核 CDP 按号上传、取材也用账号的内核,不依赖浏览器插件,
+  // 且选的都是已关联(登录)账号 → 运行前【不需要】插件/平台登录校验,直接跑。
+  const loginCheckList = MATRIX_EDITION ? [] : Array.from(new Set([...publishPlatforms, ...materialLoginPlatforms]));
   // 主站 override = 取材要、但不在发布列表里的(同时发布时按发布的创作者中心口径,更严)。
   const loginMainSiteOverride = materialLoginPlatforms.filter((p) => !publishPlatforms.includes(p));
   const [showLoginCheck, setShowLoginCheck] = useState(false);
@@ -2645,7 +2648,7 @@ const VideoConfigModal: React.FC<{
   const selectedPlatformIds = PUBLISH_PLATFORMS.map((m) => m.id).filter((p) => platforms[p]);
 
   // ── 矩阵号:每个发布平台选一个账号(平台→accountId),发布走指纹内核 CDP(同 HotspotVideoModal)。──
-  const [matrixAccounts, setMatrixAccounts] = useState<Array<{ id: string; platform: string; displayName: string; status: string }>>([]);
+  const [matrixAccounts, setMatrixAccounts] = useState<MatrixAcctLite[]>([]);
   const [accountByPlatform, setAccountByPlatform] = useState<Record<string, string>>(
     () => (matrixMode && (editTask?.input as any)?.publishAccounts && typeof (editTask!.input as any).publishAccounts === 'object' ? { ...(editTask!.input as any).publishAccounts } : {}),
   );
@@ -2656,14 +2659,14 @@ const VideoConfigModal: React.FC<{
       try {
         const r = await (window as any).electron?.matrix?.listAccounts?.();
         const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
-        if (alive) setMatrixAccounts(accs.map((a) => ({ id: a.id, platform: a.platform, displayName: a.displayName, status: a.status })));
+        if (alive) setMatrixAccounts(accs.map((a) => ({ id: a.id, platform: a.platform, displayName: a.displayName, status: a.status, nickname: a.nickname, displayId: a.displayId, avatar: a.avatar })));
       } catch { if (alive) setMatrixAccounts([]); }
     })();
     return () => { alive = false; };
   }, [matrixMode]);
   const accountsFor = (platform: string) => matrixAccounts.filter((a) => a.platform === platform);
   const matrixAccountsReady = !matrixMode || outputMode !== 'upload'
-    || selectedPlatformIds.every((p) => !!accountByPlatform[p] && accountsFor(p).some((a) => a.id === accountByPlatform[p]));
+    || selectedPlatformIds.every((p) => !!accountByPlatform[p] && accountsFor(p).some((a) => a.id === accountByPlatform[p] && a.status !== 'login_required'));
 
   // 决策①:要发布(upload 模式 + 勾了平台)时,保存前必须先过【全平台登录校验】(全登录才放行)。
   const [showLoginCheck, setShowLoginCheck] = useState(false);
@@ -3815,6 +3818,70 @@ const PublishPlatformPicker: React.FC<{
   );
 };
 
+// 发布账号(矩阵)精简结构:富信息下拉用。
+type MatrixAcctLite = { id: string; platform: string; displayName: string; status: string; nickname?: string; displayId?: string; avatar?: string };
+const MATRIX_PLAT_ZH: Record<string, string> = { douyin: '抖音', xhs: '小红书', bilibili: 'B站', kuaishou: '快手', tiktok: 'TikTok', x: 'X', binance: '币安广场', youtube: 'YouTube', shipinhao: '视频号', toutiao: '头条' };
+// 单个账号行(头像 + 昵称 + 平台号 + 备注 + 登录状态);未登录关联(login_required)置灰。
+const MatrixAcctRow: React.FC<{ isZh: boolean; a: MatrixAcctLite }> = ({ isZh, a }) => {
+  const linked = a.status !== 'login_required';
+  const title = a.nickname || a.displayName;
+  return (
+    <div className="flex items-center gap-2 min-w-0">
+      {a.avatar
+        ? <img src={a.avatar} referrerPolicy="no-referrer" alt="" className="w-7 h-7 rounded-full object-cover bg-gray-200 dark:bg-gray-700 shrink-0" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+        : <div className="w-7 h-7 rounded-full bg-violet-500/20 text-violet-500 flex items-center justify-center text-xs font-bold shrink-0">{(title || '?').slice(0, 1)}</div>}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="text-sm font-medium dark:text-gray-200 truncate">{title}</span>
+          <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${linked ? 'text-green-600 dark:text-green-400 bg-green-500/15' : 'text-amber-600 dark:text-amber-400 bg-amber-500/15'}`}>{linked ? (isZh ? '已关联' : 'Linked') : (isZh ? '未关联' : 'Not linked')}</span>
+        </div>
+        <div className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
+          {a.displayId ? `${MATRIX_PLAT_ZH[a.platform] || ''}号:${a.displayId} · ` : ''}{isZh ? '备注' : 'note'}:{a.displayName}
+        </div>
+      </div>
+    </div>
+  );
+};
+// 富信息账号下拉(原生 select 放不了头像,自建):未关联账号置灰不可选。
+const MatrixAccountSelect: React.FC<{
+  isZh: boolean; accounts: MatrixAcctLite[]; value: string; onChange: (id: string) => void; onAddAccount: () => void;
+}> = ({ isZh, accounts, value, onChange, onAddAccount }) => {
+  const [open, setOpen] = useState(false);
+  if (accounts.length === 0) {
+    return (
+      <button type="button" onClick={onAddAccount}
+        className="flex-1 text-left px-3 py-2 rounded-lg border border-dashed border-rose-400 text-rose-500 text-xs hover:bg-rose-500/5">
+        {isZh ? '⚠️ 暂无该平台账号 · 点此去「我的矩阵账号」关联 →' : '⚠️ No account · link one in "My Matrix Accounts" →'}
+      </button>
+    );
+  }
+  const sel = accounts.find((a) => a.id === value);
+  return (
+    <div className="relative flex-1">
+      <button type="button" onClick={() => setOpen((o) => !o)}
+        className="w-full px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-left flex items-center justify-between gap-2">
+        {sel ? <MatrixAcctRow isZh={isZh} a={sel} /> : <span className="text-sm text-gray-400">{isZh ? '— 选择已关联账号 —' : '— pick a linked account —'}</span>}
+        <span className="text-gray-400 shrink-0">▾</span>
+      </button>
+      {open && (
+        <div className="absolute z-30 mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-xl max-h-64 overflow-auto p-1">
+          {accounts.map((a) => {
+            const disabled = a.status === 'login_required';
+            return (
+              <button key={a.id} type="button" disabled={disabled}
+                onClick={() => { if (disabled) return; onChange(a.id); setOpen(false); }}
+                title={disabled ? (isZh ? '该账号尚未关联,请先到「我的矩阵账号」扫码关联' : 'Not linked yet') : undefined}
+                className={`w-full text-left px-2 py-1.5 rounded-md ${disabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-100 dark:hover:bg-gray-700'} ${a.id === value ? 'bg-amber-500/10' : ''}`}>
+                <MatrixAcctRow isZh={isZh} a={a} />
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // 通用入口卡(3 张视频创作卡复用:电影级 / 在线素材 / 模板速生)。
 // accent 决定主色;cost 在描述下方展示「价格」(用户要求 card 表面带价格特点)。
 // accent 类名写成完整字面量映射,避免 Tailwind 动态拼接被 purge。
@@ -4040,7 +4107,7 @@ export const HotspotVideoModal: React.FC<{
 
   // ── 矩阵号:每个发布平台选一个账号(平台→accountId)。账号走指纹内核 CDP 发布。 ──
   // 拉一次本地矩阵账号池;按平台分组,在「账号」步给每个已勾平台一个下拉(可用号才列)。
-  const [matrixAccounts, setMatrixAccounts] = useState<Array<{ id: string; platform: string; displayName: string; status: string }>>([]);
+  const [matrixAccounts, setMatrixAccounts] = useState<MatrixAcctLite[]>([]);
   const [accountByPlatform, setAccountByPlatform] = useState<Record<string, string>>(
     () => (matrixMode && editTask?.input?.publishAccounts && typeof editTask.input.publishAccounts === 'object' ? { ...editTask.input.publishAccounts } : {}),
   );
@@ -4051,7 +4118,7 @@ export const HotspotVideoModal: React.FC<{
       try {
         const r = await (window as any).electron?.matrix?.listAccounts?.();
         const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
-        if (alive) setMatrixAccounts(accs.map((a) => ({ id: a.id, platform: a.platform, displayName: a.displayName, status: a.status })));
+        if (alive) setMatrixAccounts(accs.map((a) => ({ id: a.id, platform: a.platform, displayName: a.displayName, status: a.status, nickname: a.nickname, displayId: a.displayId, avatar: a.avatar })));
       } catch { if (alive) setMatrixAccounts([]); }
     })();
     return () => { alive = false; };
@@ -4060,7 +4127,7 @@ export const HotspotVideoModal: React.FC<{
   const accountsFor = (platform: string) => matrixAccounts.filter((a) => a.platform === platform);
   // 矩阵 + 发布模式下:每个勾选平台是否都已选号(没号的平台算未满足 → 引导建号)。
   const matrixAccountsReady = !matrixMode || outputMode !== 'upload'
-    || selectedPlatformIds.every((p) => !!accountByPlatform[p] && accountsFor(p).some((a) => a.id === accountByPlatform[p]));
+    || selectedPlatformIds.every((p) => !!accountByPlatform[p] && accountsFor(p).some((a) => a.id === accountByPlatform[p] && a.status !== 'login_required'));
 
   // 任务名不再让用户填(每次随机选题,固定名没意义)→ 新建固定「热搜成片」,编辑保留旧名。
   const buildTitle = () => (title.trim() || (isZh ? '热搜成片' : 'Hotspot Video'));
@@ -4253,8 +4320,8 @@ export const HotspotVideoModal: React.FC<{
               <Field label={isZh ? '画面素材' : 'Footage'}>
                 <div className="flex gap-2">
                   {([
-                    { v: 'image', zh: '🖼️ 智能配图', en: '🖼️ Images', deszh: '中文走抖音图文 · 英文走 TikTok · Ken Burns' },
-                    { v: 'douyin', zh: '🎬 智能混剪', en: '🎬 Smart remix', deszh: '中文搜抖音 · 英文搜 TikTok · 真实视频混剪 + 配音 · 需登录对应平台' },
+                    { v: 'image', zh: '🖼️ 智能配图', en: '🖼️ Images', deszh: '通过关键词在抖音/TikTok找最匹配图文素材进行制作' },
+                    { v: 'douyin', zh: '🎬 智能混剪', en: '🎬 Smart remix', deszh: '通过关键词在抖音/TikTok找最匹配视频素材进行混剪' },
                   ] as const).map((m) => (
                     <button key={m.v} type="button" onClick={() => setMaterialSource(m.v)}
                       className={`flex-1 px-3 py-2 rounded-lg text-sm border text-left ${materialSource === m.v ? 'border-amber-500 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 font-semibold' : 'border-gray-200 dark:border-gray-700 dark:text-gray-300'}`}>
@@ -4442,34 +4509,19 @@ export const HotspotVideoModal: React.FC<{
                         const accs = accountsFor(pid);
                         return (
                           <div key={pid} className="flex items-center gap-3">
-                            <div className="w-28 shrink-0 text-sm font-medium dark:text-gray-200">{label}</div>
-                            {accs.length === 0 ? (
-                              <button
-                                type="button"
-                                onClick={() => { window.dispatchEvent(new CustomEvent('noobclaw:show-matrix-accounts')); onClose(); }}
-                                className="flex-1 text-left px-3 py-2 rounded-lg border border-dashed border-rose-400 text-rose-500 text-xs hover:bg-rose-500/5"
-                              >
-                                {isZh ? '⚠️ 暂无该平台账号 · 点此去「我的矩阵账号」添加 →' : '⚠️ No account · add one in "My Matrix Accounts" →'}
-                              </button>
-                            ) : (
-                              <select
-                                value={accountByPlatform[pid] || ''}
-                                onChange={(e) => setAccountByPlatform((m) => ({ ...m, [pid]: e.target.value }))}
-                                className="flex-1 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm dark:text-gray-200"
-                              >
-                                <option value="">{isZh ? '— 选择账号 —' : '— pick account —'}</option>
-                                {accs.map((a) => (
-                                  <option key={a.id} value={a.id}>
-                                    {a.displayName}{a.status && a.status !== 'idle' ? ` (${a.status})` : ''}
-                                  </option>
-                                ))}
-                              </select>
-                            )}
+                            <div className="w-24 shrink-0 text-sm font-medium dark:text-gray-200">{label}</div>
+                            <MatrixAccountSelect
+                              isZh={isZh}
+                              accounts={accs}
+                              value={accountByPlatform[pid] || ''}
+                              onChange={(id) => setAccountByPlatform((m) => ({ ...m, [pid]: id }))}
+                              onAddAccount={() => { window.dispatchEvent(new CustomEvent('noobclaw:show-matrix-accounts')); onClose(); }}
+                            />
                           </div>
                         );
                       })}
                       <p className="text-[11px] text-gray-500 dark:text-gray-400 pt-1">
-                        {isZh ? '每个平台最多选 1 个账号;发布时用该号的指纹浏览器登录态上传(未登录会在运行时跳过)。' : 'Max 1 account per platform; published via that account\'s fingerprint browser.'}
+                        {isZh ? '每个平台必须选一个【已关联】账号;未关联的已置灰不可选,选好才能下一步。发布时用该号的指纹浏览器上传。' : 'Each platform needs a LINKED account (unlinked ones are greyed out). Published via that account\'s fingerprint browser.'}
                       </p>
                     </div>
                   </Field>
@@ -4627,7 +4679,7 @@ export const TemplateSpeedModal: React.FC<{ isZh: boolean; matrixMode?: boolean;
   const selectedPlatformIds = PUBLISH_PLATFORMS.map((m) => m.id).filter((p) => platforms[p]);
 
   // ── 矩阵号:每个发布平台选一个账号(平台→accountId),发布走指纹内核 CDP(同 HotspotVideoModal)。──
-  const [matrixAccounts, setMatrixAccounts] = useState<Array<{ id: string; platform: string; displayName: string; status: string }>>([]);
+  const [matrixAccounts, setMatrixAccounts] = useState<MatrixAcctLite[]>([]);
   const [accountByPlatform, setAccountByPlatform] = useState<Record<string, string>>(
     () => (matrixMode && (editTask?.input as any)?.publishAccounts && typeof (editTask!.input as any).publishAccounts === 'object' ? { ...(editTask!.input as any).publishAccounts } : {}),
   );
@@ -4638,14 +4690,14 @@ export const TemplateSpeedModal: React.FC<{ isZh: boolean; matrixMode?: boolean;
       try {
         const r = await (window as any).electron?.matrix?.listAccounts?.();
         const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
-        if (alive) setMatrixAccounts(accs.map((a) => ({ id: a.id, platform: a.platform, displayName: a.displayName, status: a.status })));
+        if (alive) setMatrixAccounts(accs.map((a) => ({ id: a.id, platform: a.platform, displayName: a.displayName, status: a.status, nickname: a.nickname, displayId: a.displayId, avatar: a.avatar })));
       } catch { if (alive) setMatrixAccounts([]); }
     })();
     return () => { alive = false; };
   }, [matrixMode]);
   const accountsFor = (platform: string) => matrixAccounts.filter((a) => a.platform === platform);
   const matrixAccountsReady = !matrixMode || outputMode !== 'upload'
-    || selectedPlatformIds.every((p) => !!accountByPlatform[p] && accountsFor(p).some((a) => a.id === accountByPlatform[p]));
+    || selectedPlatformIds.every((p) => !!accountByPlatform[p] && accountsFor(p).some((a) => a.id === accountByPlatform[p] && a.status !== 'login_required'));
   // 发布文案不再给输入框(用户要求,AI 自动写)→ 只保留值(编辑老任务回填),不需要 setter。
   const [publishTitle] = useState<string>((editTask?.input as any)?.publishTitle || '');
   const [publishCaption] = useState<string>((editTask?.input as any)?.publishCaption || '');
