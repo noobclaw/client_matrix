@@ -198,6 +198,12 @@ export function resetRunningToIdle(): void {
   if (changed) { cache = accts; persist(); }
 }
 
+/** 按平台 + 真实 uid 找【已被别的矩阵号关联】的账号(去重用:同一个真实平台账号不许关联到两个矩阵号)。 */
+export function findAccountByUid(platform: string, boundUid: string, excludeId: string): MatrixAccount | undefined {
+  if (!boundUid) return undefined;
+  return loadAccounts().find((a) => a.id !== excludeId && a.platform === platform && a.boundUid === boundUid);
+}
+
 export function removeAccount(id: string): void {
   cache = loadAccounts().filter((a) => a.id !== id);
   persist();

@@ -1313,15 +1313,23 @@ const server = http.createServer(async (req, res) => {
                   let ok = false;
                   try { ok = await checkKernelLogin(acc.id, acc.platform); } catch { ok = false; }
                   if (ok) {
-                    setAccountStatus(acc.id, 'idle');
-                    // 读真实身份(昵称 + uid)写回账号,推给 UI 显示。
+                    // 读真实身份(昵称 + uid)。
                     let ident: any = {};
                     try {
                       const { kernelReadIdentity } = await import('./libs/matrix/kernelPool');
-                      const { setAccountIdentity } = await import('./libs/matrix/accountManager');
                       ident = await kernelReadIdentity(acc.id, acc.platform);
-                      setAccountIdentity(acc.id, { nickname: ident.nickname, displayId: ident.displayId, avatar: ident.avatar, boundUid: ident.uid });
                     } catch { /* 身份读取失败不影响登录 */ }
+                    // 去重(B):这个真实账号(uid)已被别的矩阵号关联 → 拒绝本次关联,清 cookie + 标未关联 + 提示换号。
+                    const { findAccountByUid, setAccountStatus: setStat, setAccountIdentity } = await import('./libs/matrix/accountManager');
+                    const dup = ident.uid ? findAccountByUid(acc.platform, String(ident.uid), acc.id) : undefined;
+                    if (dup) {
+                      try { const { kernelClearCookies } = await import('./libs/matrix/kernelPool'); await kernelClearCookies(acc.id); } catch { /* ignore */ }
+                      setStat(acc.id, 'login_required');
+                      broadcastSSE('matrix:account', { id: acc.id, status: 'login_required', error: `该账号已被「${dup.displayName}」关联,一个真实账号只能关联一个矩阵号,请换一个号扫码` });
+                      break;
+                    }
+                    setStat(acc.id, 'idle');
+                    try { setAccountIdentity(acc.id, { nickname: ident.nickname, displayId: ident.displayId, avatar: ident.avatar, boundUid: ident.uid }); } catch { /* ignore */ }
                     broadcastSSE('matrix:account', { id: acc.id, status: 'idle', nickname: ident.nickname, displayId: ident.displayId, avatar: ident.avatar, boundUid: ident.uid });
                     break;
                   }
@@ -1373,8 +1381,18 @@ const server = http.createServer(async (req, res) => {
                 const loggedIn = await checkKernelLogin(acc.id, acc.platform);
                 let ident: any = {};
                 if (loggedIn) {
+                  try { ident = await kernelReadIdentity(acc.id, acc.platform); } catch { /* ignore */ }
+                  // 去重(B):该真实账号(uid)已被别的矩阵号关联 → 拒绝,清 cookie + 标未关联 + 提示。
+                  const { findAccountByUid } = await import('./libs/matrix/accountManager');
+                  const dup = ident.uid ? findAccountByUid(acc.platform, String(ident.uid), acc.id) : undefined;
+                  if (dup) {
+                    try { const { kernelClearCookies } = await import('./libs/matrix/kernelPool'); await kernelClearCookies(acc.id); } catch { /* ignore */ }
+                    setAccountStatus(acc.id, 'login_required');
+                    broadcastSSE('matrix:account', { id: acc.id, status: 'login_required', error: `该账号已被「${dup.displayName}」关联,一个真实账号只能关联一个矩阵号` });
+                    return writeJSON(res, 200, { ok: true, loggedIn: false, duplicate: true });
+                  }
                   setAccountStatus(acc.id, 'idle');
-                  try { ident = await kernelReadIdentity(acc.id, acc.platform); setAccountIdentity(acc.id, { nickname: ident.nickname, displayId: ident.displayId, avatar: ident.avatar, boundUid: ident.uid }); } catch { /* ignore */ }
+                  try { setAccountIdentity(acc.id, { nickname: ident.nickname, displayId: ident.displayId, avatar: ident.avatar, boundUid: ident.uid }); } catch { /* ignore */ }
                 } else {
                   setAccountStatus(acc.id, 'login_required');
                 }

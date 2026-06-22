@@ -431,7 +431,11 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
                       <button onClick={() => openProxy(a)} className={`text-xs px-2.5 py-1 rounded-lg text-white ${a.status === 'login_required' ? 'bg-violet-500 hover:bg-violet-600' : 'bg-emerald-600 hover:bg-emerald-700'}`}>配置IP</button>
                       <button onClick={() => openEdit(a)} className={`text-xs px-2.5 py-1 rounded-lg text-white ${a.status === 'login_required' ? 'bg-violet-500 hover:bg-violet-600' : 'bg-emerald-600 hover:bg-emerald-700'}`}>编辑</button>
                       {a.status === 'login_required'
-                        ? <button onClick={() => promptScanLogin(a.id, a.platform, a.displayName)} className="text-xs px-2.5 py-1 rounded-lg bg-violet-500 text-white hover:bg-violet-600">扫码关联</button>
+                        ? (<>
+                            {/* 已在浏览器里登录了但卡片还显示「尚未关联」→ 点这个重新检测(扫码轮询超时/手动登录后用) */}
+                            <button onClick={() => refreshIdentity(a)} className="text-xs px-2.5 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">刷新信息</button>
+                            <button onClick={() => promptScanLogin(a.id, a.platform, a.displayName)} className="text-xs px-2.5 py-1 rounded-lg bg-violet-500 text-white hover:bg-violet-600">扫码关联</button>
+                          </>)
                         : (<>
                             {/* 已关联:读真实身份 / 断开(清登录,保留配置) */}
                             <button onClick={() => refreshIdentity(a)} className="text-xs px-2.5 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">刷新信息</button>
