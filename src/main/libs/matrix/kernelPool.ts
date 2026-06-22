@@ -529,7 +529,7 @@ const IDENTITY_EXPR: Record<string, string> = {
   // 小红书:/me 接口(edith 子域,带 cred 可跨子域)。nickname/小红书号(red_id)/uid(user_id)/头像。
   xhs: '(async function(){try{var r=await fetch("https://edith.xiaohongshu.com/api/sns/web/v2/user/me",{credentials:"include"});var j=await r.json();var d=(j&&j.data)||{};if(d.guest)return "{}";return JSON.stringify({nickname:d.nickname,displayId:d.red_id,uid:d.user_id,avatar:d.images||d.imageb});}catch(e){return "{}";}})()',
   // B站:nav 接口最干净。uname/mid/face。
-  bilibili: '(async function(){try{var r=await fetch("https://api.bilibili.com/x/web-interface/nav",{credentials:"include"});var j=await r.json();var d=(j&&j.data)||{};if(!d.isLogin)return "{}";var mid=String(d.mid||"");return JSON.stringify({nickname:d.uname,uid:mid,displayId:mid,avatar:d.face});}catch(e){return "{}";}})()',
+  bilibili: '(async function(){try{var r=await fetch("https://api.bilibili.com/x/web-interface/nav",{credentials:"include"});var j=await r.json();var d=(j&&j.data)||{};if(!d.isLogin)return "{}";var mid=String(d.mid||"");return JSON.stringify({nickname:d.uname,uid:mid,displayId:mid,avatar:(d.face||"").replace(/^http:/,"https:")});}catch(e){return "{}";}})()',
   // 推特X:左侧头像容器 [data-testid="UserAvatar-Container-<handle>"](真机实测 2026-06-22):
   //   testid 末段=@handle(推特号)、其 img.alt=昵称、img.src=头像;uid 从 twid=u%3D<id> cookie。
   //   (账号切换器按钮的 span 实测是空的,不可靠 → 改用头像容器。)

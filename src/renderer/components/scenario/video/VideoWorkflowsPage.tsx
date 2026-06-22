@@ -3836,7 +3836,7 @@ const MatrixAcctRow: React.FC<{ isZh: boolean; a: MatrixAcctLite }> = ({ isZh, a
   return (
     <div className="flex items-center gap-2 min-w-0">
       {a.avatar
-        ? <img src={a.avatar} referrerPolicy="no-referrer" alt="" className="w-7 h-7 rounded-full object-cover bg-gray-200 dark:bg-gray-700 shrink-0" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+        ? <img src={a.avatar.replace(/^http:/, 'https:')} referrerPolicy="no-referrer" alt="" className="w-7 h-7 rounded-full object-cover bg-gray-200 dark:bg-gray-700 shrink-0" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
         : <div className="w-7 h-7 rounded-full bg-violet-500/20 text-violet-500 flex items-center justify-center text-xs font-bold shrink-0">{(title || '?').slice(0, 1)}</div>}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5 min-w-0">

@@ -395,9 +395,10 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
                     <div className="flex items-center gap-2.5 min-w-0 pr-6">
                       {/* 头像 + 状态点角标 */}
                       <div className="relative shrink-0">
-                        {a.avatar
-                          ? <img src={a.avatar} referrerPolicy="no-referrer" alt="" className="w-9 h-9 rounded-full object-cover bg-gray-200 dark:bg-gray-700" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
-                          : <div className="w-9 h-9 rounded-full bg-violet-500/20 text-violet-500 flex items-center justify-center text-sm font-bold">{(a.nickname || a.displayName || '?').slice(0, 1)}</div>}
+                        {/* 首字母兜底永远在底层;头像加载成功盖在上面,失败(onError 隐藏)则露出首字母 —— 不会变空白。
+                            B站等 CDN 返回 http:// 头像,在 webview(https/app://)是混合内容会被拦,统一升 https。 */}
+                        <div className="w-9 h-9 rounded-full bg-violet-500/20 text-violet-500 flex items-center justify-center text-sm font-bold">{(a.nickname || a.displayName || '?').slice(0, 1)}</div>
+                        {a.avatar && <img src={a.avatar.replace(/^http:/, 'https:')} referrerPolicy="no-referrer" alt="" className="absolute inset-0 w-9 h-9 rounded-full object-cover bg-gray-200 dark:bg-gray-700" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />}
                         <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white dark:border-gray-900 ${STATUS_DOT[a.status]}`} />
                       </div>
                       {/* 昵称(真实)+ 平台号 + 备注 */}
