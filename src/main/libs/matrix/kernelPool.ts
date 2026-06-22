@@ -55,6 +55,7 @@ export interface LaunchKernelOptions {
   label?: string;                 // 窗口左上角常驻角标文案(一般是账号备注名 + 分组)
   startUrl?: string;              // 启动即打开的 URL(扫码登录用):内核直接开到平台登录页,
                                   //   避免「先开新标签页再 navigate」的 target 竞态(导航落到看不见的后台 tab)。
+  skipLease?: boolean;            // 不占「按账号使用互斥锁」(openLogin:用户交互、只读 cookie 轮询,不驱动页面)
 }
 
 const sessions = new Map<string, KernelSession>();
@@ -62,6 +63,23 @@ const launching = new Map<string, Promise<KernelSession>>(); // 启动去重
 // 按 accountId 的【引用计数】:每次 launchKernel +1、closeKernel -1;>0 说明还有别的流程在用
 // 这个号 → closeKernel 不真关(防「A 任务用着、B 流程把窗关了」误关 + 防并发撞同一 profile 损坏)。
 const refCount = new Map<string, number>();
+
+// 按 accountId 的【使用互斥锁(异步队列)】:同一账号同一时刻只允许一个流程操作,其他【排队等】。
+// 防「涨粉任务和视频任务同时驱动同一个号的页面 → 命令打架/串台」。launchKernel 时占锁、
+// closeKernel 时释放。openLogin(用户交互、只读 cookie 轮询)用 skipLease 不占锁,不阻塞任务。
+const leaseTail = new Map<string, Promise<void>>();   // 每号一条队尾 promise
+const leaseHeld = new Map<string, () => void>();       // 当前持有者的释放函数
+function acquireLease(accountId: string): Promise<void> {
+  let release!: () => void;
+  const mine = new Promise<void>((res) => { release = res; });
+  const prev = leaseTail.get(accountId) || Promise.resolve();
+  leaseTail.set(accountId, prev.then(() => mine));      // 后来者排在我后面
+  return prev.then(() => { leaseHeld.set(accountId, release); }); // 等前一个用完才返回
+}
+function releaseLease(accountId: string): void {
+  const r = leaseHeld.get(accountId);
+  if (r) { leaseHeld.delete(accountId); r(); }
+}
 let nextDebugPort = 9300;        // 每号一个端口,递增分配
 let nextSlot = 0;                // 第几个窗口(错开层叠位置用)
 
@@ -130,6 +148,9 @@ function buildKernelArgs(opts: LaunchKernelOptions, debugPort: number): string[]
 // ── 启动一个号的内核实例(in-flight 去重,杜绝同号双开) ──
 
 export async function launchKernel(opts: LaunchKernelOptions): Promise<KernelSession> {
+  // 占「按账号使用互斥锁」:同号有别的流程正在用 → 在这里【排队等】,直到它 closeKernel 释放。
+  //   openLogin(skipLease)不占锁,不阻塞任务。
+  if (!opts.skipLease) await acquireLease(opts.accountId);
   // 引用计数 +1:任何流程要用这个号都先 +1,closeKernel 时 -1,归 0 才真关。
   refCount.set(opts.accountId, (refCount.get(opts.accountId) || 0) + 1);
   const existing = sessions.get(opts.accountId);
@@ -144,8 +165,8 @@ export async function launchKernel(opts: LaunchKernelOptions): Promise<KernelSes
   const p = doLaunch(opts).finally(() => {
     if (launching.get(opts.accountId) === p) launching.delete(opts.accountId);
   });
-  // 启动失败时调用方拿到 reject、不会再 closeKernel → 这里回退它的 +1,防计数泄漏。
-  p.catch(() => { refCount.set(opts.accountId, Math.max(0, (refCount.get(opts.accountId) || 1) - 1)); });
+  // 启动失败时调用方拿到 reject、不会再 closeKernel → 这里回退它的 +1 并释放锁,防计数/锁泄漏。
+  p.catch(() => { refCount.set(opts.accountId, Math.max(0, (refCount.get(opts.accountId) || 1) - 1)); if (!opts.skipLease) releaseLease(opts.accountId); });
   launching.set(opts.accountId, p);
   return p;
 }
@@ -555,6 +576,8 @@ export function listSessions(): string[] {
 }
 
 export function closeKernel(accountId: string, opts?: { force?: boolean }): void {
+  // 释放「使用互斥锁」:本流程对该号的操作结束 → 让排队的下一个流程能进(不受 refcount/下面早返回影响)。
+  releaseLease(accountId);
   // 引用计数 -1:还有别的流程在用(>0)就【不关】,只有归 0(或 force)才真关 → 防误关在用的窗。
   const n = Math.max(0, (refCount.get(accountId) || 1) - 1);
   refCount.set(accountId, n);

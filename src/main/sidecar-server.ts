@@ -1301,6 +1301,7 @@ const server = http.createServer(async (req, res) => {
                 userDataDir: acc.userDataDir, fingerprint: acc.fingerprint, proxy: acc.proxy,
                 label: accountBadgeLabel(acc),   // 角标:平台名 · 昵称 · 备注
                 startUrl: a?.loginUrl || undefined,   // 新起内核直接开到登录页(避免新标签页竞态)
+                skipLease: true,                  // 用户扫码场景:只读 cookie 轮询、不驱动页面 → 不占使用互斥锁,不阻塞任务
               });
               // 内核已在运行(复用)时不会按 startUrl 重开 → 仍 navigate 兜底;新起时这步是冗余的二次确保。
               await kernelNavigate(acc.id, a?.loginUrl || 'about:blank');
@@ -1365,19 +1366,23 @@ const server = http.createServer(async (req, res) => {
                 userDataDir: acc.userDataDir, fingerprint: acc.fingerprint, proxy: acc.proxy,
                 label: accountBadgeLabel(acc),   // 角标:平台名 · 昵称 · 备注
               });
-              if (a?.homeUrl) await kernelNavigate(acc.id, a.homeUrl);
-              await new Promise((r) => setTimeout(r, 3500)); // 等页面/SSR 就绪
-              const loggedIn = await checkKernelLogin(acc.id, acc.platform);
-              let ident: any = {};
-              if (loggedIn) {
-                setAccountStatus(acc.id, 'idle');
-                try { ident = await kernelReadIdentity(acc.id, acc.platform); setAccountIdentity(acc.id, { nickname: ident.nickname, displayId: ident.displayId, avatar: ident.avatar, boundUid: ident.uid }); } catch { /* ignore */ }
-              } else {
-                setAccountStatus(acc.id, 'login_required');
+              // launchKernel 成功后无论中途是否异常,都必须 closeKernel(否则使用锁 + 引用计数泄漏 → 该号卡死)。
+              try {
+                if (a?.homeUrl) await kernelNavigate(acc.id, a.homeUrl);
+                await new Promise((r) => setTimeout(r, 3500)); // 等页面/SSR 就绪
+                const loggedIn = await checkKernelLogin(acc.id, acc.platform);
+                let ident: any = {};
+                if (loggedIn) {
+                  setAccountStatus(acc.id, 'idle');
+                  try { ident = await kernelReadIdentity(acc.id, acc.platform); setAccountIdentity(acc.id, { nickname: ident.nickname, displayId: ident.displayId, avatar: ident.avatar, boundUid: ident.uid }); } catch { /* ignore */ }
+                } else {
+                  setAccountStatus(acc.id, 'login_required');
+                }
+                broadcastSSE('matrix:account', { id: acc.id, status: loggedIn ? 'idle' : 'login_required', nickname: ident.nickname, displayId: ident.displayId, avatar: ident.avatar, boundUid: ident.uid });
+                return writeJSON(res, 200, { ok: true, loggedIn, nickname: ident.nickname, displayId: ident.displayId });
+              } finally {
+                try { closeKernel(acc.id); } catch { /* ignore */ } // -1 引用计数 + 释放使用锁
               }
-              broadcastSSE('matrix:account', { id: acc.id, status: loggedIn ? 'idle' : 'login_required', nickname: ident.nickname, displayId: ident.displayId, avatar: ident.avatar, boundUid: ident.uid });
-              try { closeKernel(acc.id); } catch { /* ignore */ } // 引用计数 -1:别的流程还用着就不会真关(refcount 决定)
-              return writeJSON(res, 200, { ok: true, loggedIn, nickname: ident.nickname, displayId: ident.displayId });
             } catch (e: any) {
               return writeJSON(res, 200, { ok: false, error: e?.message || String(e) });
             }
