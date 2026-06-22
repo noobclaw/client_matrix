@@ -15,6 +15,7 @@ interface MatrixAccount {
   id: string; platform: string; displayName: string; group?: string; persona?: string; status: AccountStatus;
   proxy?: { protocol?: string; host: string; port: number; username?: string; password?: string; geo?: string; health?: string };
   keywords?: string[]; kernelVersion?: string; nickname?: string; displayId?: string; avatar?: string; boundUid?: string;
+  loginScope?: 'main' | 'creator';   // 仅快手:主站 / 创作者中心
 }
 interface MatrixTask {
   id: string; platform: string; type: 'engage'; name: string; enabled: boolean; accountIds: string[];
@@ -38,6 +39,16 @@ const LOGIN_URL: Record<string, string> = {
   binance: 'https://www.binance.com/zh-CN/square', youtube: 'https://www.youtube.com/',
   shipinhao: 'https://channels.weixin.qq.com/', toutiao: 'https://mp.toutiao.com/',
 };
+// 登录/读身份导航 URL:快手按场景分流(创作端登 cp.kuaishou.com,主站登 www);其它平台用 LOGIN_URL。
+const loginUrlFor = (platform: string, loginScope?: string): string => {
+  if (platform === 'kuaishou') return loginScope === 'creator' ? 'https://cp.kuaishou.com/profile' : 'https://www.kuaishou.com/';
+  return LOGIN_URL[platform] || '';
+};
+// 快手两类账号子 tab。
+const KS_SCOPES: { key: 'main' | 'creator'; label: string }[] = [
+  { key: 'creator', label: '创作者中心(发布)' },
+  { key: 'main', label: '主站(涨粉)' },
+];
 const STATUS_DOT: Record<AccountStatus, string> = { idle: 'bg-green-500', running: 'bg-blue-500', login_required: 'bg-amber-500', limited: 'bg-gray-400', banned: 'bg-red-500' };
 const STATUS_LABEL: Record<AccountStatus, string> = { idle: '已连接', running: '运行中', login_required: '尚未连接', limited: '限流冷却', banned: '已封' };
 const FREQ_LABEL: Record<string, string> = { once: '不重复(手动)', '30min': '每30分钟', '1h': '每小时', '3h': '每3小时', '6h': '每6小时', daily_random: '每日随机一次' };
@@ -85,6 +96,9 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
   // kernelPath:调试用的手动内核路径覆盖(UI 已移除输入框,留空即由后端自动解析已装版本)。
   const [kernelPath] = useState<string>(() => localStorage.getItem('matrix:kernelPath') || '');
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  // 快手专属:当前子 tab(创作者中心 / 主站)+ 新建时所选类型(建号后不可改)。
+  const [ksScope, setKsScope] = useState<'main' | 'creator'>('creator');
+  const [newScope, setNewScope] = useState<'main' | 'creator'>('creator');
 
   // 进度
   const [items, setItems] = useState<Record<string, ItemResult>>({});
@@ -161,7 +175,8 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
 
   const downloadKernel = async () => { setShowKernelModal(true); setKernelBusy(true); setKernelPct(0); setKernelMsg('准备下载…'); await M()?.ensureKernel(); };
 
-  const platformAccounts = accounts.filter((a) => a.platform === platform);
+  // 快手按子 tab 过滤(老号无 loginScope → 当主站);其它平台不分。
+  const platformAccounts = accounts.filter((a) => a.platform === platform && (platform !== 'kuaishou' || (a.loginScope || 'main') === ksScope));
   const platformTasks = tasks.filter((t) => t.platform === platform);
   const kernelReady = !!kernel.installed || !!kernelPath.trim();
   const requireKernel = (): boolean => { if (kernelReady) return true; setShowKernelModal(true); return false; };
@@ -172,7 +187,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
   const openAdd = () => {
     if (!requireLogin()) return;
     if (!requireKernel()) return;
-    setEditId(null); setNewName(`账号${platformAccounts.length + 1}-`);
+    setEditId(null); setNewName(`账号${platformAccounts.length + 1}-`); setNewScope(ksScope);
     // 默认选中一个赛道并带出人设 + 关键词(可再改)。
     const def = TRACK_PRESETS.find((t) => t.name === DEFAULT_TRACK) || TRACK_PRESETS[0];
     setNewGroup(def.name); setNewPersona(def.persona); setNewKeywords(def.keywords.join(' '));
@@ -186,7 +201,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
     const p = TRACK_PRESETS.find((t) => t.name === name);
     if (p) { setNewKeywords(p.keywords.join(' ')); setNewPersona(p.persona); }
   };
-  const openEdit = (a: MatrixAccount) => { if (!requireLogin()) return; setEditId(a.id); setNewName(a.displayName); setNewGroup(a.group || ''); setNewPersona(a.persona || ''); setNewKeywords((a.keywords || []).join(' ')); setNotice(''); setShowAdd(true); };
+  const openEdit = (a: MatrixAccount) => { if (!requireLogin()) return; setEditId(a.id); setNewName(a.displayName); setNewGroup(a.group || ''); setNewPersona(a.persona || ''); setNewKeywords((a.keywords || []).join(' ')); setNewScope((a.loginScope as 'main' | 'creator') || 'main'); setNotice(''); setShowAdd(true); };
   const confirmAdd = async (thenLogin: boolean) => {
     if (!requireLogin()) return;
     const m = M(); if (!m) { setNotice('matrix 接口未就绪'); return; }
@@ -194,7 +209,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
     if (!persona) { setNotice('请填写人设(自动评论时按这个口吻写)'); return; } // 人设必填
     if (editId) { await m.updateAccountMeta({ id: editId, displayName: newName.trim() || undefined, group, persona, keywords }); setShowAdd(false); await reload(); setNotice('已更新'); return; }
     const name = newName.trim(); if (!name) { setNotice('请填账号备注名'); return; }
-    const r = await m.createAccount({ platform, displayName: name, group, persona, keywords });
+    const r = await m.createAccount({ platform, displayName: name, group, persona, keywords, loginScope: platform === 'kuaishou' ? newScope : undefined });
     // 第 2 步配了代理就一起绑到新号上(没配则该号共用本机 IP,有同 IP 风控风险——已在第 2 步提示)。
     if (r?.ok && r.account) {
       const host = proxyForm.host.trim(); const port = Number(proxyForm.port);
@@ -203,22 +218,23 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
       }
     }
     setShowAdd(false);
-    if (r?.ok) { await reload(); setNotice(`已建号:${name}`); if (thenLogin && r.account) promptScanLogin(r.account.id, platform, name); }
+    if (r?.ok) { await reload(); setNotice(`已建号:${name}`); if (thenLogin && r.account) promptScanLogin(r.account.id, platform, name, platform === 'kuaishou' ? newScope : undefined); }
     else setNotice('创建失败:' + (r?.error || 'IPC 未响应'));
   };
   // 扫码登录二次确认:点「好的,我已知晓」才真正打开指纹浏览器导航到平台登录页(避免「一点就开浏览器」的突兀)。
-  const promptScanLogin = (accountId: string, plat: string, displayName: string) => {
+  const promptScanLogin = (accountId: string, plat: string, displayName: string, loginScope?: string) => {
     if (!requireLogin()) return;
     const platName = PLATFORM_LABEL[plat] || '该平台';
+    const scopeName = plat === 'kuaishou' ? (loginScope === 'creator' ? '创作者中心(cp.kuaishou.com)' : '主站(www.kuaishou.com)') : '';
     setConfirmDlg({
-      title: `扫码连接${platName}`,
-      body: `即将打开指纹浏览器访问${platName},需要您在弹出的浏览器里扫码登录${platName}账号。扫码成功后状态会自动变「已连接」。`,
+      title: `扫码连接${platName}${scopeName ? ' · ' + scopeName : ''}`,
+      body: `即将打开指纹浏览器访问${platName}${scopeName ? scopeName : ''},需要您在弹出的浏览器里扫码登录。扫码成功后状态会自动变「已连接」。`,
       okText: '好的,请打开',
       onYes: async () => {
         setConfirmDlg(null);
         if (!requireKernel()) return;
         setNotice(`正在为「${displayName}」打开指纹浏览器,扫码连接后状态自动刷新`);
-        await M()?.openLogin({ accountId, kernelPath, loginUrl: LOGIN_URL[plat] || '' });
+        await M()?.openLogin({ accountId, kernelPath, loginUrl: loginUrlFor(plat, loginScope) });
       },
     });
   };
@@ -227,7 +243,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
     if (!requireLogin()) return;
     if (!requireKernel()) return;
     setNotice(`正在读取「${a.displayName}」的账号信息…(会短暂弹出浏览器)`);
-    const r = await M()?.refreshIdentity?.({ accountId: a.id, homeUrl: LOGIN_URL[a.platform] || '', kernelPath });
+    const r = await M()?.refreshIdentity?.({ accountId: a.id, homeUrl: loginUrlFor(a.platform, a.loginScope), kernelPath });
     if (r?.ok) { await reload(); setNotice(r.loggedIn ? `已读取:${r.nickname || a.displayName}${r.displayId ? ' · ' + r.displayId : ''}` : `「${a.displayName}」未检测到登录,请扫码连接`); }
     else setNotice('读取失败:' + (r?.error || '未知'));
   };
@@ -386,6 +402,15 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
                 <button key={p} onClick={() => setPlatform(p)} className={`px-3.5 py-1.5 rounded-full text-sm border transition-colors ${platform === p ? 'border-violet-500 bg-violet-500/10 text-violet-500 font-medium' : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-violet-500/50'}`}>{PLATFORM_LABEL[p]}</button>
               ))}
             </div>
+            {/* 快手:创作者中心(发布)/ 主站(涨粉)两类账号分开管理(两端登录互不覆盖)。 */}
+            {platform === 'kuaishou' && (
+              <div className="flex items-center gap-2 mb-4 -mt-1">
+                <span className="text-xs text-gray-400">快手分两类:</span>
+                {KS_SCOPES.map((s) => (
+                  <button key={s.key} onClick={() => setKsScope(s.key)} className={`px-3 py-1 rounded-lg text-xs border transition-colors ${ksScope === s.key ? 'border-orange-500 bg-orange-500/10 text-orange-500 font-medium' : 'border-gray-300 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-orange-500/50'}`}>{s.label}</button>
+                ))}
+              </div>
+            )}
             {platformAccounts.length === 0 ? (
               <div className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 p-10 text-center">
                 <div className="text-4xl mb-2">📭</div>
@@ -448,7 +473,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
                         ? (<>
                             {/* 已在浏览器里登录了但卡片还显示「尚未连接」→ 点这个重新检测(扫码轮询超时/手动登录后用) */}
                             <button onClick={() => refreshIdentity(a)} className="text-xs px-2.5 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">刷新信息</button>
-                            <button onClick={() => promptScanLogin(a.id, a.platform, a.displayName)} className="text-xs px-2.5 py-1 rounded-lg bg-violet-500 text-white hover:bg-violet-600">扫码连接</button>
+                            <button onClick={() => promptScanLogin(a.id, a.platform, a.displayName, a.loginScope)} className="text-xs px-2.5 py-1 rounded-lg bg-violet-500 text-white hover:bg-violet-600">扫码连接</button>
                           </>)
                         : (<>
                             {/* 已连接:读真实身份 / 断开(清登录,保留配置) */}
@@ -694,6 +719,24 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
             {showAccount && (<>
               <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">账号备注名</label>
               <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="如:账号1-美食号" className="w-full text-sm px-3 py-2.5 rounded-lg border dark:border-white/15 border-black/15 bg-transparent mb-3" />
+              {/* 快手:选账号类型(两端登录互不覆盖,发布用创作者中心、涨粉用主站)。建号时定,编辑不可改。 */}
+              {platform === 'kuaishou' && (
+                <div className="mb-3">
+                  <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">账号类型{editId && <span className="ml-2 font-normal text-gray-400">(建号后不可更改)</span>}</label>
+                  <div className="flex gap-2">
+                    {KS_SCOPES.map((s) => {
+                      const active = editId ? false : newScope === s.key;   // 编辑态不高亮可选,只读展示
+                      return (
+                        <button key={s.key} disabled={!!editId} onClick={() => setNewScope(s.key)}
+                          className={`flex-1 text-xs px-3 py-2 rounded-lg border transition-colors ${editId ? 'opacity-60 cursor-not-allowed border-gray-300 dark:border-gray-700' : active ? 'border-orange-500 bg-orange-500/10 text-orange-500 font-medium' : 'border-gray-300 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-orange-500/50'}`}>
+                          {s.label}{editId && (newScope === s.key ? ' ✓' : '')}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {!editId && <div className="text-[11px] text-gray-400 mt-1">{newScope === 'creator' ? '将登录 cp.kuaishou.com,用于视频发布' : '将登录 www.kuaishou.com,用于涨粉互动'}</div>}
+                </div>
+              )}
               <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">赛道（必选）<span className="ml-2 font-normal text-gray-400">选完自动带出人设和关键词，可再改</span></label>
               <div className="relative mb-3">
                 <select value={TRACK_PRESETS.some((t) => t.name === newGroup) ? newGroup : ''} onChange={(e) => pickTrack(e.target.value)} className="w-full appearance-none text-sm pl-3 pr-9 py-2.5 rounded-lg border dark:border-white/15 border-black/15 bg-transparent dark:bg-gray-800 cursor-pointer">

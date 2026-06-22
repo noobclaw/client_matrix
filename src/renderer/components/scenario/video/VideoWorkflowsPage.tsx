@@ -2668,12 +2668,13 @@ const VideoConfigModal: React.FC<{
       try {
         const r = await (window as any).electron?.matrix?.listAccounts?.();
         const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
-        if (alive) setMatrixAccounts(accs.map((a) => ({ id: a.id, platform: a.platform, displayName: a.displayName, status: a.status, nickname: a.nickname, displayId: a.displayId, avatar: a.avatar })));
+        if (alive) setMatrixAccounts(accs.map((a) => ({ id: a.id, platform: a.platform, displayName: a.displayName, status: a.status, nickname: a.nickname, displayId: a.displayId, avatar: a.avatar, loginScope: a.loginScope })));
       } catch { if (alive) setMatrixAccounts([]); }
     })();
     return () => { alive = false; };
   }, [matrixMode]);
-  const accountsFor = (platform: string) => matrixAccounts.filter((a) => a.platform === platform);
+  // 发布上传:快手只列「创作者中心」账号(主站号没有 cp 发布登录态)。
+  const accountsFor = (platform: string) => matrixAccounts.filter((a) => a.platform === platform && (platform !== 'kuaishou' || (a as any).loginScope === 'creator'));
   const matrixAccountsReady = !matrixMode || outputMode !== 'upload'
     || selectedPlatformIds.every((p) => !!accountByPlatform[p] && accountsFor(p).some((a) => a.id === accountByPlatform[p] && a.status !== 'login_required'));
 
@@ -4135,13 +4136,14 @@ export const HotspotVideoModal: React.FC<{
       try {
         const r = await (window as any).electron?.matrix?.listAccounts?.();
         const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
-        if (alive) setMatrixAccounts(accs.map((a) => ({ id: a.id, platform: a.platform, displayName: a.displayName, status: a.status, nickname: a.nickname, displayId: a.displayId, avatar: a.avatar })));
+        if (alive) setMatrixAccounts(accs.map((a) => ({ id: a.id, platform: a.platform, displayName: a.displayName, status: a.status, nickname: a.nickname, displayId: a.displayId, avatar: a.avatar, loginScope: a.loginScope })));
       } catch { if (alive) setMatrixAccounts([]); }
     })();
     return () => { alive = false; };
   }, [matrixMode]);
   // 某平台下「可用」账号(idle / running 视为可登录可用;banned/login_required 仍列出但标注,选号交给用户)。
-  const accountsFor = (platform: string) => matrixAccounts.filter((a) => a.platform === platform);
+  // 发布上传:快手只列「创作者中心」账号(主站号没有 cp 发布登录态)。
+  const accountsFor = (platform: string) => matrixAccounts.filter((a) => a.platform === platform && (platform !== 'kuaishou' || (a as any).loginScope === 'creator'));
   // 矩阵 + 发布模式下:每个勾选平台是否都已选号(没号的平台算未满足 → 引导建号)。
   const matrixAccountsReady = !matrixMode || outputMode !== 'upload'
     || selectedPlatformIds.every((p) => !!accountByPlatform[p] && accountsFor(p).some((a) => a.id === accountByPlatform[p] && a.status !== 'login_required'));
@@ -4763,12 +4765,13 @@ export const TemplateSpeedModal: React.FC<{ isZh: boolean; matrixMode?: boolean;
       try {
         const r = await (window as any).electron?.matrix?.listAccounts?.();
         const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
-        if (alive) setMatrixAccounts(accs.map((a) => ({ id: a.id, platform: a.platform, displayName: a.displayName, status: a.status, nickname: a.nickname, displayId: a.displayId, avatar: a.avatar })));
+        if (alive) setMatrixAccounts(accs.map((a) => ({ id: a.id, platform: a.platform, displayName: a.displayName, status: a.status, nickname: a.nickname, displayId: a.displayId, avatar: a.avatar, loginScope: a.loginScope })));
       } catch { if (alive) setMatrixAccounts([]); }
     })();
     return () => { alive = false; };
   }, [matrixMode]);
-  const accountsFor = (platform: string) => matrixAccounts.filter((a) => a.platform === platform);
+  // 发布上传:快手只列「创作者中心」账号(主站号没有 cp 发布登录态)。
+  const accountsFor = (platform: string) => matrixAccounts.filter((a) => a.platform === platform && (platform !== 'kuaishou' || (a as any).loginScope === 'creator'));
   const matrixAccountsReady = !matrixMode || outputMode !== 'upload'
     || selectedPlatformIds.every((p) => !!accountByPlatform[p] && accountsFor(p).some((a) => a.id === accountByPlatform[p] && a.status !== 'login_required'));
   // 发布文案不再给输入框(用户要求,AI 自动写)→ 只保留值(编辑老任务回填),不需要 setter。

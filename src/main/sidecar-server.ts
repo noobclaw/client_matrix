@@ -1333,10 +1333,6 @@ const server = http.createServer(async (req, res) => {
                       broadcastSSE('matrix:account', { id: acc.id, status: 'login_required', error: `该账号已被「${dup.displayName}」关联,一个真实账号只能关联一个矩阵号,请换一个号扫码` });
                       break;
                     }
-                    // 创作端预热:发布走独立子域的平台(快手 cp.kuaishou.com),主站登录后访问一次让 SSO 把创作端
-                    // 会话(cp 专属 token)也建好 → 发布时不再撞创作端登录页(2026-06-22 实测:主站登录能 SSO 覆盖 cp)。
-                    const warmUrl: Record<string, string> = { kuaishou: 'https://cp.kuaishou.com/profile' };
-                    if (warmUrl[acc.platform]) { try { await kernelNavigate(acc.id, warmUrl[acc.platform]); await new Promise((r) => setTimeout(r, 3500)); } catch { /* 预热失败不影响连接 */ } }
                     setStat(acc.id, 'idle');
                     try { setAccountIdentity(acc.id, { nickname: ident.nickname, displayId: ident.displayId, avatar: ident.avatar, boundUid: ident.uid }); } catch { /* ignore */ }
                     broadcastSSE('matrix:account', { id: acc.id, status: 'idle', nickname: ident.nickname, displayId: ident.displayId, avatar: ident.avatar, boundUid: ident.uid });

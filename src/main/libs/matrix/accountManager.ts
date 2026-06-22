@@ -94,6 +94,7 @@ export function createAccount(args: {
   track?: string;
   persona?: string;
   kernelVersion?: string;
+  loginScope?: 'main' | 'creator';   // 仅快手:主站 / 创作者中心
 }): MatrixAccount {
   ensureDirs();
   const accounts = loadAccounts();
@@ -119,6 +120,7 @@ export function createAccount(args: {
     keywords: Array.isArray(args.keywords) ? args.keywords.filter(Boolean) : [],
     track: args.track || `${args.platform}_default`,
     kernelVersion: args.kernelVersion || undefined,
+    loginScope: args.platform === 'kuaishou' ? (args.loginScope || 'main') : undefined,
   };
   accounts.push(account);
   cache = accounts;
