@@ -62,6 +62,9 @@ export interface EngageItemResult {
   accountId: string;
   state: 'success' | 'failed' | 'skipped';
   counts?: { like: number; follow: number; comment: number };
+  // 该号本次累计实际扣费(积分 + 美元)。每条互动动作扣费后累加,用于「本次/累计消耗」。
+  chargedCredits?: number;
+  chargedUsd?: number;
   reason?: string;
 }
 
@@ -128,7 +131,9 @@ async function chargeAction(authToken: string | undefined, actionType: string, p
     });
     const data: any = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, reason: String(data?.error || `http_${res.status}`) };
-    return { ok: true, charged: data?.charged, balance_after: data?.balance_after };
+    // 后端 /api/charge/action 返回 charged(积分)+ cost_usd(按 token_price_per_million 算好的权威美元)。
+    // 两个都带回去 → 任务的「本次/累计消耗」💎 + $ 才算得对(之前丢了 → 一直显示 0)。
+    return { ok: true, charged: Number(data?.charged) || 0, cost_usd: Number(data?.cost_usd) || 0, balance_after: data?.balance_after };
   } catch (e: any) { return { ok: false, reason: 'network_error' }; }
 }
 
@@ -146,6 +151,8 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string): Pr
   await sleep(randInt(opts.jitterMinMs ?? 3000, opts.jitterMaxMs ?? 15000)); // 错峰
 
   const counts = { like: 0, follow: 0, comment: 0 };
+  let chargedCredits = 0; // 该号本次累计扣费(积分),每笔互动动作扣费后累加
+  let chargedUsd = 0;     // 同上,美元(后端按 token_price_per_million 算好)
   const history = engageHistoryFor(accountId);
   const q = opts.quota || {};
   const authToken = opts.authToken || getNoobClawAuthToken() || undefined; // aiCall/计费 token(main 侧)
@@ -193,6 +200,17 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string): Pr
       scroll: (amount?: number) => matrixCmd(accountId, 'scroll', { amount: amount || randInt(2, 4) }),
     };
 
+    // 扣费包装:调后端扣费 → 成功就累加 charged(积分)+ cost_usd,并推一次 onItem 让「本次消耗」实时更新。
+    const doCharge = async (a: string, p: string, r?: string) => {
+      const res: any = await chargeAction(authToken, a, p, r);
+      if (res && res.ok) {
+        chargedCredits += Number(res.charged) || 0;
+        chargedUsd += Number(res.cost_usd) || 0;
+        try { opts.onItem?.({ accountId, state: 'success', counts: { ...counts }, chargedCredits, chargedUsd }); } catch { /* ignore */ }
+      }
+      return res;
+    };
+
     const ctx: any = {
       task, config: pack?.config || {}, manifest: pack?.manifest || {},
       appLocale: 'zh',
@@ -212,11 +230,11 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string): Pr
       startAction: (..._a: any[]) => {},
       stepResetAll: () => {},
       setActionTargets: (t: any) => { log(`🎯 配额 赞${t.like}/关${t.follow}/评${t.comment}`); try { opts.onTargets?.(accountId, { like: t.like, follow: t.follow, comment: t.comment }); } catch { /* ignore */ } },
-      addActionCount: (type: string, n: number) => { if (type in counts) (counts as any)[type] += n; opts.onItem?.({ accountId, state: 'success', counts: { ...counts } }); },
+      addActionCount: (type: string, n: number) => { if (type in counts) (counts as any)[type] += n; opts.onItem?.({ accountId, state: 'success', counts: { ...counts }, chargedCredits, chargedUsd }); },
       finish: (status: string, error?: string) => { finished = { status, error }; },
-      // 计费 / AI / 去重
-      chargeAction: (a: string, p: string, r?: string) => chargeAction(authToken, a, p, r),
-      charge: (a: string, p: string, r?: string) => chargeAction(authToken, a, p, r),
+      // 计费 / AI / 去重 —— 扣费成功就把 charged(积分)+ cost_usd 累加,并推一次 onItem 让「本次消耗」实时跳。
+      chargeAction: doCharge,
+      charge: doCharge,
       aiCall,
       getPrompt: (name: string) => { const t = pack?.prompts?.[name]; if (!t) throw new Error('Missing prompt: ' + name); return t; },
       engageHistory: history,
@@ -235,13 +253,14 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string): Pr
 
     setAccountStatus(accountId, 'idle');
     const fin = finished as { status: string; error?: string } | null;
-    if (fin && fin.status === 'error') { coworkLog('ERROR', 'engage', `[${accountId}] finished error: ${fin.error}`); return { accountId, state: 'failed', counts, reason: fin.error }; }
-    coworkLog('INFO', 'engage', `[${accountId}] done 赞${counts.like}/关${counts.follow}/评${counts.comment}`);
-    return { accountId, state: 'success', counts };
+    if (fin && fin.status === 'error') { coworkLog('ERROR', 'engage', `[${accountId}] finished error: ${fin.error}`); return { accountId, state: 'failed', counts, chargedCredits, chargedUsd, reason: fin.error }; }
+    coworkLog('INFO', 'engage', `[${accountId}] done 赞${counts.like}/关${counts.follow}/评${counts.comment} · 扣费 ${chargedCredits}积分`);
+    return { accountId, state: 'success', counts, chargedCredits, chargedUsd };
   } catch (e: any) {
     setAccountStatus(accountId, 'idle');
     coworkLog('ERROR', 'engage', `[${accountId}] threw: ${String(e?.stack || e?.message || e).slice(0, 300)}`);
-    return { accountId, state: 'failed', counts, reason: 'engage_threw:' + String(e?.message || e).slice(0, 140) };
+    // 抛错前可能已经扣过几笔 —— 钱已花,照样回传,别让「已扣的费」从消耗统计里消失。
+    return { accountId, state: 'failed', counts, chargedCredits, chargedUsd, reason: 'engage_threw:' + String(e?.message || e).slice(0, 140) };
   } finally {
     try { closeKernel(accountId); } catch { /* ignore */ }
   }

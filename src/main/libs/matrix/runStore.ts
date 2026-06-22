@@ -13,7 +13,7 @@ function storeFile(): string { return path.join(baseDir(), 'runs.json'); }
 
 const MAX_RECORDS = 200;
 
-export interface MatrixRunItem { accountId: string; displayName?: string; state: 'success' | 'failed' | 'skipped'; reason?: string; counts?: { like: number; follow: number; comment: number } }
+export interface MatrixRunItem { accountId: string; displayName?: string; state: 'success' | 'failed' | 'skipped'; reason?: string; counts?: { like: number; follow: number; comment: number }; chargedCredits?: number; chargedUsd?: number }
 export interface MatrixRunRecord {
   id: string;
   taskId: string;
@@ -25,6 +25,8 @@ export interface MatrixRunRecord {
   failed: number;
   skipped: number;
   totals: { like: number; follow: number; comment: number };
+  // 本次运行总扣费(各号实际扣费之和):credits=积分,usd=美元。缺省视为 0(老记录无此字段)。
+  cost?: { credits: number; usd: number };
   items: MatrixRunItem[];
 }
 

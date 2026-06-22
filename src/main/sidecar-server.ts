@@ -195,9 +195,11 @@ interface MatrixLiveProgress {
   startedAt: number;
   targets: { like: number; follow: number; comment: number };
   done: { like: number; follow: number; comment: number };
+  // 本次运行累计扣费(各账号实际扣费之和):credits=积分(钱包真实扣的),usd=按 token_price_per_million 算好的美元。
+  cost: { credits: number; usd: number };
   perAccountTargets: Record<string, { like: number; follow: number; comment: number }>;
-  // 每个账号独立进度(详情页可切换查看):各号目标/完成/状态/日志互不影响。
-  perAccount: Record<string, { displayName: string; status: string; targets: { like: number; follow: number; comment: number }; done: { like: number; follow: number; comment: number }; logs: Array<{ ts: number; msg: string }> }>;
+  // 每个账号独立进度(详情页可切换查看):各号目标/完成/状态/日志/扣费互不影响。
+  perAccount: Record<string, { displayName: string; status: string; targets: { like: number; follow: number; comment: number }; done: { like: number; follow: number; comment: number }; cost: { credits: number; usd: number }; logs: Array<{ ts: number; msg: string }> }>;
   logs: Array<{ ts: number; accountId: string; msg: string }>;
   error?: string;
 }
@@ -237,13 +239,14 @@ async function runMatrixTaskById(taskId: string, kernelPath?: string): Promise<{
         displayName: getAccount(aid)?.displayName || aid,
         status: 'running',
         targets: { like: q.daily_like_max || 0, follow: q.daily_follow_max || 0, comment: q.daily_comment_max || 0 }, // 收到真实 setActionTargets 前用配额上限兜底
-        done: zero(), logs: [],
+        done: zero(), cost: { credits: 0, usd: 0 }, logs: [],
       };
     }
     matrixLiveProgress = {
       taskId: task.id, status: 'running', startedAt,
       targets: { like: (q.daily_like_max || 0) * accN, follow: (q.daily_follow_max || 0) * accN, comment: (q.daily_comment_max || 0) * accN },
       done: zero(),
+      cost: { credits: 0, usd: 0 },
       perAccountTargets: {}, perAccount, logs: [],
     };
     const pushLog = (accountId: string, msg: string) => {
@@ -277,12 +280,21 @@ async function runMatrixTaskById(taskId: string, kernelPath?: string): Promise<{
         if (matrixLiveProgress) {
           // 聚合 done = 各号最新累计 counts 之和;同时记每号自己的 done(详情页切换看)。
           const sum = zero();
-          for (const it of collected.values()) { sum.like += it.counts?.like || 0; sum.follow += it.counts?.follow || 0; sum.comment += it.counts?.comment || 0; }
+          // 聚合 cost = 各号最新累计扣费之和(每号 chargedCredits 是该号到目前的累计,直接相加不会重复计)。
+          const costSum = { credits: 0, usd: 0 };
+          for (const it of collected.values()) {
+            sum.like += it.counts?.like || 0; sum.follow += it.counts?.follow || 0; sum.comment += it.counts?.comment || 0;
+            costSum.credits += it.chargedCredits || 0; costSum.usd += it.chargedUsd || 0;
+          }
           matrixLiveProgress.done = sum;
+          matrixLiveProgress.cost = costSum;
           const pa = matrixLiveProgress.perAccount[item.accountId];
-          if (pa && item.counts) pa.done = { like: item.counts.like || 0, follow: item.counts.follow || 0, comment: item.counts.comment || 0 };
+          if (pa) {
+            if (item.counts) pa.done = { like: item.counts.like || 0, follow: item.counts.follow || 0, comment: item.counts.comment || 0 };
+            pa.cost = { credits: item.chargedCredits || 0, usd: item.chargedUsd || 0 };
+          }
         }
-        broadcastSSE('matrix:progress', { type: 'item', accountId: item.accountId, state: item.state, reason: item.reason, counts: item.counts });
+        broadcastSSE('matrix:progress', { type: 'item', accountId: item.accountId, state: item.state, reason: item.reason, counts: item.counts, chargedCredits: item.chargedCredits, chargedUsd: item.chargedUsd });
       },
     }).then((report) => {
       // 收尾:把每号最终状态(success/failed/skipped)写回 perAccount。
@@ -293,9 +305,11 @@ async function runMatrixTaskById(taskId: string, kernelPath?: string): Promise<{
       setTaskLastRun(task.id, Date.now());
       // 存运行记录(供「矩阵涨粉运行记录」页)
       try {
-        const items = Array.from(collected.values()).map((it: any) => ({ accountId: it.accountId, displayName: getAccount(it.accountId)?.displayName, state: it.state, reason: it.reason, counts: it.counts }));
+        const items = Array.from(collected.values()).map((it: any) => ({ accountId: it.accountId, displayName: getAccount(it.accountId)?.displayName, state: it.state, reason: it.reason, counts: it.counts, chargedCredits: it.chargedCredits, chargedUsd: it.chargedUsd }));
         const totals = items.reduce((acc, it: any) => ({ like: acc.like + (it.counts?.like || 0), follow: acc.follow + (it.counts?.follow || 0), comment: acc.comment + (it.counts?.comment || 0) }), { like: 0, follow: 0, comment: 0 });
-        addRun({ taskId: task.id, taskName: task.name, platform: task.platform, startedAt, finishedAt: Date.now(), success: report?.success ?? 0, failed: report?.failed ?? 0, skipped: report?.skipped ?? 0, totals, items });
+        // 本次运行总扣费 = 各号实际扣费之和(写进运行记录 → 累计消耗才算得对)。
+        const cost = items.reduce((acc, it: any) => ({ credits: acc.credits + (it.chargedCredits || 0), usd: acc.usd + (it.chargedUsd || 0) }), { credits: 0, usd: 0 });
+        addRun({ taskId: task.id, taskName: task.name, platform: task.platform, startedAt, finishedAt: Date.now(), success: report?.success ?? 0, failed: report?.failed ?? 0, skipped: report?.skipped ?? 0, totals, cost, items });
       } catch (e) { coworkLog('WARN', 'sidecar-server', 'addRun failed', { err: String(e) }); }
       broadcastSSE('matrix:progress', { type: 'done', report, taskId: task.id });
     })
