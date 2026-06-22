@@ -30,6 +30,8 @@ function parseKeywords(s: string): string[] { return s.split(/[\s,，、\n]+/).m
 // 对齐支持「互动涨粉」的平台(与新建页一致)。
 const PLATFORMS = ['douyin', 'xhs', 'kuaishou', 'bilibili', 'shipinhao', 'toutiao', 'x', 'binance', 'youtube', 'tiktok'];
 const PLATFORM_LABEL: Record<string, string> = { douyin: '抖音', xhs: '小红书', bilibili: 'B站', kuaishou: '快手', tiktok: 'TikTok', x: 'X', binance: '币安广场', youtube: 'YouTube', shipinhao: '视频号', toutiao: '头条' };
+// 平台号的标签:平台名已以「号」结尾(视频号)就不再加「号」,否则拼「号」(抖音号/快手号…)。
+const platformIdLabel = (p: string): string => { const l = PLATFORM_LABEL[p] || ''; return l.endsWith('号') ? l : l + '号'; };
 const LOGIN_URL: Record<string, string> = {
   douyin: 'https://www.douyin.com/', xhs: 'https://www.xiaohongshu.com/', bilibili: 'https://passport.bilibili.com/login',
   kuaishou: 'https://www.kuaishou.com/', tiktok: 'https://www.tiktok.com/login', x: 'https://x.com/login',
@@ -412,9 +414,9 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
                           {a.status === 'login_required'
                             ? <div className="text-amber-500 truncate">请点击下方扫码连接进行连接</div>
                             : (<>
-                                {a.displayId && <div className="text-gray-600 dark:text-gray-300 truncate">{PLATFORM_LABEL[a.platform] || ''}号:{a.displayId}</div>}
+                                {a.displayId && <div className="text-gray-600 dark:text-gray-300 truncate">{platformIdLabel(a.platform)}:{a.displayId}</div>}
                                 {/* 已连接但还没读到平台号/昵称(老建的号或读取失败)→ 明确提示去刷新,别让用户以为该功能没有 */}
-                                {!a.displayId && !a.nickname && <div className="text-amber-500/90 truncate">ℹ️ 账号信息未读取,点「刷新信息」获取{PLATFORM_LABEL[a.platform] || ''}号/昵称/头像</div>}
+                                {!a.displayId && !a.nickname && <div className="text-amber-500/90 truncate">ℹ️ 账号信息未读取,点「刷新信息」获取{platformIdLabel(a.platform)}/昵称/头像</div>}
                                 <div className="text-gray-500 dark:text-gray-400 truncate">备注:{a.displayName}</div>
                               </>)}
                         </div>
