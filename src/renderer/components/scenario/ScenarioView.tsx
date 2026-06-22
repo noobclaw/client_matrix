@@ -177,6 +177,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   // 矩阵号:互动涨粉向导(选账号 + 配额 + 频率;账号制,赛道/关键词/人设在账号上)。
   const [matrixWizardPlatform, setMatrixWizardPlatform] = useState<string | null>(null);
   const [matrixAccounts, setMatrixAccounts] = useState<WizardAccount[]>([]);
+  const [matrixWizardTask, setMatrixWizardTask] = useState<any | null>(null); // 编辑时的初始任务(回填账号/配额/频率);新建为 null
   // 指纹浏览器内核守卫:没装内核时弹「去下载」,后续流程不走(创建/运行矩阵任务都先过这关)。
   const [matrixKernelMissing, setMatrixKernelMissing] = useState(false);
   const [matrixKernelBusy, setMatrixKernelBusy] = useState(false);
@@ -208,15 +209,41 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
       setMatrixAccounts(accs.filter((a) => a.platform === platform).map((a) => ({ id: a.id, displayName: a.displayName, status: a.status, keywords: a.keywords, group: a.group, platform: a.platform, nickname: a.nickname, displayId: a.displayId, avatar: a.avatar })));
     } catch { setMatrixAccounts([]); }
+    setMatrixWizardTask(null);          // 新建:清掉编辑态(否则会被上次编辑的任务回填)
     setMatrixWizardPlatform(platform);
+  };
+  // 编辑现有矩阵互动任务:加载该平台账号 + 把任务映成 wizard 的 initialTask(回填账号/配额/频率)。
+  const openMatrixWizardEdit = async (task: any) => {
+    if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; }
+    if (!(await ensureMatrixKernel())) return;
+    const plat = (task?.platform as string) || currentPlatform || 'douyin';
+    try {
+      const r = await (window as any).electron?.matrix?.listAccounts?.();
+      const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
+      setMatrixAccounts(accs.filter((a) => a.platform === plat).map((a) => ({ id: a.id, displayName: a.displayName, status: a.status, keywords: a.keywords, group: a.group, platform: a.platform, nickname: a.nickname, displayId: a.displayId, avatar: a.avatar })));
+    } catch { setMatrixAccounts([]); }
+    setMatrixWizardTask({
+      id: task.id,
+      name: task.name,
+      accountIds: task.account_ids || [],
+      quota: {
+        daily_like_min: task.daily_like_min, daily_like_max: task.daily_like_max,
+        daily_follow_min: task.daily_follow_min, daily_follow_max: task.daily_follow_max,
+        daily_comment_min: task.daily_comment_min, daily_comment_max: task.daily_comment_max,
+      },
+      frequency: task.run_interval,
+    });
+    setMatrixWizardPlatform(plat);
   };
   const saveMatrixTask = async (input: { name: string; accountIds: string[]; concurrency: number; frequency: string; quota: any }) => {
     if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); throw new Error('请先登录 NoobClaw 账号'); }
     const m = (window as any).electron?.matrix;
-    const r = await m?.saveTask?.({ platform: matrixWizardPlatform, type: 'engage', name: input.name, accountIds: input.accountIds, quota: input.quota, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
+    // 带 id = 更新现有任务(saveTask 是整体 upsert);无 id = 新建。
+    const r = await m?.saveTask?.({ id: matrixWizardTask?.id, platform: matrixWizardPlatform, type: 'engage', name: input.name, accountIds: input.accountIds, quota: input.quota, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
     if (!r?.ok) throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限', duplicate_type: '该平台已有同类型(互动)任务,直接编辑它即可' } as any)[r?.error] || r?.error || '保存失败');
     const plat = matrixWizardPlatform;
     setMatrixWizardPlatform(null);
+    setMatrixWizardTask(null);
     await refreshAll();
     onSwitchToManage?.(plat as any);
   };
@@ -587,8 +614,8 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
           task={task}
           scenario={scenario || null}
           onBack={goBack}
-          /* 矩阵号:编辑走 MatrixView 新建/编辑页(账号多选向导),不开原版 ConfigWizard */
-          onEdit={() => { if (matrixMode) { onSwitchToCreate?.(undefined); return; } if (scenario) openWizardEdit(task, scenario); }}
+          /* 矩阵号:编辑打开账号多选向导(回填该任务的账号/配额/频率),不开原版 ConfigWizard */
+          onEdit={() => { if (matrixMode) { void openMatrixWizardEdit(task); return; } if (scenario) openWizardEdit(task, scenario); }}
           onChanged={refreshAll}
           onOpenHistory={() => openHistoryForTask(task.id)}
         />
@@ -1178,7 +1205,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
 
       {/* 矩阵号互动涨粉向导(选账号 + 配额 + 频率) */}
       {matrixWizardPlatform && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setMatrixWizardPlatform(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => { setMatrixWizardPlatform(null); setMatrixWizardTask(null); }}>
           <div className="w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
             <MatrixTaskWizard
               platformLabel={(() => {
@@ -1189,7 +1216,8 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
               })()}
               platform={matrixWizardPlatform}
               accounts={matrixAccounts}
-              onCancel={() => setMatrixWizardPlatform(null)}
+              initialTask={matrixWizardTask}
+              onCancel={() => { setMatrixWizardPlatform(null); setMatrixWizardTask(null); }}
               onSave={saveMatrixTask}
             />
           </div>
