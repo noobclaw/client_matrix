@@ -213,7 +213,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate, onShowIn
     setConfirmDlg({
       title: '移除账号',
       danger: true,
-      body: `彻底移除「${a.nickname || a.displayName}」?账号配置和指纹 profile 都会移除,不可恢复。`,
+      body: `从列表中移除「${a.nickname || a.displayName}」?你可以下次通过关联账号再次添加。`,
       okText: '移除',
       onYes: async () => {
         setConfirmDlg(null);

@@ -461,7 +461,16 @@ export async function checkKernelLogin(accountId: string, platform: string): Pro
     if (!cookies.length) { const r2 = await send(s, 'Network.getCookies', {}); cookies = r2?.cookies || []; }
     const names = new Set<string>(cookies.map((c: any) => String(c.name)));
     const need = LOGIN_COOKIES[platform] || [];
-    return need.some((n) => names.has(n));
+    if (!need.some((n) => names.has(n))) return false;
+    // ⚠️ 小红书的 web_session 对【未登录游客】也会下发 → cookie 命中不代表已登录(否则一打开登录页
+    // 就被误判「已关联」)。用 /me 接口的 guest 标志二次确认;接口异常不误杀(回落 cookie 结果)。
+    if (platform === 'xhs') {
+      try {
+        const v = await kernelEval(accountId, '(async function(){try{var r=await fetch("https://edith.xiaohongshu.com/api/sns/web/v2/user/me",{credentials:"include"});var j=await r.json();var d=(j&&j.data)||{};return (d&&d.guest===false&&d.user_id)?"1":"0";}catch(e){return "?";}})()');
+        if (v === '0') return false; // 明确是游客 → 未登录
+      } catch { /* 接口异常不误杀 */ }
+    }
+    return true;
   } catch { return false; }
 }
 
@@ -473,7 +482,7 @@ export interface KernelIdentity { uid?: string; nickname?: string; displayId?: s
 // 各平台「读身份」的页面表达式(在内核页里 eval;async 的靠 awaitPromise 兜)。返回 JSON 字符串。
 const IDENTITY_EXPR: Record<string, string> = {
   // 抖音:RENDER_DATA(SSR JSON)。nickname/uid/抖音号(unique_id)/头像。
-  douyin: '(function(){try{var el=document.getElementById("RENDER_DATA");var d="";try{d=decodeURIComponent((el&&el.textContent)||"");}catch(e){d=(el&&el.textContent)||"";}var n=d.match(/"nickname":"([^"]{1,40})"/),u=d.match(/"uid":"(\\d{6,25})"/),s=d.match(/"unique_id":"([^"]{1,40})"/),a=d.match(/"avatar_thumb":\\{"uri":"[^"]*","url_list":\\["([^"]+)"/)||d.match(/"avatarUrl":"([^"]+)"/);return JSON.stringify({nickname:n&&n[1],uid:u&&u[1],displayId:s&&s[1]||null,avatar:a&&(a[1]||"").replace(/\\\\u002F/g,"/")});}catch(e){return "{}";}})()',
+  douyin: '(function(){try{var el=document.getElementById("RENDER_DATA");var d="";try{d=decodeURIComponent((el&&el.textContent)||"");}catch(e){d=(el&&el.textContent)||"";}var n=d.match(/"nickname":"([^"]{1,40})"/),u=d.match(/"uid":"(\\d{6,25})"/),s=d.match(/"unique_id":"([^"]{1,40})"/),s2=d.match(/"short_id":"(\\d{3,40})"/),a=d.match(/"avatar_thumb":\\{"uri":"[^"]*","url_list":\\["([^"]+)"/)||d.match(/"avatarUrl":"([^"]+)"/);var did=(s&&s[1])||(s2&&s2[1])||null;return JSON.stringify({nickname:n&&n[1],uid:u&&u[1],displayId:did,avatar:a&&(a[1]||"").replace(/\\\\u002F/g,"/")});}catch(e){return "{}";}})()',
   // 小红书:/me 接口(edith 子域,带 cred 可跨子域)。nickname/小红书号(red_id)/uid(user_id)/头像。
   xhs: '(async function(){try{var r=await fetch("https://edith.xiaohongshu.com/api/sns/web/v2/user/me",{credentials:"include"});var j=await r.json();var d=(j&&j.data)||{};if(d.guest)return "{}";return JSON.stringify({nickname:d.nickname,displayId:d.red_id,uid:d.user_id,avatar:d.images||d.imageb});}catch(e){return "{}";}})()',
   // B站:nav 接口最干净。uname/mid/face。
