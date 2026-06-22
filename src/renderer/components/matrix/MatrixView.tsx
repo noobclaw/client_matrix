@@ -660,10 +660,16 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
             <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">账号备注名</label>
             <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="如:账号1-美食号" className="w-full text-sm px-3 py-2.5 rounded-lg border dark:border-white/15 border-black/15 bg-transparent mb-3" />
             <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">赛道（必选）<span className="ml-2 font-normal text-gray-400">选完自动带出人设和关键词，可再改</span></label>
-            <select value={TRACK_PRESETS.some((t) => t.name === newGroup) ? newGroup : ''} onChange={(e) => pickTrack(e.target.value)} className="w-full text-sm px-3 py-2.5 rounded-lg border dark:border-white/15 border-black/15 bg-transparent dark:bg-gray-800 mb-3">
-              {TRACK_PRESETS.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}
-              <option value="">自定义 / 其他(自己填人设 + 关键词)</option>
-            </select>
+            <div className="relative mb-3">
+              <select value={TRACK_PRESETS.some((t) => t.name === newGroup) ? newGroup : ''} onChange={(e) => pickTrack(e.target.value)} className="w-full appearance-none text-sm pl-3 pr-9 py-2.5 rounded-lg border dark:border-white/15 border-black/15 bg-transparent dark:bg-gray-800 cursor-pointer">
+                {TRACK_PRESETS.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}
+                <option value="">自定义 / 其他(自己填人设 + 关键词)</option>
+              </select>
+              {/* 下拉箭头(对齐旧 client 的赛道下拉:appearance-none 去原生箭头 + 自绘 chevron) */}
+              <svg className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
             <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">人设<span className="ml-2 font-normal text-gray-400">你是谁、对谁说话、什么口吻</span></label>
             <textarea value={newPersona} onChange={(e) => setNewPersona(e.target.value)} placeholder="如:爱吃会做的美食博主,评论真诚接地气" rows={4} className="w-full text-sm px-3 py-2.5 rounded-lg border dark:border-white/15 border-black/15 bg-transparent mb-3" />
             <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">关键词<span className="ml-2 font-normal text-gray-400">空格分隔,互动时按这些搜</span></label>
