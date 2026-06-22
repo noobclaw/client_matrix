@@ -22,7 +22,7 @@
 import type { VideoPlatform, PublishInput } from './types';
 import { VIDEO_PLATFORMS } from './types';
 import type { RunPublishResult } from './runPublish';
-import { getAccount, platformKey } from '../../matrix/accountManager';
+import { getAccount, platformKey, accountBadgeLabel } from '../../matrix/accountManager';
 import { launchKernel, kernelNavigate, checkKernelLogin, closeKernel } from '../../matrix/kernelPool';
 import { runMatrixDriver } from '../../matrix/driverCtx';
 import { PUBLISHER_ANCHOR_URL } from './publisherUtils';
@@ -111,6 +111,7 @@ export async function runMatrixPublishStep(opts: RunMatrixPublishOptions): Promi
       await launchKernel({
         accountId, kernelPath: opts.kernelPath, kernelVersion: acc.kernelVersion,
         userDataDir: acc.userDataDir, fingerprint: acc.fingerprint, proxy: acc.proxy,
+        label: accountBadgeLabel(acc),   // 窗口角标 + 标签组标题用友好名(平台·昵称·备注),别回落成 accountId
       });
     } catch (e: any) {
       opts.onLog?.(`⚠️ ${label} 内核启动失败:${String(e?.message || e).slice(0, 100)} · 跳过`);
