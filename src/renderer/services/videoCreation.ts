@@ -107,6 +107,8 @@ export interface VideoCreationInput {
    * 非矩阵 edition 不写;矩阵 edition 走插件回退时也忽略。
    */
   publishAccounts?: Record<string, string>;
+  /** 平台→账号【显示名】(矩阵号,保存时存一份),详情/记录页直接展示「上传到 抖音(账号1-涛涛)」,不必再查账号库。 */
+  publishAccountNames?: Record<string, string>;
   /**
    * 平台发布文案(向导可选填,覆盖 AI 自动生成):钩人标题 + 引导互动正文 + 话题标签。
    * 跟口播稿 / 视频标题是不同产物。都留空 → 出片时 AI 自动生成;填了 → 用用户的。

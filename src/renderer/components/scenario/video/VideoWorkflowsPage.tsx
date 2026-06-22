@@ -980,9 +980,13 @@ const Row: React.FC<{ label: string; children: React.ReactNode }> = ({ label, ch
 function publishSummary(input: VideoCreationInput, isZh: boolean): string {
   const ids = Array.isArray(input.publishPlatforms) ? input.publishPlatforms.filter(Boolean) : [];
   if (ids.length === 0) return isZh ? '存本地(不上传)' : 'Local only';
+  // 矩阵号:每个平台带上要上传的账号名(保存时存的 publishAccountNames)。
+  const acctNames = (input as any).publishAccountNames as Record<string, string> | undefined;
   const names = ids.map((id) => {
     const m = PUBLISH_PLATFORMS.find((p) => p.id === id);
-    return m ? `${m.emoji} ${isZh ? m.zh : m.en}` : String(id);
+    const base = m ? `${m.emoji} ${isZh ? m.zh : m.en}` : String(id);
+    const acct = acctNames?.[id];
+    return acct ? `${base}(${acct})` : base;
   });
   return (isZh ? '上传到 ' : 'Upload to ') + names.join(isZh ? '、' : ', ');
 }
@@ -2581,6 +2585,10 @@ const VideoConfigModal: React.FC<{
     publishAccounts: matrixMode && outputMode === 'upload'
       ? Object.fromEntries(selectedPlatformIds.filter((p) => accountByPlatform[p]).map((p) => [p, accountByPlatform[p]]))
       : undefined,
+    // 账号【名字】也存一份(平台→名),详情/记录页直接展示「上传到 抖音(账号1-涛涛)」。
+    publishAccountNames: matrixMode && outputMode === 'upload'
+      ? Object.fromEntries(selectedPlatformIds.filter((p) => accountByPlatform[p]).map((p) => { const a = matrixAccounts.find((x) => x.id === accountByPlatform[p]); return [p, a ? (a.nickname || a.displayName) : accountByPlatform[p]]; }))
+      : undefined,
     // 自定义发布文案(选填);空 = AI 自动生成。仅在要上传时带上。
     publishTitle: outputMode === 'upload' && publishTitle.trim() ? publishTitle.trim() : undefined,
     publishCaption: outputMode === 'upload' && publishCaption.trim() ? publishCaption.trim() : undefined,
@@ -4143,6 +4151,10 @@ export const HotspotVideoModal: React.FC<{
     publishAccounts: matrixMode && outputMode === 'upload'
       ? Object.fromEntries(selectedPlatformIds.filter((p) => accountByPlatform[p]).map((p) => [p, accountByPlatform[p]]))
       : undefined,
+    // 账号【名字】也存一份(平台→名),详情/记录页直接展示「上传到 抖音(账号1-涛涛)」,不必再查账号库。
+    publishAccountNames: matrixMode && outputMode === 'upload'
+      ? Object.fromEntries(selectedPlatformIds.filter((p) => accountByPlatform[p]).map((p) => { const a = matrixAccounts.find((x) => x.id === accountByPlatform[p]); return [p, a ? (a.nickname || a.displayName) : accountByPlatform[p]]; }))
+      : undefined,
     targetSeconds,
     useStockVideo: false,            // 纯图 Ken Burns(Serper 给的是图,不是视频)
     subtitleEnabled,
@@ -4739,6 +4751,10 @@ export const TemplateSpeedModal: React.FC<{ isZh: boolean; matrixMode?: boolean;
         // 矩阵号:每个发布平台选定的账号(平台→accountId),发布时按号走 CDP。仅取已勾平台的映射。
         publishAccounts: matrixMode && outputMode === 'upload'
           ? Object.fromEntries(selectedPlatformIds.filter((p) => accountByPlatform[p]).map((p) => [p, accountByPlatform[p]]))
+          : undefined,
+        // 账号【名字】也存一份(平台→名),详情/记录页直接展示。
+        publishAccountNames: matrixMode && outputMode === 'upload'
+          ? Object.fromEntries(selectedPlatformIds.filter((p) => accountByPlatform[p]).map((p) => { const a = matrixAccounts.find((x) => x.id === accountByPlatform[p]); return [p, a ? (a.nickname || a.displayName) : accountByPlatform[p]]; }))
           : undefined,
         publishTitle: outputMode === 'upload' && selectedPlatformIds.length && publishTitle.trim() ? publishTitle.trim() : undefined,
         publishCaption: outputMode === 'upload' && selectedPlatformIds.length && publishCaption.trim() ? publishCaption.trim() : undefined,
