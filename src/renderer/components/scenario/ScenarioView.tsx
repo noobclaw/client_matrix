@@ -138,8 +138,8 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   // v6.x: 菜单拆分后,本实例的「主页/落地段」由 mode 决定:
   //   create 模式落在 'create'(新建页);manage 模式落在 'tasks'(我的涨粉任务)。
   const baseSection: SectionId = mode === 'create' ? 'create' : mode === 'runs' ? 'history' : 'tasks';
-  // 默认平台 tab:矩阵 edition 主打涨粉,默认进【抖音】;非矩阵(旧视频版)仍默认多平台视频创作。
-  const defaultPlatform: PlatformId = matrixMode ? 'douyin' : 'video';
+  // 默认平台 tab:统一默认【多平台视频创作】(video)。
+  const defaultPlatform: PlatformId = 'video';
   const [view, setView] = useState<ViewState>({ kind: 'main', section: baseSection, platform: initialPlatform || defaultPlatform });
 
   // Seed scenarios from the bundled snapshot so the "立即开始" buttons in

@@ -937,9 +937,11 @@ const App: React.FC = () => {
   const handleShowPartners = () => setMainView('partners');
   const handleShowPersonality = () => setMainView('personality');
   const handleShowMatrix = () => setMainView('matrix');
-  const handleShowMatrixTaskNew = () => setMainView('matrixTaskNew');
-  const handleShowMatrixTasks = () => setMainView('matrixTasks');
-  const handleShowMatrixRuns = () => setMainView('matrixRuns');
+  // 侧栏点「新建/我的/记录」:复位到默认【多平台视频创作】tab(从某平台「已有任务」跳过去才带具体平台)。
+  // bump navNonce 让 ScenarioView 按新 initialPlatform 复位 tab。
+  const handleShowMatrixTaskNew = () => { setMatrixPlatform('video'); setMainView('matrixTaskNew'); setScenarioNavNonce((n) => n + 1); };
+  const handleShowMatrixTasks = () => { setMatrixPlatform('video'); setMainView('matrixTasks'); setScenarioNavNonce((n) => n + 1); };
+  const handleShowMatrixRuns = () => { setMatrixPlatform('video'); setMainView('matrixRuns'); setScenarioNavNonce((n) => n + 1); };
 
   return (
     <div className="relative h-screen overflow-hidden flex flex-col dark:bg-claude-darkSurfaceMuted bg-claude-surfaceMuted">
@@ -1134,8 +1136,8 @@ const App: React.FC = () => {
                 matrixMode
                 mode={mainView === 'matrixRuns' ? 'runs' : mainView === 'matrixTaskNew' ? 'create' : 'manage'}
                 initialPlatform={matrixPlatform as any}
-                onSwitchToCreate={() => setMainView('matrixTaskNew')}
-                onSwitchToManage={() => setMainView('matrixTasks')}
+                onSwitchToCreate={(platform) => { if (platform) setMatrixPlatform(platform); setMainView('matrixTaskNew'); setScenarioNavNonce((n) => n + 1); }}
+                onSwitchToManage={(platform) => { if (platform) setMatrixPlatform(platform); setMainView('matrixTasks'); setScenarioNavNonce((n) => n + 1); }}
                 onInDetailChange={setScenarioInDetail}
                 navNonce={scenarioNavNonce}
                 isSidebarCollapsed={isSidebarCollapsed}
