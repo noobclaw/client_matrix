@@ -43,7 +43,9 @@ import MatrixTaskWizard, { type WizardAccount } from '../matrix/MatrixTaskWizard
 type PlatformId = 'xhs' | 'x' | 'binance' | 'douyin' | 'shipinhao' | 'toutiao' | 'kuaishou' | 'bilibili' | 'tiktok' | 'youtube' | 'video';
 
 // 矩阵号支持「互动涨粉」的平台(后端 backend/matrix/scenarios 有 <platform>_auto_engage)。
-const MATRIX_ENGAGE_PLATFORMS = new Set<string>(['douyin', 'kuaishou', 'bilibili', 'xhs', 'x', 'binance', 'youtube', 'tiktok']);
+// 矩阵 tab 顺序:涨粉为主 → 抖音/小红书最前,视频创作放最后(与「我的矩阵账号」平台顺序一致)。
+// 这 8 个平台有 engage 剧本;其余(视频号/头条)无 engage,矩阵任务页不列。
+const MATRIX_TAB_ORDER: PlatformId[] = ['douyin', 'xhs', 'kuaishou', 'bilibili', 'x', 'binance', 'youtube', 'tiktok', 'video'];
 
 // Top-level navigation:
 //   create  — scenario cards (current XhsWorkflowsPage / XWorkflowsPage,
@@ -135,7 +137,9 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   // v6.x: 菜单拆分后,本实例的「主页/落地段」由 mode 决定:
   //   create 模式落在 'create'(新建页);manage 模式落在 'tasks'(我的涨粉任务)。
   const baseSection: SectionId = mode === 'create' ? 'create' : mode === 'runs' ? 'history' : 'tasks';
-  const [view, setView] = useState<ViewState>({ kind: 'main', section: baseSection, platform: initialPlatform || 'video' });
+  // 默认平台 tab:矩阵 edition 主打涨粉,默认进【抖音】;非矩阵(旧视频版)仍默认多平台视频创作。
+  const defaultPlatform: PlatformId = matrixMode ? 'douyin' : 'video';
+  const [view, setView] = useState<ViewState>({ kind: 'main', section: baseSection, platform: initialPlatform || defaultPlatform });
 
   // Seed scenarios from the bundled snapshot so the "立即开始" buttons in
   // every WorkflowsPage are clickable from first paint, not greyed out
@@ -161,7 +165,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   // 侧栏点涨粉菜单(navNonce 递增)→ 退回本 mode 的列表页(不重挂、不重拉数据)。修:在运行记录详情里
   //   点「涨粉运行记录」,App setMainView 同值是 no-op,原来退不出详情、且高亮乱跳。mount 时无害(等于初值)。
   useEffect(() => {
-    setView({ kind: 'main', section: baseSection, platform: initialPlatform || 'video' });
+    setView({ kind: 'main', section: baseSection, platform: initialPlatform || defaultPlatform });
     setVideoInDetail(false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navNonce]);
@@ -1061,7 +1065,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       {view.kind === 'main' && !(currentPlatform === 'video' && videoInDetail) && (
         <div className="flex flex-wrap items-center gap-2 px-4 pt-3 pb-2 border-b dark:border-claude-darkBorder border-claude-border shrink-0">
           {/* 矩阵号:显示「视频创作」(热搜成片)+ 支持「互动涨粉」的平台(其余无 engage 剧本)。 */}
-          {(matrixMode ? PLATFORM_TABS.filter(t => t.id === 'video' || MATRIX_ENGAGE_PLATFORMS.has(t.id)) : PLATFORM_TABS).map((tab) => {
+          {(matrixMode ? MATRIX_TAB_ORDER.map((id) => PLATFORM_TABS.find((t) => t.id === id)!).filter(Boolean) : PLATFORM_TABS).map((tab) => {
             const active = currentPlatform === tab.id;
             return (
               <button
