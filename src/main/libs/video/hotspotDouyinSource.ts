@@ -54,7 +54,7 @@ async function fetchDouyinClipsViaKernel(
   const diag: DouyinClipsDiag = { reached: false, loggedIn: false, gotUrls: 0, downloaded: 0 };
   if (signal?.aborted) { diag.reason = 'aborted'; return { paths: [], titles: [], diag }; }
   // 懒加载矩阵模块(避免顶层循环依赖)。
-  const { accountsByPlatform } = require('../matrix/accountManager');
+  const { accountsByPlatform, accountBadgeLabel } = require('../matrix/accountManager');
   const { launchKernel, checkKernelLogin, closeKernel, getSession } = require('../matrix/kernelPool');
   const { runMatrixDouyinSearch } = require('../matrix/driverCtx');
 
@@ -77,7 +77,7 @@ async function fetchDouyinClipsViaKernel(
     if (signal?.aborted) { diag.reason = 'aborted'; return { paths: [], titles: [], diag }; }
     const wasRunning = !!getSession(cand.id);
     try {
-      await launchKernel({ accountId: cand.id, kernelVersion: cand.kernelVersion, userDataDir: cand.userDataDir, fingerprint: cand.fingerprint, proxy: cand.proxy, label: cand.displayName });
+      await launchKernel({ accountId: cand.id, kernelVersion: cand.kernelVersion, userDataDir: cand.userDataDir, fingerprint: cand.fingerprint, proxy: cand.proxy, label: accountBadgeLabel(cand) });
     } catch { onLog(`   「${cand.displayName}」内核启动失败,换下一个…`); continue; }
     const loggedIn = await checkKernelLogin(cand.id, 'douyin').catch(() => false);
     if (loggedIn) { accountId = cand.id; accWasRunning = wasRunning; onLog(`🧬 用抖音账号「${cand.displayName}」的指纹浏览器取材`); break; }
@@ -116,11 +116,25 @@ async function fetchDouyinClipsViaKernel(
     const ext = mode === 'image' ? 'jpg' : 'mp4';
     const base = mode === 'image' ? 'img' : 'clip';
     const paths: string[] = [];
+    const { matrixCmd } = require('../matrix/cdpCommands');
     for (let i = 0; i < urls.length; i++) {
       if (signal?.aborted) break;
       onLog(`⬇️ 下载 ${i + 1}/${urls.length}…`);
       const dest = path.join(destDir, `${base}_${String(i).padStart(2, '0')}.${ext}`);
-      if (await downloadOne(urls[i], dest)) { paths.push(dest); diag.downloaded++; }
+      // 【内核同源下载】:内核页就在 www.douyin.com,play_addr 取的也是 douyin.com 同源域 →
+      //   用 main_world_fetch_api(base64)在内核里下(带账号 cookie/同 IP),绕开主进程跨网络
+      //   下 zjcdn 被 CORS/IP 绑定拒的问题(实测主进程下 zjcdn 全失败、内核下 douyin.com 域 OK)。
+      let ok = false;
+      try {
+        const res: any = await matrixCmd(accountId, 'main_world_fetch_api', { url: String(urls[i]).replace(/playwm/g, 'play'), responseType: 'base64', credentials: 'include' });
+        if (res && res.ok !== false && typeof res.body === 'string' && res.body.length > 100) {
+          const buf = Buffer.from(res.body, 'base64');
+          if (buf.length > 10000) { fs.writeFileSync(dest, buf); ok = true; }
+        }
+      } catch { /* 内核下失败 → 回落主进程直连 */ }
+      // 兜底:内核下不到(极少数 douyin.com 也拒)→ 再试一次主进程直连。
+      if (!ok) ok = await downloadOne(urls[i], dest);
+      if (ok) { paths.push(dest); diag.downloaded++; }
       else onLog(`   ⏭️ 第 ${i + 1} 个下载失败,跳过`);
     }
     onLog(`✅ 抖音素材就绪:${paths.length}/${urls.length} 个${titles.length ? ` · ${titles.length} 个标题` : ''}`);
