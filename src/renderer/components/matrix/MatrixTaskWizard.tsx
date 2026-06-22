@@ -15,7 +15,7 @@ const COMMENT_HARDCAP = 100;
 
 type WizardStep = 1 | 2 | 3;
 
-export interface WizardAccount { id: string; displayName: string; status: string; keywords?: string[]; group?: string; platform?: string; nickname?: string; displayId?: string }
+export interface WizardAccount { id: string; displayName: string; status: string; keywords?: string[]; group?: string; platform?: string; nickname?: string; displayId?: string; avatar?: string }
 
 // 平台 id → 中文名(账号行里标出来,避免「分不清这是抖音还是 YouTube 的号」)。
 const PLATFORM_NAME: Record<string, string> = { douyin: '抖音', xhs: '小红书', bilibili: 'B站', kuaishou: '快手', tiktok: 'TikTok', x: 'X', binance: '币安广场', youtube: 'YouTube', shipinhao: '视频号', toutiao: '头条' };
@@ -37,7 +37,7 @@ const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, platform, accounts, 
   // 默认勾选所有「可用」账号(配了关键词 + 未封);编辑时用任务已存的账号。
   const [selected, setSelected] = useState<Set<string>>(() => {
     if (initialTask?.accountIds) return new Set(initialTask.accountIds);
-    return new Set(accounts.filter((a) => a.keywords && a.keywords.length && a.status !== 'banned').map((a) => a.id));
+    return new Set(accounts.filter((a) => a.keywords && a.keywords.length && a.status !== 'banned' && a.status !== 'login_required').map((a) => a.id));
   });
   const toggle = (id: string) => setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
@@ -122,22 +122,28 @@ const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, platform, accounts, 
                 )}
                 {accounts.map((a) => {
                   const hasKw = !!(a.keywords && a.keywords.length);
-                  // 放宽:配了词且没被封即可勾(profile cookie 持久,登录态只是标记;真没登录时跑会自动跳过)
-                  const ready = hasKw && a.status !== 'banned';
-                  const reason = a.status === 'banned' ? '已封' : !hasKw ? '未配关键词' : (a.status === 'login_required' ? '可能需登录' : '');
+                  // 未关联(login_required)/已封 → 不可选(置灰);还要配了关键词。
+                  const linked = a.status !== 'login_required' && a.status !== 'banned';
+                  const ready = hasKw && linked;
+                  const reason = a.status === 'banned' ? '已封' : a.status === 'login_required' ? '未关联' : !hasKw ? '未配关键词' : '';
+                  const title = a.nickname || a.displayName;
                   return (
-                    <label key={a.id} className={`flex items-center gap-2 text-sm px-1.5 py-1 rounded ${ready ? 'dark:text-gray-200 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800' : 'opacity-50 cursor-not-allowed'}`}>
+                    <label key={a.id} className={`flex items-center gap-2.5 text-sm px-2 py-1.5 rounded ${ready ? 'dark:text-gray-200 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800' : 'opacity-45 cursor-not-allowed'}`}>
                       <input type="checkbox" checked={selected.has(a.id)} onChange={() => ready && toggle(a.id)} disabled={saving || !ready} className="h-4 w-4 accent-violet-500 shrink-0" />
-                      {a.platform && <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-500 whitespace-nowrap shrink-0">{PLATFORM_NAME[a.platform] || a.platform}</span>}
-                      <span className="font-medium whitespace-nowrap shrink-0">{a.displayName}</span>
-                      {(a.nickname || a.displayId) && (
-                        <span className="text-xs text-gray-500 dark:text-gray-300 whitespace-nowrap shrink-0">
-                          {a.nickname || ''}{a.displayId ? ` (${a.displayId})` : ''}
-                        </span>
-                      )}
-                      {a.group && <span className="text-xs text-gray-400 whitespace-nowrap shrink-0">· {a.group}</span>}
-                      {hasKw ? <span className="text-xs text-gray-400 truncate min-w-0 flex-1">[{(a.keywords || []).join('/')}]</span> : <span className="flex-1" />}
-                      {reason && <span className="text-[11px] text-amber-500 shrink-0">{reason}</span>}
+                      {/* 头像 */}
+                      {a.avatar
+                        ? <img src={a.avatar} referrerPolicy="no-referrer" alt="" className="w-7 h-7 rounded-full object-cover bg-gray-200 dark:bg-gray-700 shrink-0" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+                        : <span className="w-7 h-7 rounded-full bg-violet-500/20 text-violet-500 flex items-center justify-center text-xs font-bold shrink-0">{(title || '?').slice(0, 1)}</span>}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="font-medium truncate dark:text-white">{title}</span>
+                          {a.displayId && <span className="text-[11px] text-gray-500 dark:text-gray-400 shrink-0">{PLATFORM_NAME[a.platform || ''] || ''}号:{a.displayId}</span>}
+                          {reason && <span className="text-[11px] text-amber-500 shrink-0">{reason}</span>}
+                        </div>
+                        <div className="text-[11px] text-gray-400 truncate">
+                          备注:{a.displayName}{a.group ? ` · ${a.group}` : ''}{hasKw ? ` · 🏷️ ${(a.keywords || []).join('/')}` : ''}
+                        </div>
+                      </div>
                     </label>
                   );
                 })}
