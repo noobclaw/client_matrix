@@ -36,24 +36,34 @@ const LOGIN_URL: Record<string, string> = {
   shipinhao: 'https://channels.weixin.qq.com/', toutiao: 'https://mp.toutiao.com/',
 };
 const STATUS_DOT: Record<AccountStatus, string> = { idle: 'bg-green-500', running: 'bg-blue-500', login_required: 'bg-amber-500', limited: 'bg-gray-400', banned: 'bg-red-500' };
-const STATUS_LABEL: Record<AccountStatus, string> = { idle: '已关联', running: '运行中', login_required: '需关联', limited: '限流冷却', banned: '已封' };
+const STATUS_LABEL: Record<AccountStatus, string> = { idle: '已关联', running: '运行中', login_required: '尚未关联', limited: '限流冷却', banned: '已封' };
 const FREQ_LABEL: Record<string, string> = { once: '不重复(手动)', '30min': '每30分钟', '1h': '每小时', '3h': '每3小时', '6h': '每6小时', daily_random: '每日随机一次' };
 
 // 赛道预设(下拉可选):选了自动填关键词 + 人设建议(用户仍可在下面微调)。
+// 赛道库与视频「素材成片」完全一致(VideoWorkflowsPage 的 TRACK_PRESETS)。name=带 emoji 的中文,
+// keywords/persona 直接沿用,选完自动带出人设 + 关键词、可再改。
 const TRACK_PRESETS: Array<{ name: string; keywords: string[]; persona: string }> = [
-  { name: '美食探店', keywords: ['美食探店', '本地美食', '街边小吃', '网红餐厅', '探店打卡', '吃播', '家常菜谱', '减脂餐', '烘焙教程', '地方菜系'], persona: '爱吃会做的美食博主,评论真诚接地气、带点烟火气' },
-  { name: '日常vlog', keywords: ['vlog', '日常分享', '生活记录', '一人居', '上班族日常', '周末vlog', '晨间routine', '搬家', '装修日记', '学生日常'], persona: '记录真实生活的 vlogger,评论亲切自然' },
-  { name: '宠物', keywords: ['宠物日常', '猫咪', '狗子', '萌宠', '养宠新手', '金毛', '橘猫', '柯基', '宠物搞笑', '猫狗日常'], persona: '资深铲屎官,评论暖心有爱' },
-  { name: '音乐舞蹈', keywords: ['翻唱', '抖音神曲', '舞蹈翻跳', '吉他弹唱', '钢琴', '街舞', '原创歌曲', '民谣', '古风', '现代舞'], persona: '热爱音乐舞蹈的创作者,评论有共鸣有热情' },
-  { name: '知识科普', keywords: ['知识分享', '科普', '冷知识', '历史', '心理学', '健康知识', '财经科普', '科技', 'AI科普', '育儿知识'], persona: '爱分享干货的知识博主,评论有理有据、不卖弄' },
-  { name: '搞笑', keywords: ['搞笑', '段子', '反转', '沙雕日常', '剧情', '情景剧', '神回复', '脱口秀', '迷惑行为', '翻车现场'], persona: '幽默风趣的段子手,评论接梗会玩、轻松不尬' },
-  { name: '母婴育儿', keywords: ['宝宝日常', '亲子', '辅食', '育儿', '早教', '萌娃', '带娃', '宝妈日常', '孕期', '亲子游戏'], persona: '过来人宝妈/宝爸,评论温柔实用、有共情' },
-  { name: '游戏', keywords: ['游戏直播', '王者荣耀', '原神', '和平精英', '手游推荐', '游戏攻略', '游戏剪辑', '英雄联盟', '电竞解说', '单机游戏'], persona: '硬核游戏玩家,评论懂行、热血' },
-  { name: '影视短剧', keywords: ['电影解说', '电视剧推荐', '影评', '影视剪辑', '高分电影', '热播剧', '短剧', '反转剧情', '悬疑片', '综艺'], persona: '影视剧爱好者,评论有梗会安利、带分寸' },
-  { name: '体育健身', keywords: ['篮球', '足球', '健身', '跑步', '运动技巧', 'NBA', '减脂', '增肌', '马拉松', '极限运动'], persona: '热爱运动的健身达人,评论阳光有干货、爱鼓励' },
-  { name: '旅行', keywords: ['旅行vlog', '国内旅游', '自驾游', '民宿推荐', '景点打卡', '小众目的地', 'citywalk', '露营', '穷游攻略', '美食旅行'], persona: '走南闯北的旅行达人,评论种草、有攻略感' },
-  { name: '美妆穿搭', keywords: ['美妆教程', '穿搭', '护肤', '口红试色', '平价好物', '通勤穿搭', 'ootd', '彩妆', '发型', '复古风'], persona: '会变美爱分享的美妆穿搭博主,评论真诚种草、不浮夸' },
+  { name: '🌏 海外生活 · 日常', keywords: ['海外生活', '国外日常', '租房', '超市采购', '异国文化', '海外Vlog', '留学生活', '省钱攻略'], persona: '在国外生活的普通人，记录真实的海外日常。租房、通勤、超市采购、节日见闻都自己拍，接地气、不滤镜、不贩卖焦虑' },
+  { name: '🐾 萌宠 · 日常', keywords: ['萌宠日常', '猫咪', '狗狗', '养宠攻略', '宠物好物', '治愈系', '铲屎官', '宠物搞笑'], persona: '养猫养狗的铲屎官,记录萌宠日常。轻松治愈、会讲细节,分享养宠经验和踩坑,真实不卖惨' },
+  { name: '🍲 美食 · 探店做饭', keywords: ['美食探店', '一人食', '家常菜', '减脂餐', '必吃榜', '本地美食', '空气炸锅', '探店打卡'], persona: '爱折腾吃喝的上班族，每天给自己做饭，也爱探店。说话热情、会种草，重点讲性价比和踩雷避坑，不浮夸' },
+  { name: '💻 数码科技 · 测评', keywords: ['数码测评', '手机评测', '笔记本', '智能硬件', '新品上手', '科技', '数码好物', '选购指南'], persona: '懂行的数码测评博主，自费买机、理性测评。技术名词直接说，优缺点都讲，绝不收钱吹，帮人避坑做选择' },
+  { name: '🤖 AI 工具 · 效率', keywords: ['AI工具', 'ChatGPT', '效率提升', 'AI办公', '提示词', '自动化', 'AI神器', '副业AI'], persona: '天天用 AI 干活的效率党，把 ChatGPT / 各种 AI 工具用到飞起。讲人话、给可复制的实操，不空谈概念' },
+  { name: '💰 财经 · 理财科普', keywords: ['财经科普', '理财入门', '攒钱方法', '基金定投', '经济趋势', '记账', '工资理财', '钱生钱'], persona: '通俗讲钱的财经科普博主，冷静中立。只做知识科普,不荐股、不喊单、不给个性化投资建议,帮人建立常识' },
+  { name: '₿ 加密货币 · Web3', keywords: ['加密货币', '区块链', 'web3', '比特币', '以太坊', '行情解读', '链上数据', '钱包安全'], persona: '把区块链讲清楚的 Web3 科普博主，客观中立。只讲原理和行业动态,不喊单、不带单、不预测价格,提示风险' },
+  { name: '💪 健身 · 减脂日记', keywords: ['居家健身', '减脂打卡', '增肌', '体态矫正', '减脂餐', 'HIIT', '健身小白', '拉伸'], persona: '边上班边坚持健身一年的过来人，167cm 从 130 减到 108 斤。正能量但不打鸡血，讲可执行的方法,反对极端节食' },
+  { name: '✈️ 旅行 · 攻略分享', keywords: ['旅行攻略', '周末去哪', '小众目的地', 'citywalk', '自驾游', '机票便宜', '民宿推荐', '旅行vlog'], persona: '爱说走就走的旅行爱好者，一年出去 6-8 次。分享性价比攻略和小众目的地，治愈、令人向往，重实操路线' },
+  { name: '👗 穿搭 · 风格分享', keywords: ['小个子穿搭', '通勤穿搭', 'OOTD', '微胖穿搭', '法式穿搭', '显瘦', '气质穿搭', '平价单品'], persona: '小个子职场穿搭爱好者，155cm。分享通勤、约会、微胖显瘦的实穿搭配，精致但不端着，重点给平价替代' },
+  { name: '💄 美妆 · 护肤测评', keywords: ['平价护肤', '敏感肌', '成分党', '粉底测评', '口红试色', '早C晚A', '防晒', '空瓶记'], persona: '敏感肌护肤爱好者，研究护肤 8 年、被坑过很多钱。成分党、只推真用过的，讲实测感受不夸大,帮新手避雷' },
+  { name: '📈 职场 · 成长干货', keywords: ['职场成长', '沟通技巧', '升职加薪', '跳槽', '简历', '汇报', '副业', '效率工具'], persona: '过来人式的职场博主，互联网公司中层。分享沟通、汇报、升职、跳槽的实操干货，实在不灌鸡汤,讲方法和案例' },
+  { name: '💼 副业 · 打工人赚钱', keywords: ['副业推荐', '下班变现', '0基础副业', 'AI副业', '在家赚钱', '自媒体', '兼职', '副业项目'], persona: '下班搞副业一年的普通打工人，杭州互联网运营。真诚不装,只分享自己真做过的副业、真实收入和踩过的坑,不卖课' },
+  { name: '🎓 留学 · 申请经验', keywords: ['留学申请', '选校', '文书', '签证', '语言考试', '留学生活', '落地攻略', '奖学金'], persona: '过来人留学博主，自己申过、踩过坑。耐心细致地讲选校、文书、签证、落地生活，给可照做的清单,不贩卖焦虑' },
+  { name: '🧸 育儿 · 亲子日常', keywords: ['科学育儿', '早教', '绘本推荐', '辅食', '亲子游戏', '母婴好物', '新手妈妈', '亲子阅读'], persona: '理性育儿不焦虑的妈妈，娃 3 岁。分享科学育儿、绘本、辅食、亲子游戏，温和实在,讲方法不制造焦虑' },
+  { name: '📚 读书 · 书单笔记', keywords: ['读书笔记', '年度书单', '好书推荐', '读书打卡', '小说推荐', '非虚构', '读书方法', '书评'], persona: '一年读 40-50 本书的普通读者，从事文化行业。分享书单、读后感、读书方法，安静走心,推荐真读过的书' },
+  { name: '😂 搞笑 · 段子娱乐', keywords: ['搞笑视频', '沙雕日常', '神反转', '搞笑段子', '整活', '名场面', '爆笑', '解压'], persona: '专做搞笑短视频的博主，节奏快、有梗、会反转。贴近生活、不低俗，让人刷到忍不住笑出来' },
+  { name: '💗 情感 · 共鸣治愈', keywords: ['情感共鸣', '治愈文案', '人生感悟', '走心', 'emo', '自我成长', '温暖', '深夜'], persona: '讲情感、聊人生的博主，真诚走心。说大白话、给共鸣和温暖,不灌鸡汤、不制造对立' },
+  { name: '🌾 三农 · 乡村生活', keywords: ['乡村生活', '三农', '农村日常', '田园', '种地', '赶大集', '农家饭', '慢生活'], persona: '记录乡村生活的博主，种地、赶集、家常饭都自己拍。真实质朴、烟火气足，让城里人向往慢生活' },
 ];
+const DEFAULT_TRACK = '🍲 美食 · 探店做饭'; // 默认选中(与视频默认 food 一致)
 
 const M = () => (window as any).electron?.matrix;
 const fmtTime = (ts?: number) => { if (!ts || ts >= Number.MAX_SAFE_INTEGER) return '—'; const d = new Date(ts); return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
@@ -148,17 +158,25 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate, onShowIn
   const requireKernel = (): boolean => { if (kernelReady) return true; setShowKernelModal(true); return false; };
 
   // ── 账号 ──
-  const openAdd = () => { if (!requireKernel()) return; setEditId(null); setNewName(`账号${platformAccounts.length + 1}-`); setNewGroup(''); setNewPersona(''); setNewKeywords(''); setNotice(''); setShowAdd(true); };
-  // 选赛道 → 关键词 + 人设跟着填(人设为空才填,不覆盖用户已写的)。
+  const openAdd = () => {
+    if (!requireKernel()) return;
+    setEditId(null); setNewName(`账号${platformAccounts.length + 1}-`);
+    // 默认选中一个赛道并带出人设 + 关键词(可再改)。
+    const def = TRACK_PRESETS.find((t) => t.name === DEFAULT_TRACK) || TRACK_PRESETS[0];
+    setNewGroup(def.name); setNewPersona(def.persona); setNewKeywords(def.keywords.join(' '));
+    setNotice(''); setShowAdd(true);
+  };
+  // 选赛道 → 关键词 + 人设自动带出(可再改);选「自定义」(空)则保留当前内容让用户自己填。
   const pickTrack = (name: string) => {
     setNewGroup(name);
     const p = TRACK_PRESETS.find((t) => t.name === name);
-    if (p) { setNewKeywords(p.keywords.join(' ')); setNewPersona((prev) => prev.trim() ? prev : p.persona); }
+    if (p) { setNewKeywords(p.keywords.join(' ')); setNewPersona(p.persona); }
   };
   const openEdit = (a: MatrixAccount) => { setEditId(a.id); setNewName(a.displayName); setNewGroup(a.group || ''); setNewPersona(a.persona || ''); setNewKeywords((a.keywords || []).join(' ')); setNotice(''); setShowAdd(true); };
   const confirmAdd = async (thenLogin: boolean) => {
     const m = M(); if (!m) { setNotice('matrix 接口未就绪'); return; }
-    const keywords = parseKeywords(newKeywords); const group = newGroup.trim() || undefined; const persona = newPersona.trim() || undefined;
+    const keywords = parseKeywords(newKeywords); const group = newGroup.trim() || undefined; const persona = newPersona.trim();
+    if (!persona) { setNotice('请填写人设(自动评论时按这个口吻写)'); return; } // 人设必填
     if (editId) { await m.updateAccountMeta({ id: editId, displayName: newName.trim() || undefined, group, persona, keywords }); setShowAdd(false); await reload(); setNotice('已更新'); return; }
     const name = newName.trim(); if (!name) { setNotice('请填账号备注名'); return; }
     const r = await m.createAccount({ platform, displayName: name, group, persona, keywords });
@@ -357,11 +375,11 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate, onShowIn
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="text-sm font-semibold dark:text-white truncate">{a.nickname || a.displayName}</span>
                           <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${stChip}`}>{STATUS_LABEL[a.status]}</span>
-                          <span className={`shrink-0 max-w-[9rem] truncate text-[10px] px-1.5 py-0.5 rounded-full ${a.proxy ? 'text-blue-600 dark:text-blue-400 bg-blue-500/15' : 'text-gray-500 bg-gray-500/15'}`}>代理IP:{a.proxy ? (a.proxy.geo || a.proxy.host) : '默认本地'}</span>
+                          <span className={`shrink-0 max-w-[9rem] truncate text-[10px] px-1.5 py-0.5 rounded-full ${a.proxy ? 'text-blue-600 dark:text-blue-400 bg-blue-500/15' : 'text-gray-500 bg-gray-500/15'}`}>代理IP:{a.proxy ? (a.proxy.geo || a.proxy.host) : '尚未配置'}</span>
                         </div>
                         <div className="text-[11px] space-y-0.5" title={a.boundUid ? `uid: ${a.boundUid}` : undefined}>
                           {a.status === 'login_required'
-                            ? <div className="text-amber-500 truncate">未关联 — 点「扫码关联」</div>
+                            ? <div className="text-amber-500 truncate">请点击下方扫码关联进行关联</div>
                             : (<>
                                 {a.displayId && <div className="text-gray-600 dark:text-gray-300 truncate">{PLATFORM_LABEL[a.platform] || ''}号:{a.displayId}</div>}
                                 <div className="text-gray-500 dark:text-gray-400 truncate">备注:{a.displayName}</div>
@@ -377,8 +395,9 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate, onShowIn
                     </div>
                     {/* 右侧可点击按钮:全色按钮 */}
                     <div className="flex items-center gap-2 flex-wrap pt-1">
-                      <button onClick={() => openProxy(a)} className="text-xs px-2.5 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">配置IP</button>
-                      <button onClick={() => openEdit(a)} className="text-xs px-2.5 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">编辑</button>
+                      {/* 未关联:配置IP/编辑/扫码关联 统一紫色;已关联:配置IP/编辑/刷新信息 统一绿色。 */}
+                      <button onClick={() => openProxy(a)} className={`text-xs px-2.5 py-1 rounded-lg text-white ${a.status === 'login_required' ? 'bg-violet-500 hover:bg-violet-600' : 'bg-emerald-600 hover:bg-emerald-700'}`}>配置IP</button>
+                      <button onClick={() => openEdit(a)} className={`text-xs px-2.5 py-1 rounded-lg text-white ${a.status === 'login_required' ? 'bg-violet-500 hover:bg-violet-600' : 'bg-emerald-600 hover:bg-emerald-700'}`}>编辑</button>
                       {a.status === 'login_required'
                         ? <button onClick={() => { if (!requireKernel()) return; setNotice(`正在为「${a.displayName}」打开指纹浏览器,扫码关联后状态自动刷新`); M()?.openLogin({ accountId: a.id, kernelPath, loginUrl: LOGIN_URL[a.platform] || '' }); }} className="text-xs px-2.5 py-1 rounded-lg bg-violet-500 text-white hover:bg-violet-600">扫码关联</button>
                         : (<>
@@ -609,19 +628,19 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', onNavigate, onShowIn
             <div className="text-base font-semibold mb-4">{editId ? '编辑账号' : `关联 ${PLATFORM_LABEL[platform]} 账号`}</div>
             <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">账号备注名</label>
             <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="如:账号1-美食号" className="w-full text-sm px-3 py-2.5 rounded-lg border dark:border-white/15 border-black/15 bg-transparent mb-3" />
-            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">赛道(选了自动填关键词 + 人设建议)</label>
+            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">赛道（必选）<span className="ml-2 font-normal text-gray-400">选完自动带出人设和关键词，可再改</span></label>
             <select value={TRACK_PRESETS.some((t) => t.name === newGroup) ? newGroup : ''} onChange={(e) => pickTrack(e.target.value)} className="w-full text-sm px-3 py-2.5 rounded-lg border dark:border-white/15 border-black/15 bg-transparent dark:bg-gray-800 mb-3">
-              <option value="">自定义 / 其他(下面自己填关键词)</option>
               {TRACK_PRESETS.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}
+              <option value="">自定义 / 其他(自己填人设 + 关键词)</option>
             </select>
-            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">赛道关键词(空格/逗号分隔,互动时按这些搜)</label>
-            <textarea value={newKeywords} onChange={(e) => setNewKeywords(e.target.value)} placeholder="如:美食 探店 家常菜" rows={4} className="w-full text-sm px-3 py-2.5 rounded-lg border dark:border-white/15 border-black/15 bg-transparent mb-3" />
-            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">人设(可选)—— 自动评论时 AI 按这个口吻写</label>
-            <textarea value={newPersona} onChange={(e) => setNewPersona(e.target.value)} placeholder="如:爱吃会做的美食博主,评论真诚接地气" rows={3} className="w-full text-sm px-3 py-2.5 rounded-lg border dark:border-white/15 border-black/15 bg-transparent mb-4" />
+            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">人设<span className="ml-2 font-normal text-gray-400">你是谁、对谁说话、什么口吻</span></label>
+            <textarea value={newPersona} onChange={(e) => setNewPersona(e.target.value)} placeholder="如:爱吃会做的美食博主,评论真诚接地气" rows={4} className="w-full text-sm px-3 py-2.5 rounded-lg border dark:border-white/15 border-black/15 bg-transparent mb-3" />
+            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">关键词<span className="ml-2 font-normal text-gray-400">空格分隔,互动时按这些搜</span></label>
+            <textarea value={newKeywords} onChange={(e) => setNewKeywords(e.target.value)} placeholder="如:美食探店 一人食 家常菜" rows={4} className="w-full text-sm px-3 py-2.5 rounded-lg border dark:border-white/15 border-black/15 bg-transparent mb-4" />
             <div className="flex justify-end gap-2">
               <button onClick={() => setShowAdd(false)} className="px-3 py-1.5 text-sm rounded-lg border dark:border-white/15 border-black/15">取消</button>
               {editId ? <button onClick={() => confirmAdd(false)} className="px-3 py-1.5 text-sm rounded-lg bg-claude-accent text-white">保存</button>
-                : (<><button onClick={() => confirmAdd(false)} className="px-3 py-1.5 text-sm rounded-lg border dark:border-white/15 border-black/15">仅关联</button><button onClick={() => confirmAdd(true)} className="px-3 py-1.5 text-sm rounded-lg bg-claude-accent text-white">关联并扫码</button></>)}
+                : (<><button onClick={() => confirmAdd(false)} className="px-3 py-1.5 text-sm rounded-lg border dark:border-white/15 border-black/15">仅保存</button><button onClick={() => confirmAdd(true)} className="px-3 py-1.5 text-sm rounded-lg bg-claude-accent text-white">保存并关联</button></>)}
             </div>
           </div>
         </div>
