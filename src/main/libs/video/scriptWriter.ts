@@ -74,40 +74,65 @@ async function callDeepSeek(
     body.response_format = { type: 'json_object' };
   }
 
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const resp = await fetch(`${apiBase()}/api/ai/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(body),
-      signal: ctrl.signal,
-    });
-    if (!resp.ok) {
-      if (resp.status === 401) throw new Error('AI_AUTH_FAILED — NoobClaw 登录态失效，请重新登录');
-      if (resp.status === 402) throw new Error('CREDITS_INSUFFICIENT — 积分余额不足，请前往钱包充值');
-      const errText = await resp.text().catch(() => '');
-      throw new Error(`AI API ${resp.status}: ${errText.slice(0, 200)}`);
+  // 网络抖动重试:fetch 本身抛错(undici "fetch failed" / ECONNRESET / 超时 abort)或 5xx/429
+  // 都是【没拿到有效响应、也没扣费】的瞬时故障 → 退避重试,别让一次抖动直接弄挂整条成片。
+  // 401/402/4xx/空内容是确定性错误,不重试。
+  const MAX_ATTEMPTS = 3;
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  let lastErr: Error | null = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const resp = await fetch(`${apiBase()}/api/ai/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(body),
+        signal: ctrl.signal,
+      });
+      if (!resp.ok) {
+        if (resp.status === 401) throw new Error('AI_AUTH_FAILED — NoobClaw 登录态失效，请重新登录');
+        if (resp.status === 402) throw new Error('CREDITS_INSUFFICIENT — 积分余额不足，请前往钱包充值');
+        const errText = await resp.text().catch(() => '');
+        // 5xx / 429:服务端瞬时问题,可重试;其余 4xx 直接抛。
+        if ((resp.status >= 500 || resp.status === 429) && attempt < MAX_ATTEMPTS) {
+          lastErr = new Error(`AI API ${resp.status}`);
+          await sleep(attempt * 2000);
+          continue;
+        }
+        throw new Error(`AI API ${resp.status}: ${errText.slice(0, 200)}`);
+      }
+      const json: any = await resp.json();
+      const content = json?.choices?.[0]?.message?.content || '';
+      if (!content) throw new Error('AI_EMPTY_RESPONSE — AI 返回空内容');
+      // 对外只用「实扣积分」口径,绝不外露 usage.total_tokens(上游真实消耗,
+      // 暴露会让用户反推我们的成本/加价率 —— 真实 token 只给后端 / admin 看)。
+      // _noobclaw.billableTokens = 含 cache 折扣 + Pro 倍率后实际扣的积分;
+      // _noobclaw.costUsd = 按 token_price_per_million 算好的权威美元(同源 scenario)。
+      const costUsd = Number(json?._noobclaw?.costUsd) || 0;
+      const price = Number(json?._noobclaw?.priceUsdPerMillion) || 0;
+      let tokens = Number(json?._noobclaw?.billableTokens) || 0;
+      // 老后端没回 billableTokens 时,用权威 costUsd 反推积分(仍不碰 raw token)。
+      if (!tokens && costUsd > 0 && price > 0) tokens = Math.round((costUsd / price) * 1_000_000);
+      return { content, tokens, costUsd };
+    } catch (e: any) {
+      const msg = String(e?.message || e);
+      // 确定性错误(登录/积分/4xx/空内容)立即抛,不重试。
+      if (/AI_AUTH_FAILED|CREDITS_INSUFFICIENT|AI_EMPTY_RESPONSE|^AI API [4]/.test(msg)) throw e;
+      // 瞬时网络/超时:undici 抛 "fetch failed"、ECONNRESET、socket hang up,或 abort 超时。
+      const transient = e?.name === 'AbortError' || /fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|network|aborted/i.test(msg);
+      if (transient && attempt < MAX_ATTEMPTS) { lastErr = e; await sleep(attempt * 2000); continue; }
+      // 重试用尽 / 非瞬时错误:给网络类故障一个更清楚的提示(不是代码 bug,是连不上)。
+      if (transient) throw new Error(`AI_NETWORK_FAILED — 调用 AI 网络失败（已重试 ${MAX_ATTEMPTS} 次），请检查网络/VPN 后重试`);
+      throw e;
+    } finally {
+      clearTimeout(timer);
     }
-    const json: any = await resp.json();
-    const content = json?.choices?.[0]?.message?.content || '';
-    if (!content) throw new Error('AI_EMPTY_RESPONSE — AI 返回空内容');
-    // 对外只用「实扣积分」口径,绝不外露 usage.total_tokens(上游真实消耗,
-    // 暴露会让用户反推我们的成本/加价率 —— 真实 token 只给后端 / admin 看)。
-    // _noobclaw.billableTokens = 含 cache 折扣 + Pro 倍率后实际扣的积分;
-    // _noobclaw.costUsd = 按 token_price_per_million 算好的权威美元(同源 scenario)。
-    const costUsd = Number(json?._noobclaw?.costUsd) || 0;
-    const price = Number(json?._noobclaw?.priceUsdPerMillion) || 0;
-    let tokens = Number(json?._noobclaw?.billableTokens) || 0;
-    // 老后端没回 billableTokens 时,用权威 costUsd 反推积分(仍不碰 raw token)。
-    if (!tokens && costUsd > 0 && price > 0) tokens = Math.round((costUsd / price) * 1_000_000);
-    return { content, tokens, costUsd };
-  } finally {
-    clearTimeout(timer);
   }
+  throw lastErr || new Error('AI_NETWORK_FAILED — 调用 AI 失败');
 }
 
 /** 中文约 4.5 字/秒;由目标秒数反推目标字数。 */
