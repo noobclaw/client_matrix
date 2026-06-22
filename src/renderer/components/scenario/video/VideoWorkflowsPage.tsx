@@ -4213,6 +4213,7 @@ export const HotspotVideoModal: React.FC<{
 
   // 最后一步「创建/保存」:校验源 → 发布前置。
   const onSubmitClick = () => {
+    if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; } // 未登录 → 弹登录窗
     if (selectedSources.length === 0) { setStep(1); setErr(isZh ? '请至少勾选一个热点源' : 'Pick at least one source'); return; }
     // 矩阵号:发布按账号走指纹内核 CDP,登录态在跑任务时按号校验 → 不弹扩展登录校验框;
     //   但必须每个勾选平台都选好账号(没号的让用户先去「我的矩阵账号」建)。

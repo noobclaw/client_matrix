@@ -20,6 +20,14 @@ import type {
 } from '../types/scenario';
 import { MATRIX_EDITION } from '../matrixEdition';
 import { DEFAULT_SCENARIOS } from '../data/defaultScenarios';
+import { noobClawAuth } from './noobclawAuth';
+
+// 矩阵操作前置:未登录 NoobClaw 账号则弹登录窗,返回 false(拦在建/改/删/运行任务前)。
+function ensureMatrixLogin(): boolean {
+  if (noobClawAuth.getState().isAuthenticated) return true;
+  noobClawAuth.requireLoginUI();
+  return false;
+}
 
 export type Scenario = ScenarioManifestIPC;
 export type Task = ScenarioTaskIPC;
@@ -101,8 +109,9 @@ function mxRunToTaskRun(r: any): ScenarioTaskRun {
     ended_at: r.finishedAt,
     status: mxRunStatusOf(r),
     action_counts: { like: t.like || 0, follow: t.follow || 0, comment: t.comment || 0 },
-    tokens_used: 0,
-    cost_usd: 0,
+    // 累计/上次消耗:从运行记录的 cost 取(老记录无 cost → 0)。
+    tokens_used: Number(r.cost?.credits) || 0,
+    cost_usd: Number(r.cost?.usd) || 0,
   };
 }
 
@@ -127,7 +136,7 @@ function mxRunToRecord(r: any): any {
     result: {
       action_counts: { like: t.like || 0, follow: t.follow || 0, comment: t.comment || 0 },
       action_targets: {},
-      tokens_used: 0, cost_usd: 0, collected_count: 0, draft_count: 0,
+      tokens_used: Number(r.cost?.credits) || 0, cost_usd: Number(r.cost?.usd) || 0, collected_count: 0, draft_count: 0,
     },
     summary: `成功 ${r.success || 0} · 失败 ${r.failed || 0} · 跳过 ${r.skipped || 0}（共 ${items.length} 个号）`,
     step_logs,
@@ -170,7 +179,10 @@ function mxProgressToScenario(taskId: string, resp: any): ScenarioRunProgress | 
       logs: (a.logs || []).map((l: any, i: number) => ({ time: hhmmss(l.ts), status: (running && i === (a.logs.length - 1) ? 'running' : 'done') as any, message: l.msg })),
     };
   });
-  return { taskId, status, currentStep: status === 'done' ? 3 : 2, steps, error: p.error, action_progress, accounts };
+  // 本次消耗:💎 = p.cost.credits(钱包真实扣的积分),$ = p.cost.usd(后端按 token_price_per_million 算好)。
+  // 之前没映射 → TaskDetailPage 的「本次消耗」恒显 0,即使钱已经扣了。
+  const cost = p.cost || { credits: 0, usd: 0 };
+  return { taskId, status, currentStep: status === 'done' ? 3 : 2, steps, error: p.error, action_progress, accounts, tokens_used: Number(cost.credits) || 0, cost_usd: Number(cost.usd) || 0 };
 }
 
 class ScenarioService {
@@ -222,6 +234,7 @@ class ScenarioService {
 
   async createTask(input: Omit<Task, 'id' | 'created_at' | 'updated_at'>): Promise<Task> {
     if (MATRIX_EDITION) {
+      if (!ensureMatrixLogin()) throw new Error('请先登录 NoobClaw 账号');
       const r = await MX()?.saveTask?.(scenarioInputToMxSave(input));
       if (!r?.ok) throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限', duplicate_type: '该平台已有同类型(互动)任务,直接编辑它即可', task_not_found: '任务不存在' } as any)[r?.error] || r?.error || '保存失败');
       return mxTaskToScenario(r.task);
@@ -231,6 +244,7 @@ class ScenarioService {
 
   async updateTask(id: string, patch: Partial<Task>): Promise<Task | null> {
     if (MATRIX_EDITION) {
+      if (!ensureMatrixLogin()) return null;
       // 把现有任务读出来合并 patch(矩阵 saveTask 是整体 upsert)。
       const cur = await this.getTask(id);
       if (!cur) return null;
@@ -242,12 +256,13 @@ class ScenarioService {
   }
 
   async deleteTask(id: string): Promise<boolean> {
-    if (MATRIX_EDITION) { const r = await MX()?.removeTask?.({ id }); return !!r?.ok; }
+    if (MATRIX_EDITION) { if (!ensureMatrixLogin()) return false; const r = await MX()?.removeTask?.({ id }); return !!r?.ok; }
     return window.electron.scenario.deleteTask(id);
   }
 
   async runTaskNow(id: string): Promise<RunOutcome> {
     if (MATRIX_EDITION) {
+      if (!ensureMatrixLogin()) return { status: 'skipped', reason: 'login_required' };
       const r = await MX()?.runTaskById?.({ taskId: id });
       if (r?.ok) return { status: 'started' };
       return { status: 'skipped', reason: r?.error === 'another_task_running' ? 'concurrency_limit_reached' : (r?.error || 'unknown') };

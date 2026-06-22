@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import MatrixTaskWizard from './MatrixTaskWizard';
 import { WalletBadge } from '../common/WalletBadge';
+import { noobClawAuth } from '../../services/noobclawAuth';
 
 /**
  * 矩阵号主界面 —— 由左侧分组菜单驱动的 4 屏(screen prop):
@@ -160,9 +161,12 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
   const platformTasks = tasks.filter((t) => t.platform === platform);
   const kernelReady = !!kernel.installed || !!kernelPath.trim();
   const requireKernel = (): boolean => { if (kernelReady) return true; setShowKernelModal(true); return false; };
+  // 未登录则弹登录窗(NoobClaw 账号),拦在所有矩阵操作(建号/编辑/删除/建任务/运行等)前面。
+  const requireLogin = (): boolean => { if (noobClawAuth.getState().isAuthenticated) return true; noobClawAuth.requireLoginUI(); return false; };
 
   // ── 账号 ──
   const openAdd = () => {
+    if (!requireLogin()) return;
     if (!requireKernel()) return;
     setEditId(null); setNewName(`账号${platformAccounts.length + 1}-`);
     // 默认选中一个赛道并带出人设 + 关键词(可再改)。
@@ -176,8 +180,9 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
     const p = TRACK_PRESETS.find((t) => t.name === name);
     if (p) { setNewKeywords(p.keywords.join(' ')); setNewPersona(p.persona); }
   };
-  const openEdit = (a: MatrixAccount) => { setEditId(a.id); setNewName(a.displayName); setNewGroup(a.group || ''); setNewPersona(a.persona || ''); setNewKeywords((a.keywords || []).join(' ')); setNotice(''); setShowAdd(true); };
+  const openEdit = (a: MatrixAccount) => { if (!requireLogin()) return; setEditId(a.id); setNewName(a.displayName); setNewGroup(a.group || ''); setNewPersona(a.persona || ''); setNewKeywords((a.keywords || []).join(' ')); setNotice(''); setShowAdd(true); };
   const confirmAdd = async (thenLogin: boolean) => {
+    if (!requireLogin()) return;
     const m = M(); if (!m) { setNotice('matrix 接口未就绪'); return; }
     const keywords = parseKeywords(newKeywords); const group = newGroup.trim() || undefined; const persona = newPersona.trim();
     if (!persona) { setNotice('请填写人设(自动评论时按这个口吻写)'); return; } // 人设必填
@@ -190,6 +195,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
   };
   // 扫码登录二次确认:点「好的,我已知晓」才真正打开指纹浏览器导航到平台登录页(避免「一点就开浏览器」的突兀)。
   const promptScanLogin = (accountId: string, plat: string, displayName: string) => {
+    if (!requireLogin()) return;
     const platName = PLATFORM_LABEL[plat] || '该平台';
     setConfirmDlg({
       title: `扫码登录${platName}`,
@@ -205,6 +211,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
   };
   // 刷新信息:对任意账号拉起内核读 昵称/平台号/头像(已登录但没读过身份的号用这个)。
   const refreshIdentity = async (a: MatrixAccount) => {
+    if (!requireLogin()) return;
     if (!requireKernel()) return;
     setNotice(`正在读取「${a.displayName}」的账号信息…(会短暂弹出浏览器)`);
     const r = await M()?.refreshIdentity?.({ accountId: a.id, homeUrl: LOGIN_URL[a.platform] || '', kernelPath });
@@ -214,6 +221,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
   // 断开关联:清登录 cookie + 身份,但保留赛道/关键词/人设/代理/指纹配置,可随时重新扫码关联。
   // 用应用内确认弹窗(不能用 window.confirm —— Tauri dialog 插件被 ACL 拦)。
   const disconnectAccount = (a: MatrixAccount) => {
+    if (!requireLogin()) return;
     setConfirmDlg({
       title: '断开关联',
       body: `断开「${a.nickname || a.displayName}」的关联?会登出该账号(清 cookie),但保留赛道 / 关键词 / 代理等配置,可随时重新扫码关联。`,
@@ -229,6 +237,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
   };
   // 移除:彻底移除账号配置 + profile,不可恢复。
   const deleteAccount = (a: MatrixAccount) => {
+    if (!requireLogin()) return;
     setConfirmDlg({
       title: '移除账号',
       danger: true,
@@ -242,7 +251,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
       },
     });
   };
-  const openProxy = (a: MatrixAccount) => { setProxyForm({ protocol: a.proxy?.protocol || 'socks5', host: a.proxy?.host || '', port: a.proxy?.port ? String(a.proxy.port) : '', username: a.proxy?.username || '', password: a.proxy?.password || '', geo: a.proxy?.geo || '' }); setProxyFor(a.id); };
+  const openProxy = (a: MatrixAccount) => { if (!requireLogin()) return; setProxyForm({ protocol: a.proxy?.protocol || 'socks5', host: a.proxy?.host || '', port: a.proxy?.port ? String(a.proxy.port) : '', username: a.proxy?.username || '', password: a.proxy?.password || '', geo: a.proxy?.geo || '' }); setProxyFor(a.id); };
   const saveProxy = async () => {
     const host = proxyForm.host.trim(); const port = Number(proxyForm.port);
     if (!host || !Number.isInteger(port) || port <= 0) { setNotice('请填写正确的代理 host 和 port'); return; }
@@ -253,6 +262,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
   // ── 任务 ──
   // 向导(MatrixTaskWizard)保存:成功回 tasks 屏;失败抛出让向导显示红字。
   const saveTaskFromWizard = async (input: { name: string; accountIds: string[]; concurrency: number; frequency: string; quota: any }) => {
+    if (!requireLogin()) throw new Error('请先登录 NoobClaw 账号');
     const r = await M()?.saveTask({ id: taskEditId || undefined, platform, type: 'engage', name: input.name, accountIds: input.accountIds, quota: input.quota, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
     if (!r?.ok) throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限', duplicate_type: '该平台已有同类型(互动)任务,直接编辑它即可', task_not_found: '任务不存在' } as any)[r?.error] || r?.error || '保存失败');
     await reloadTasks(); setNotice('任务已保存');
@@ -260,6 +270,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
     onNavigate?.('tasks');
   };
   const runTaskNow = async (t: MatrixTask) => {
+    if (!requireLogin()) return;
     if (!requireKernel()) return;
     if (running) { setNotice('已有任务在跑,同时只能跑一个'); return; }
     setItems({}); setLogs([]); setDoneReport(null); setRunning(true); setSelectedTaskId(t.id);
@@ -450,7 +461,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
                       <div className="inline-flex items-center gap-1.5 text-xs font-medium text-violet-500 mb-2"><span className="inline-block w-1.5 h-1.5 rounded-full bg-violet-500 animate-pulse" />互动涨粉</div>
                       <h3 className="text-base font-bold dark:text-white mb-1.5">🎶 抖音 · 互动涨粉(矩阵)</h3>
                       <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed mb-3 flex-1">同时控制多个账号,每个号在自己的指纹浏览器里、按【自己的赛道关键词】搜抖音视频,按你配的随机区间做点赞 / 关注 / 评论。评论由 AI 按视频文案 + 该号人设自动生成,行为间隔随机模拟真人。赛道/关键词/人设在「我的矩阵账号」给每个号设。</p>
-                      <button onClick={() => { if (!requireKernel()) return; setShowNewWizard(true); }} className="w-full py-2.5 rounded-lg text-sm font-semibold text-white bg-violet-500 hover:bg-violet-600 shadow-lg shadow-violet-500/25">🎶 开始互动 →</button>
+                      <button onClick={() => { if (!requireLogin()) return; if (!requireKernel()) return; setShowNewWizard(true); }} className="w-full py-2.5 rounded-lg text-sm font-semibold text-white bg-violet-500 hover:bg-violet-600 shadow-lg shadow-violet-500/25">🎶 开始互动 →</button>
                     </div>
                   </div>
                 </section>
@@ -550,7 +561,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
                 {runningTaskId === selectedTask.id
                   ? <button onClick={stopTask} className="px-4 py-2 rounded-lg text-sm font-semibold bg-red-500 text-white hover:bg-red-600">⏹ 停止</button>
                   : <button onClick={() => runTaskNow(selectedTask)} disabled={running} className="px-4 py-2 rounded-lg text-sm font-semibold bg-violet-500 text-white hover:bg-violet-600 disabled:opacity-50">{running ? '运行中…' : '🎯 直接运行'}</button>}
-                <button onClick={() => { setTaskEditId(selectedTask.id); setShowTaskEditModal(true); }} className="px-3 py-2 rounded-lg text-sm font-medium border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800">编辑</button>
+                <button onClick={() => { if (!requireLogin()) return; setTaskEditId(selectedTask.id); setShowTaskEditModal(true); }} className="px-3 py-2 rounded-lg text-sm font-medium border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800">编辑</button>
                 <button onClick={() => deleteTask(selectedTask)} className="px-3 py-2 rounded-lg text-sm font-medium border border-red-500/40 text-red-500 hover:bg-red-500/5">删除</button>
               </div>
             </div>

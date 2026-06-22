@@ -201,6 +201,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     } finally { setMatrixKernelBusy(false); }
   };
   const openMatrixWizard = async (platform: string) => {
+    if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; } // 未登录 → 弹登录窗
     if (!(await ensureMatrixKernel())) return; // 没内核 → 弹下载,不开向导
     try {
       const r = await (window as any).electron?.matrix?.listAccounts?.();
@@ -210,6 +211,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     setMatrixWizardPlatform(platform);
   };
   const saveMatrixTask = async (input: { name: string; accountIds: string[]; concurrency: number; frequency: string; quota: any }) => {
+    if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); throw new Error('请先登录 NoobClaw 账号'); }
     const m = (window as any).electron?.matrix;
     const r = await m?.saveTask?.({ platform: matrixWizardPlatform, type: 'engage', name: input.name, accountIds: input.accountIds, quota: input.quota, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
     if (!r?.ok) throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限', duplicate_type: '该平台已有同类型(互动)任务,直接编辑它即可' } as any)[r?.error] || r?.error || '保存失败');
