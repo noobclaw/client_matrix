@@ -4385,8 +4385,8 @@ export const HotspotVideoModal: React.FC<{
                 </div>
                 <div className="mt-2 text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed">
                   {isZh
-                    ? `ⓘ 仅用该账号在${materialPlatform === 'tiktok' ? 'TikTok' : '抖音'}做全网搜索 + 下载素材,不会用它发帖、不改动你的内容。运行时自动打开它的指纹浏览器去搜。`
-                    : 'ⓘ This account is only used to search & download footage on the platform — never to post or modify your content.'}
+                    ? `ⓘ 仅用该账号在${materialPlatform === 'tiktok' ? 'TikTok' : '抖音'}做全网搜索 + 下载素材`
+                    : `ⓘ Only used to search & download footage on ${materialPlatform === 'tiktok' ? 'TikTok' : 'Douyin'}`}
                 </div>
               </Field>
               <label className="flex items-center gap-2 text-sm dark:text-gray-200 cursor-pointer">
