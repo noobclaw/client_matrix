@@ -18,13 +18,14 @@ type WizardStep = 1 | 2 | 3;
 export interface WizardAccount { id: string; displayName: string; status: string; keywords?: string[]; group?: string }
 interface Props {
   platformLabel: string;
+  platform?: string;                       // 平台 id(用于「无账号」引导跳到对应 tab)
   accounts: WizardAccount[];               // 可选账号(已登录 + 配了关键词)
   initialTask?: any | null;                // 编辑时传入矩阵任务
   onCancel: () => void;
   onSave: (input: { name: string; accountIds: string[]; concurrency: number; frequency: string; quota: any }) => Promise<void> | void;
 }
 
-const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, accounts, initialTask, onCancel, onSave }) => {
+const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, platform, accounts, initialTask, onCancel, onSave }) => {
   const isZh = i18nService.currentLanguage === 'zh';
   const editing = !!initialTask;
   const [step, setStep] = useState<WizardStep>(1);
@@ -106,7 +107,16 @@ const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, accounts, initialTas
                 选账号<span className="text-xs text-gray-400 font-normal ml-1">· 已登录且配了关键词;已选 {selected.size}</span>
               </label>
               <div className="space-y-1.5 max-h-64 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 p-2">
-                {accounts.length === 0 && <div className="text-xs text-gray-400 p-2">该平台还没有账号。先去「我的矩阵账号」添加并扫码登录、配关键词。</div>}
+                {accounts.length === 0 && (
+                  <div className="p-3 text-center space-y-2.5">
+                    <div className="text-xs text-gray-400">该平台还没有账号。先去「我的矩阵账号」添加并扫码登录、配关键词。</div>
+                    <button
+                      type="button"
+                      onClick={() => { window.dispatchEvent(new CustomEvent('noobclaw:show-matrix-accounts', { detail: { platform } })); onCancel(); }}
+                      className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-white text-sm font-semibold bg-violet-500 hover:bg-violet-600 active:scale-95"
+                    >👥 去「我的矩阵账号」添加 →</button>
+                  </div>
+                )}
                 {accounts.map((a) => {
                   const hasKw = !!(a.keywords && a.keywords.length);
                   // 放宽:配了词且没被封即可勾(profile cookie 持久,登录态只是标记;真没登录时跑会自动跳过)

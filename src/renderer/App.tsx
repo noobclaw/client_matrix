@@ -586,11 +586,22 @@ const App: React.FC = () => {
   }, []);
 
   // 矩阵号:从深层组件(热搜成片向导「无可用账号」引导)跳到「我的矩阵账号」管理页。
+  // detail.platform 携带来源平台,落到 MatrixView 对应平台 tab。
+  const [matrixInitialPlatform, setMatrixInitialPlatform] = useState<string | undefined>(undefined);
   useEffect(() => {
-    const handler = () => setMainView('matrix');
+    const handler = (e: Event) => {
+      const p = (e as CustomEvent)?.detail?.platform;
+      if (typeof p === 'string' && p) setMatrixInitialPlatform(p);
+      setMainView('matrix');
+    };
     window.addEventListener('noobclaw:show-matrix-accounts', handler);
     return () => window.removeEventListener('noobclaw:show-matrix-accounts', handler);
   }, []);
+  // 离开「我的矩阵账号」就清掉引导平台,避免粘滞(否则下次从侧栏进会停在上次引导的平台而非默认抖音)。
+  useEffect(() => { if (mainView !== 'matrix' && matrixInitialPlatform) setMatrixInitialPlatform(undefined); }, [mainView, matrixInitialPlatform]);
+  // 矩阵号:记住账号页当前选中的平台 —— 「新建涨粉任务」互动向导默认落在这个平台,
+  // 而不是写死抖音(否则在 YouTube tab 点新建,弹出的却是「配置抖音互动涨粉」=串台)。
+  const [matrixPlatform, setMatrixPlatform] = useState<string>('douyin');
 
   // Listen for command-bar submissions from the floating NSPanel window
   // (src/renderer/components/commandBar/CommandBarView.tsx). When the
@@ -1108,6 +1119,8 @@ const App: React.FC = () => {
               // 「我的矩阵账号」= 账号管理(增删/登录/配赛道关键词人设),仍走 MatrixView。
               <MatrixView
                 screen={'accounts'}
+                initialPlatform={matrixInitialPlatform}
+                onPlatformChange={setMatrixPlatform}
                 onNavigate={(s: string) => setMainView(s === 'newTask' ? 'matrixTaskNew' : s === 'tasks' ? 'matrixTasks' : s === 'runs' ? 'matrixRuns' : 'matrix')}
                 isSidebarCollapsed={isSidebarCollapsed}
                 onToggleSidebar={handleToggleSidebar}
@@ -1119,7 +1132,7 @@ const App: React.FC = () => {
               <ScenarioView
                 matrixMode
                 mode={mainView === 'matrixRuns' ? 'runs' : mainView === 'matrixTaskNew' ? 'create' : 'manage'}
-                initialPlatform="douyin"
+                initialPlatform={matrixPlatform}
                 onSwitchToCreate={() => setMainView('matrixTaskNew')}
                 onSwitchToManage={() => setMainView('matrixTasks')}
                 onInDetailChange={setScenarioInDetail}

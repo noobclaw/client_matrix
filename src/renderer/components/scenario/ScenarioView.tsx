@@ -1067,6 +1067,24 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
           {/* 矩阵号:显示「视频创作」(热搜成片)+ 支持「互动涨粉」的平台(其余无 engage 剧本)。 */}
           {(matrixMode ? MATRIX_TAB_ORDER.map((id) => PLATFORM_TABS.find((t) => t.id === id)!).filter(Boolean) : PLATFORM_TABS).map((tab) => {
             const active = currentPlatform === tab.id;
+            // 矩阵号:对齐「我的矩阵账号」的简洁 pill 切换(纯文字 + violet 选中,rounded-full),
+            // 顺序同账号页(MATRIX_TAB_ORDER 已与 PLATFORMS 一致)。非矩阵(旧视频版)保持原绿卡样式。
+            if (matrixMode) {
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setPlatform(tab.id)}
+                  className={`px-3.5 py-1.5 rounded-full text-sm border transition-colors whitespace-nowrap ${
+                    active
+                      ? 'border-violet-500 bg-violet-500/10 text-violet-500 font-medium'
+                      : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-violet-500/50'
+                  }`}
+                >
+                  {i18nService.t(tab.labelKey)}
+                </button>
+              );
+            }
             return (
               <button
                 key={tab.id}
@@ -1146,6 +1164,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
                   : p === 'xhs' ? '小红书' : p === 'x' ? '推特' : p === 'binance' ? '币安广场'
                   : p === 'youtube' ? 'YouTube' : p === 'tiktok' ? 'TikTok' : String(p);
               })()}
+              platform={matrixWizardPlatform}
               accounts={matrixAccounts}
               onCancel={() => setMatrixWizardPlatform(null)}
               onSave={saveMatrixTask}
