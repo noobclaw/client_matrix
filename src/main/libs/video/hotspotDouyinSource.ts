@@ -42,6 +42,88 @@ export interface DouyinClipsResult {
   diag: DouyinClipsDiag;
 }
 
+/**
+ * 矩阵 edition 取材:智能选一个【已关联】抖音矩阵账号,用它的指纹内核搜+下素材。
+ * 不走插件/扫码登录;账号都不可用 → 清晰报错(上层据此提示去关联抖音号),绝不抛。
+ */
+async function fetchDouyinClipsViaKernel(
+  keywords: string[], wantCount: number, destDir: string,
+  onLog: (m: string) => void, signal: AbortSignal | undefined, mode: 'video' | 'image',
+): Promise<DouyinClipsResult> {
+  const diag: DouyinClipsDiag = { reached: false, loggedIn: false, gotUrls: 0, downloaded: 0 };
+  if (signal?.aborted) { diag.reason = 'aborted'; return { paths: [], titles: [], diag }; }
+  // 懒加载矩阵模块(避免顶层循环依赖)。
+  const { accountsByPlatform } = require('../matrix/accountManager');
+  const { launchKernel, checkKernelLogin, closeKernel, getSession } = require('../matrix/kernelPool');
+  const { runMatrixDouyinSearch } = require('../matrix/driverCtx');
+
+  const usable = (accountsByPlatform('douyin') as any[]).filter((a) => a.status !== 'login_required' && a.status !== 'banned' && a.status !== 'limited');
+  if (usable.length === 0) {
+    onLog('⚠️ 没有已关联的抖音矩阵账号,无法取材 —— 请到「我的矩阵账号」扫码关联一个抖音号');
+    diag.reason = 'no_matrix_douyin_account';
+    return { paths: [], titles: [], diag };
+  }
+  // 逐个候选号:起内核 + 验登录,找到第一个真登录的就用它取材。
+  let accountId = '';
+  let accWasRunning = false;
+  for (const cand of usable) {
+    if (signal?.aborted) { diag.reason = 'aborted'; return { paths: [], titles: [], diag }; }
+    const wasRunning = !!getSession(cand.id);
+    try {
+      await launchKernel({ accountId: cand.id, kernelVersion: cand.kernelVersion, userDataDir: cand.userDataDir, fingerprint: cand.fingerprint, proxy: cand.proxy, label: cand.displayName });
+    } catch { onLog(`   「${cand.displayName}」内核启动失败,换下一个…`); continue; }
+    const loggedIn = await checkKernelLogin(cand.id, 'douyin').catch(() => false);
+    if (loggedIn) { accountId = cand.id; accWasRunning = wasRunning; onLog(`🧬 用抖音账号「${cand.displayName}」的指纹浏览器取材`); break; }
+    onLog(`   「${cand.displayName}」登录态失效,换下一个…`);
+    if (!wasRunning) { try { closeKernel(cand.id); } catch { /* ignore */ } }
+  }
+  if (!accountId) {
+    onLog('⚠️ 已关联的抖音账号登录态都失效了,无法取材(请到「我的矩阵账号」重新扫码关联)');
+    diag.reason = 'not_logged_in';
+    return { paths: [], titles: [], diag };
+  }
+  diag.loggedIn = true;
+
+  try {
+    // 搜+取源(带重试,口径同插件版)。
+    const MAX_TRIES = 3, RETRY_WAIT_MS = 8000;
+    let urls: string[] = [], titles: string[] = [];
+    for (let attempt = 1; attempt <= MAX_TRIES; attempt++) {
+      if (signal?.aborted) { diag.reason = 'aborted'; break; }
+      onLog(mode === 'image' ? '🔎 按标题搜抖音图文、取图…' : '🔎 按标题搜抖音、取无水印源…');
+      const r = await runMatrixDouyinSearch(accountId, keywords, wantCount, mode, onLog);
+      diag.reached = true; diag.scriptDiag = r.diag;
+      if (Array.isArray(r.titles) && r.titles.length > titles.length) titles = r.titles;
+      if (Array.isArray(r.urls) && r.urls.length) { urls = r.urls; break; }
+      if (r.reason && r.reason.startsWith('no_matrix_driver')) { onLog('⚠️ ' + r.reason); diag.reason = r.reason; break; }
+      if (attempt < MAX_TRIES) { onLog(`   ⚠️ 第 ${attempt}/${MAX_TRIES} 次没搜到,等 ${Math.round(RETRY_WAIT_MS / 1000)}s 再试…`); await sleep(RETRY_WAIT_MS); }
+    }
+    diag.gotUrls = urls.length;
+    if (urls.length === 0) {
+      if (!diag.reason) diag.reason = 'no_urls';
+      onLog(mode === 'image' ? '⚠️ 抖音没取到可用图文图片' : '⚠️ 抖音没取到可用视频源');
+      return { paths: [], titles, diag };
+    }
+    onLog(`⬇️ 下载 ${urls.length} 个抖音${mode === 'image' ? '图片' : '视频'}…`);
+    try { fs.mkdirSync(destDir, { recursive: true }); } catch { /* 已存在 */ }
+    const ext = mode === 'image' ? 'jpg' : 'mp4';
+    const base = mode === 'image' ? 'img' : 'clip';
+    const paths: string[] = [];
+    for (let i = 0; i < urls.length; i++) {
+      if (signal?.aborted) break;
+      onLog(`⬇️ 下载 ${i + 1}/${urls.length}…`);
+      const dest = path.join(destDir, `${base}_${String(i).padStart(2, '0')}.${ext}`);
+      if (await downloadOne(urls[i], dest)) { paths.push(dest); diag.downloaded++; }
+      else onLog(`   ⏭️ 第 ${i + 1} 个下载失败,跳过`);
+    }
+    onLog(`✅ 抖音素材就绪:${paths.length}/${urls.length} 个${titles.length ? ` · ${titles.length} 个标题` : ''}`);
+    return { paths, titles, diag };
+  } finally {
+    // 不是本来就在跑的内核 → 取完关掉,释放资源(跟发布一致)。
+    if (!accWasRunning) { try { closeKernel(accountId); } catch { /* ignore */ } }
+  }
+}
+
 /** 主进程 fetch 下载单个无水印视频到本地(参考 phaseRunner.downloadVideoToDisk)。 */
 async function downloadOne(url: string, dest: string): Promise<boolean> {
   try {
@@ -132,6 +214,12 @@ async function fetchDouyinClipsImpl(
   const diag: DouyinClipsDiag = { reached: false, loggedIn: false, gotUrls: 0, downloaded: 0 };
   // 排队等待期间任务可能已被取消 → 直接降级返空,不再驱动浏览器。
   if (signal?.aborted) { diag.reason = 'aborted'; return { paths: [], titles: [], diag }; }
+
+  // 矩阵 edition:没有浏览器插件 —— 取材改走【智能选一个已关联的抖音矩阵账号 + 它的指纹内核 CDP】。
+  // 逻辑同插件版(选一个抖音号→搜→下),只是把「插件登录的抖音」换成「矩阵抖音账号内核」。
+  let MATRIX = false;
+  try { MATRIX = require('../../matrixEdition').MATRIX_EDITION === true; } catch { /* 非矩阵构建 */ }
+  if (MATRIX) return fetchDouyinClipsViaKernel(keywords, wantCount, destDir, onLog, signal, mode);
 
   // 1. 拉下发脚本(走发布 driver 同款 publish-drivers 热更新;key = 文件名 douyin_search)
   const pack = await fetchPublishDrivers();

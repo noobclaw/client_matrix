@@ -11,7 +11,7 @@
  * 不打包 client;③ 22 个剧本一行不改。
  */
 
-import { kernelEval, kernelExec, kernelKeypress, kernelClick, kernelWheel } from './kernelPool';
+import { kernelEval, kernelExec, kernelKeypress, kernelClick, kernelWheel, kernelNavigate } from './kernelPool';
 
 export async function matrixCmd(
   accountId: string,
@@ -51,6 +51,13 @@ export async function matrixCmd(
       const x = Number(params?.x) || 400, y = Number(params?.y) || 400;
       const dx = Number(params?.deltaX) || 0, dy = Number(params?.deltaY ?? params?.dy) || 0;
       try { await kernelWheel(accountId, x, y, dx, dy); return { ok: true }; }
+      catch (e: any) { return { ok: false, error: String(e?.message || e).slice(0, 80) }; }
+    }
+    // 整页导航(CDP Page.navigate):取材 driver 搜索/进详情页要用;执行器在页面里做不了真导航。
+    case 'navigate': {
+      const url = String(params?.url || '');
+      if (!url) return { ok: false, error: 'navigate_needs_url' };
+      try { await kernelNavigate(accountId, url); return { ok: true }; }
       catch (e: any) { return { ok: false, error: String(e?.message || e).slice(0, 80) }; }
     }
     // 当前页 URL(轻量,直接 eval,不依赖执行器在位)。
