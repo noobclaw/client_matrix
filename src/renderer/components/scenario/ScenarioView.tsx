@@ -42,10 +42,11 @@ import MatrixTaskWizard, { type WizardAccount } from '../matrix/MatrixTaskWizard
 
 type PlatformId = 'xhs' | 'x' | 'binance' | 'douyin' | 'shipinhao' | 'toutiao' | 'kuaishou' | 'bilibili' | 'tiktok' | 'youtube' | 'video';
 
-// 矩阵号支持「互动涨粉」的平台(后端 backend/matrix/scenarios 有 <platform>_auto_engage)。
-// 矩阵 tab 顺序:涨粉为主 → 抖音/小红书最前,视频创作放最后(与「我的矩阵账号」平台顺序一致)。
-// 这 8 个平台有 engage 剧本;其余(视频号/头条)无 engage,矩阵任务页不列。
-const MATRIX_TAB_ORDER: PlatformId[] = ['douyin', 'xhs', 'kuaishou', 'bilibili', 'x', 'binance', 'youtube', 'tiktok', 'video'];
+// 矩阵 tab 顺序:多平台视频创作放最前(用户要求),其后与「我的矩阵账号」平台顺序一致(含视频号/头条)。
+const MATRIX_TAB_ORDER: PlatformId[] = ['video', 'douyin', 'xhs', 'kuaishou', 'bilibili', 'shipinhao', 'toutiao', 'x', 'binance', 'youtube', 'tiktok'];
+// 后端 backend/matrix/scenarios 有 <platform>_auto_engage 互动涨粉剧本的平台(共 8 个)。
+// 视频号/头条暂无 engage 剧本 → tab 仍展示(与账号页一致),但「开始创作」标注「即将上线」不放行,避免跑出错任务。
+const MATRIX_ENGAGE_PLATFORMS = new Set<PlatformId>(['douyin', 'xhs', 'kuaishou', 'bilibili', 'x', 'binance', 'youtube', 'tiktok']);
 
 // Top-level navigation:
 //   create  — scenario cards (current XhsWorkflowsPage / XWorkflowsPage,
@@ -663,6 +664,8 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     // 矩阵号:每个平台只有「互动涨粉」一个卡片(账号制),点开 MatrixTaskWizard。
     if (matrixMode) {
       const platLabel = platformLabel;
+      // 视频号/头条暂无 engage 剧本 → tab 在(与账号页一致),但「开始创作」改为「即将上线」不放行。
+      const engageReady = MATRIX_ENGAGE_PLATFORMS.has(currentPlatform);
       return (
         <div className="p-6 max-w-3xl mx-auto">
           <div className="rounded-2xl border border-violet-500/30 bg-violet-500/5 dark:bg-violet-500/10 p-6">
@@ -674,20 +677,38 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
               勾选多个已登录账号,每个账号在各自指纹浏览器里按<strong>自己的赛道关键词</strong>搜索,自动点赞 / 关注 / 评论。
               赛道 / 关键词 / 人设在「我的矩阵账号」里给每个号设;选几个号就同时开几个窗。
             </div>
-            <button
-              type="button"
-              onClick={() => openMatrixWizard(currentPlatform)}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-violet-500 text-white text-sm font-bold hover:bg-violet-600 shadow-sm shadow-violet-500/25 transition-all active:scale-95"
-            >
-              🎯 开始创作 →
-            </button>
-            <button
-              type="button"
-              onClick={() => onSwitchToManage?.(currentPlatform as any)}
-              className="ml-3 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
-            >
-              已有任务 »
-            </button>
+            {engageReady ? (
+              <button
+                type="button"
+                onClick={() => openMatrixWizard(currentPlatform)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-violet-500 text-white text-sm font-bold hover:bg-violet-600 shadow-sm shadow-violet-500/25 transition-all active:scale-95"
+              >
+                🎯 开始创作 →
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled
+                title={`${platLabel} 互动涨粉即将上线`}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gray-300 dark:bg-gray-700 text-gray-500 dark:text-gray-400 text-sm font-bold cursor-not-allowed"
+              >
+                🚧 互动涨粉即将上线
+              </button>
+            )}
+            {engageReady && (
+              <button
+                type="button"
+                onClick={() => onSwitchToManage?.(currentPlatform as any)}
+                className="ml-3 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+              >
+                已有任务 »
+              </button>
+            )}
+            {!engageReady && (
+              <div className="text-xs text-gray-500 dark:text-gray-400 mt-3 leading-relaxed">
+                {platLabel} 账号可在「我的矩阵账号」里登录管理,并用于<strong>多平台视频创作</strong>发布;互动涨粉(点赞/关注/评论)剧本还在开发中。
+              </div>
+            )}
           </div>
         </div>
       );
