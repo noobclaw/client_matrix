@@ -412,6 +412,8 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
                             ? <div className="text-amber-500 truncate">请点击下方扫码关联进行关联</div>
                             : (<>
                                 {a.displayId && <div className="text-gray-600 dark:text-gray-300 truncate">{PLATFORM_LABEL[a.platform] || ''}号:{a.displayId}</div>}
+                                {/* 已关联但还没读到平台号/昵称(老建的号或读取失败)→ 明确提示去刷新,别让用户以为该功能没有 */}
+                                {!a.displayId && !a.nickname && <div className="text-amber-500/90 truncate">ℹ️ 账号信息未读取,点「刷新信息」获取{PLATFORM_LABEL[a.platform] || ''}号/昵称/头像</div>}
                                 <div className="text-gray-500 dark:text-gray-400 truncate">备注:{a.displayName}</div>
                               </>)}
                         </div>
