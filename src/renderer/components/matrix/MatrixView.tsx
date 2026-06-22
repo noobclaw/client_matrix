@@ -96,6 +96,8 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
   // 账号弹窗 + 通知
   const [showAdd, setShowAdd] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
+  // 添加新号的步骤:平台已有号时,新号走 2 步(1 配账号 → 2 配代理 IP);首个号 / 编辑保持单步。
+  const [addStep, setAddStep] = useState<1 | 2>(1);
   const [newName, setNewName] = useState('');
   const [newGroup, setNewGroup] = useState('');
   const [newPersona, setNewPersona] = useState('');
@@ -174,6 +176,8 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
     // 默认选中一个赛道并带出人设 + 关键词(可再改)。
     const def = TRACK_PRESETS.find((t) => t.name === DEFAULT_TRACK) || TRACK_PRESETS[0];
     setNewGroup(def.name); setNewPersona(def.persona); setNewKeywords(def.keywords.join(' '));
+    // 新号从第 1 步开始;代理表单清空(第 2 步填,不填则共用本机 IP)。
+    setAddStep(1); setProxyForm({ protocol: 'socks5', host: '', port: '', username: '', password: '', geo: '' });
     setNotice(''); setShowAdd(true);
   };
   // 选赛道 → 关键词 + 人设自动带出(可再改);选「自定义」(空)则保留当前内容让用户自己填。
@@ -191,6 +195,13 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
     if (editId) { await m.updateAccountMeta({ id: editId, displayName: newName.trim() || undefined, group, persona, keywords }); setShowAdd(false); await reload(); setNotice('已更新'); return; }
     const name = newName.trim(); if (!name) { setNotice('请填账号备注名'); return; }
     const r = await m.createAccount({ platform, displayName: name, group, persona, keywords });
+    // 第 2 步配了代理就一起绑到新号上(没配则该号共用本机 IP,有同 IP 风控风险——已在第 2 步提示)。
+    if (r?.ok && r.account) {
+      const host = proxyForm.host.trim(); const port = Number(proxyForm.port);
+      if (host && port > 0) {
+        try { await m.setAccountProxy({ id: r.account.id, proxy: { protocol: proxyForm.protocol, host, port, username: proxyForm.username.trim() || undefined, password: proxyForm.password.trim() || undefined, geo: proxyForm.geo.trim() || undefined } }); } catch { /* 代理存失败不挡建号 */ }
+      }
+    }
     setShowAdd(false);
     if (r?.ok) { await reload(); setNotice(`已建号:${name}`); if (thenLogin && r.account) promptScanLogin(r.account.id, platform, name); }
     else setNotice('创建失败:' + (r?.error || 'IPC 未响应'));
@@ -662,35 +673,80 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
       )}
 
       {/* 添加/编辑账号 */}
-      {showAdd && (
+      {showAdd && (() => {
+        // 平台已有号(无论是否关联)→ 新号走 2 步:第 1 步配账号、第 2 步配代理 IP。首个号 / 编辑保持单步。
+        const twoStep = !editId && platformAccounts.length >= 1;
+        const showAccount = !twoStep || addStep === 1;
+        const showProxy = twoStep && addStep === 2;
+        const validateStep1 = (): boolean => {
+          if (!newName.trim()) { setNotice('请填账号备注名'); return false; }
+          if (!newPersona.trim()) { setNotice('请填写人设(自动评论时按这个口吻写)'); return false; }
+          return true;
+        };
+        return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-[40rem] max-w-full max-h-[88vh] overflow-y-auto rounded-2xl p-6 dark:bg-claude-darkBg bg-white border dark:border-white/10 border-black/10 shadow-xl">
-            <div className="text-base font-semibold mb-4">{editId ? '编辑账号' : `连接 ${PLATFORM_LABEL[platform]} 账号`}</div>
-            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">账号备注名</label>
-            <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="如:账号1-美食号" className="w-full text-sm px-3 py-2.5 rounded-lg border dark:border-white/15 border-black/15 bg-transparent mb-3" />
-            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">赛道（必选）<span className="ml-2 font-normal text-gray-400">选完自动带出人设和关键词，可再改</span></label>
-            <div className="relative mb-3">
-              <select value={TRACK_PRESETS.some((t) => t.name === newGroup) ? newGroup : ''} onChange={(e) => pickTrack(e.target.value)} className="w-full appearance-none text-sm pl-3 pr-9 py-2.5 rounded-lg border dark:border-white/15 border-black/15 bg-transparent dark:bg-gray-800 cursor-pointer">
-                {TRACK_PRESETS.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}
-                <option value="">自定义 / 其他(自己填人设 + 关键词)</option>
-              </select>
-              {/* 下拉箭头(对齐旧 client 的赛道下拉:appearance-none 去原生箭头 + 自绘 chevron) */}
-              <svg className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
+            <div className="flex items-center gap-2 mb-4">
+              <div className="text-base font-semibold">{editId ? '编辑账号' : `连接 ${PLATFORM_LABEL[platform]} 账号`}</div>
+              {twoStep && <span className="text-xs px-2 py-0.5 rounded-full border border-violet-500/40 text-violet-500 bg-violet-500/5">第 {addStep} / 2 步 · {addStep === 1 ? '配账号' : '配代理 IP'}</span>}
             </div>
-            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">人设<span className="ml-2 font-normal text-gray-400">你是谁、对谁说话、什么口吻</span></label>
-            <textarea value={newPersona} onChange={(e) => setNewPersona(e.target.value)} placeholder="如:爱吃会做的美食博主,评论真诚接地气" rows={4} className="w-full text-sm px-3 py-2.5 rounded-lg border dark:border-white/15 border-black/15 bg-transparent mb-3" />
-            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">关键词<span className="ml-2 font-normal text-gray-400">空格分隔,互动时按这些搜</span></label>
-            <textarea value={newKeywords} onChange={(e) => setNewKeywords(e.target.value)} placeholder="如:美食探店 一人食 家常菜" rows={4} className="w-full text-sm px-3 py-2.5 rounded-lg border dark:border-white/15 border-black/15 bg-transparent mb-4" />
+
+            {showAccount && (<>
+              <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">账号备注名</label>
+              <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="如:账号1-美食号" className="w-full text-sm px-3 py-2.5 rounded-lg border dark:border-white/15 border-black/15 bg-transparent mb-3" />
+              <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">赛道（必选）<span className="ml-2 font-normal text-gray-400">选完自动带出人设和关键词，可再改</span></label>
+              <div className="relative mb-3">
+                <select value={TRACK_PRESETS.some((t) => t.name === newGroup) ? newGroup : ''} onChange={(e) => pickTrack(e.target.value)} className="w-full appearance-none text-sm pl-3 pr-9 py-2.5 rounded-lg border dark:border-white/15 border-black/15 bg-transparent dark:bg-gray-800 cursor-pointer">
+                  {TRACK_PRESETS.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}
+                  <option value="">自定义 / 其他(自己填人设 + 关键词)</option>
+                </select>
+                {/* 下拉箭头(对齐旧 client 的赛道下拉:appearance-none 去原生箭头 + 自绘 chevron) */}
+                <svg className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </div>
+              <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">人设<span className="ml-2 font-normal text-gray-400">你是谁、对谁说话、什么口吻</span></label>
+              <textarea value={newPersona} onChange={(e) => setNewPersona(e.target.value)} placeholder="如:爱吃会做的美食博主,评论真诚接地气" rows={4} className="w-full text-sm px-3 py-2.5 rounded-lg border dark:border-white/15 border-black/15 bg-transparent mb-3" />
+              <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">关键词<span className="ml-2 font-normal text-gray-400">空格分隔,互动时按这些搜</span></label>
+              <textarea value={newKeywords} onChange={(e) => setNewKeywords(e.target.value)} placeholder="如:美食探店 一人食 家常菜" rows={4} className="w-full text-sm px-3 py-2.5 rounded-lg border dark:border-white/15 border-black/15 bg-transparent mb-4" />
+            </>)}
+
+            {showProxy && (<>
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs text-amber-700 dark:text-amber-300 leading-relaxed mb-4">
+                ⚠️ 本平台已有账号。建议给这个新号配一个<strong>独立代理 IP</strong>:不配的话,它会和本平台其它号<strong>共用同一个本机 IP</strong>,多个号同 IP 容易被平台判定关联、有<strong>被风控/封号</strong>的风险。确实没有代理也可<strong>留空直接保存</strong>。
+              </div>
+              <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">代理 IP（可选）</label>
+              <div className="flex gap-2 mb-2">
+                <select value={proxyForm.protocol} onChange={(e) => setProxyForm((f) => ({ ...f, protocol: e.target.value }))} className="text-sm px-2 py-2 rounded border dark:border-white/15 border-black/15 bg-transparent dark:bg-gray-800">
+                  <option value="socks5">socks5</option>
+                  <option value="socks5h">socks5h</option>
+                  <option value="http">http</option>
+                  <option value="https">https</option>
+                </select>
+                <input value={proxyForm.host} onChange={(e) => setProxyForm((f) => ({ ...f, host: e.target.value }))} placeholder="host(如 1.2.3.4)" className="flex-1 text-sm px-3 py-2 rounded border dark:border-white/15 border-black/15 bg-transparent" />
+                <input value={proxyForm.port} onChange={(e) => setProxyForm((f) => ({ ...f, port: e.target.value.replace(/[^0-9]/g, '') }))} placeholder="port" className="w-20 text-sm px-2 py-2 rounded border dark:border-white/15 border-black/15 bg-transparent" />
+              </div>
+              <div className="flex gap-2 mb-2">
+                <input value={proxyForm.username} onChange={(e) => setProxyForm((f) => ({ ...f, username: e.target.value }))} placeholder="用户名(可选)" className="flex-1 text-sm px-3 py-2 rounded border dark:border-white/15 border-black/15 bg-transparent" />
+                <input value={proxyForm.password} onChange={(e) => setProxyForm((f) => ({ ...f, password: e.target.value }))} placeholder="密码(可选)" className="flex-1 text-sm px-3 py-2 rounded border dark:border-white/15 border-black/15 bg-transparent" />
+              </div>
+              <input value={proxyForm.geo} onChange={(e) => setProxyForm((f) => ({ ...f, geo: e.target.value }))} placeholder="归属地标注(可选,仅显示用)" className="w-full text-sm px-3 py-2 rounded border dark:border-white/15 border-black/15 bg-transparent mb-4" />
+            </>)}
+
             <div className="flex justify-end gap-2">
-              <button onClick={() => setShowAdd(false)} className="px-3 py-1.5 text-sm rounded-lg border dark:border-white/15 border-black/15">取消</button>
-              {editId ? <button onClick={() => confirmAdd(false)} className="px-3 py-1.5 text-sm rounded-lg bg-claude-accent text-white">保存</button>
-                : (<><button onClick={() => confirmAdd(false)} className="px-3 py-1.5 text-sm rounded-lg border dark:border-white/15 border-black/15">仅保存</button><button onClick={() => confirmAdd(true)} className="px-3 py-1.5 text-sm rounded-lg bg-claude-accent text-white">保存并连接</button></>)}
+              {twoStep && addStep === 2
+                ? <button onClick={() => setAddStep(1)} className="px-3 py-1.5 text-sm rounded-lg border dark:border-white/15 border-black/15">← 上一步</button>
+                : <button onClick={() => setShowAdd(false)} className="px-3 py-1.5 text-sm rounded-lg border dark:border-white/15 border-black/15">取消</button>}
+              {editId
+                ? <button onClick={() => confirmAdd(false)} className="px-3 py-1.5 text-sm rounded-lg bg-claude-accent text-white">保存</button>
+                : (twoStep && addStep === 1)
+                  ? <button onClick={() => { if (validateStep1()) { setNotice(''); setAddStep(2); } }} className="px-3 py-1.5 text-sm rounded-lg bg-claude-accent text-white">下一步 →</button>
+                  : (<><button onClick={() => confirmAdd(false)} className="px-3 py-1.5 text-sm rounded-lg border dark:border-white/15 border-black/15">{showProxy ? '不配代理,仅保存' : '仅保存'}</button><button onClick={() => confirmAdd(true)} className="px-3 py-1.5 text-sm rounded-lg bg-claude-accent text-white">保存并连接</button></>)}
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* 编辑任务弹窗(详情页用)—— 同一个向导 */}
       {showTaskEditModal && (
