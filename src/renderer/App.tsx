@@ -601,7 +601,8 @@ const App: React.FC = () => {
   useEffect(() => { if (mainView !== 'matrix' && matrixInitialPlatform) setMatrixInitialPlatform(undefined); }, [mainView, matrixInitialPlatform]);
   // 矩阵号:记住账号页当前选中的平台 —— 「新建涨粉任务」互动向导默认落在这个平台,
   // 而不是写死抖音(否则在 YouTube tab 点新建,弹出的却是「配置抖音互动涨粉」=串台)。
-  const [matrixPlatform, setMatrixPlatform] = useState<string>('douyin');
+  // 初值用 'video'(多平台视频创作):新建/我的/运行记录三页默认就停在这个 tab。
+  const [matrixPlatform, setMatrixPlatform] = useState<string>('video');
 
   // Listen for command-bar submissions from the floating NSPanel window
   // (src/renderer/components/commandBar/CommandBarView.tsx). When the

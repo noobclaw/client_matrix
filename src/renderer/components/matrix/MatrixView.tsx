@@ -193,7 +193,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
     const platName = PLATFORM_LABEL[plat] || '该平台';
     setConfirmDlg({
       title: `扫码登录${platName}`,
-      body: `即将打开指纹浏览器访问${platName},需要您在弹出的浏览器里扫码登录「${displayName}」。扫码成功后状态会自动变「已关联」。`,
+      body: `即将打开指纹浏览器访问${platName},需要您在弹出的浏览器里扫码登录${platName}账号。扫码成功后状态会自动变「已关联」。`,
       okText: '好的,我已知晓',
       onYes: async () => {
         setConfirmDlg(null);
