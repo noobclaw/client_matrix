@@ -1132,7 +1132,7 @@ const App: React.FC = () => {
               <ScenarioView
                 matrixMode
                 mode={mainView === 'matrixRuns' ? 'runs' : mainView === 'matrixTaskNew' ? 'create' : 'manage'}
-                initialPlatform={matrixPlatform}
+                initialPlatform={matrixPlatform as any}
                 onSwitchToCreate={() => setMainView('matrixTaskNew')}
                 onSwitchToManage={() => setMainView('matrixTasks')}
                 onInDetailChange={setScenarioInDetail}

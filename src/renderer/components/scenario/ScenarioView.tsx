@@ -204,7 +204,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     try {
       const r = await (window as any).electron?.matrix?.listAccounts?.();
       const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
-      setMatrixAccounts(accs.filter((a) => a.platform === platform).map((a) => ({ id: a.id, displayName: a.displayName, status: a.status, keywords: a.keywords, group: a.group })));
+      setMatrixAccounts(accs.filter((a) => a.platform === platform).map((a) => ({ id: a.id, displayName: a.displayName, status: a.status, keywords: a.keywords, group: a.group, platform: a.platform, nickname: a.nickname, displayId: a.displayId })));
     } catch { setMatrixAccounts([]); }
     setMatrixWizardPlatform(platform);
   };

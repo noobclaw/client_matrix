@@ -15,7 +15,10 @@ const COMMENT_HARDCAP = 100;
 
 type WizardStep = 1 | 2 | 3;
 
-export interface WizardAccount { id: string; displayName: string; status: string; keywords?: string[]; group?: string }
+export interface WizardAccount { id: string; displayName: string; status: string; keywords?: string[]; group?: string; platform?: string; nickname?: string; displayId?: string }
+
+// 平台 id → 中文名(账号行里标出来,避免「分不清这是抖音还是 YouTube 的号」)。
+const PLATFORM_NAME: Record<string, string> = { douyin: '抖音', xhs: '小红书', bilibili: 'B站', kuaishou: '快手', tiktok: 'TikTok', x: 'X', binance: '币安广场', youtube: 'YouTube', shipinhao: '视频号', toutiao: '头条' };
 interface Props {
   platformLabel: string;
   platform?: string;                       // 平台 id(用于「无账号」引导跳到对应 tab)
@@ -104,7 +107,7 @@ const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, platform, accounts, 
           <>
             <div>
               <label className="text-sm font-medium dark:text-gray-200 mb-1.5 block">
-                选账号<span className="text-xs text-gray-400 font-normal ml-1">· 已登录且配了关键词;已选 {selected.size}</span>
+                选 {platformLabel} 账号<span className="text-xs text-gray-400 font-normal ml-1">· 已登录且配了关键词;已选 {selected.size}</span>
               </label>
               <div className="space-y-1.5 max-h-64 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 p-2">
                 {accounts.length === 0 && (
@@ -125,7 +128,13 @@ const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, platform, accounts, 
                   return (
                     <label key={a.id} className={`flex items-center gap-2 text-sm px-1.5 py-1 rounded ${ready ? 'dark:text-gray-200 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800' : 'opacity-50 cursor-not-allowed'}`}>
                       <input type="checkbox" checked={selected.has(a.id)} onChange={() => ready && toggle(a.id)} disabled={saving || !ready} className="h-4 w-4 accent-violet-500 shrink-0" />
+                      {a.platform && <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-500 whitespace-nowrap shrink-0">{PLATFORM_NAME[a.platform] || a.platform}</span>}
                       <span className="font-medium whitespace-nowrap shrink-0">{a.displayName}</span>
+                      {(a.nickname || a.displayId) && (
+                        <span className="text-xs text-gray-500 dark:text-gray-300 whitespace-nowrap shrink-0">
+                          {a.nickname || ''}{a.displayId ? ` (${a.displayId})` : ''}
+                        </span>
+                      )}
                       {a.group && <span className="text-xs text-gray-400 whitespace-nowrap shrink-0">· {a.group}</span>}
                       {hasKw ? <span className="text-xs text-gray-400 truncate min-w-0 flex-1">[{(a.keywords || []).join('/')}]</span> : <span className="flex-1" />}
                       {reason && <span className="text-[11px] text-amber-500 shrink-0">{reason}</span>}
