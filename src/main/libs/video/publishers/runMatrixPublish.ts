@@ -22,7 +22,7 @@
 import type { VideoPlatform, PublishInput } from './types';
 import { VIDEO_PLATFORMS } from './types';
 import type { RunPublishResult } from './runPublish';
-import { getAccount, platformKey, accountBadgeLabel } from '../../matrix/accountManager';
+import { getAccount, platformKey, accountBadgeLabel, setAccountStatus } from '../../matrix/accountManager';
 import { launchKernel, kernelNavigate, checkKernelLogin, closeKernel } from '../../matrix/kernelPool';
 import { runMatrixDriver } from '../../matrix/driverCtx';
 import { PUBLISHER_ANCHOR_URL } from './publisherUtils';
@@ -128,7 +128,10 @@ export async function runMatrixPublishStep(opts: RunMatrixPublishOptions): Promi
       const loggedIn = await checkKernelLogin(accountId, acc ? platformKey(acc) : id).catch(() => false);
       if (!loggedIn) {
         // 矩阵号登录态在「我的矩阵账号」里扫码维护;这里不在出片流程里硬等登录(会卡死定时任务)。
-        opts.onLog?.(`⚠️ ${label} 账号「${acc.displayName}」未登录 · 跳过本条(请到「我的矩阵账号」重新登录)`);
+        // ⚠️ 翻状态:对齐 engageRunner/taskRunner —— 检到登录失效就把账号标 login_required,
+        //   列表立刻显示「需重新扫码」而不是继续假装「已登录」(否则定时发布每次静默跳过、用户无感)。
+        setAccountStatus(accountId, 'login_required');
+        opts.onLog?.(`⚠️ ${label} 账号「${acc.displayName}」登录已失效 · 已标记需重新扫码 · 跳过本条(请到「我的矩阵账号」重新登录)`);
         result.skippedCount++;
         result.details.push({ platform: id, status: 'skipped', reason: 'not_logged_in' });
         continue;
