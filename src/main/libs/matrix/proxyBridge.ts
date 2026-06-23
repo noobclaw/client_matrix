@@ -36,6 +36,43 @@ export async function ensureProxyBridge(proxy?: Proxy): Promise<number | null> {
   }
 }
 
+/**
+ * 探测代理是否【能通】:经该代理连一个全球(含中国大陆)可达的中立目标(apple.com:443)。
+ * 成功=能通(角标变绿),失败/超时=不通(角标变黄)。socks5 走 socks 库;http/https 走 CONNECT 隧道。
+ */
+export async function probeProxy(proxy: Proxy, timeoutMs = 6000): Promise<boolean> {
+  const target = { host: 'www.apple.com', port: 443 }; // 国内外都可达的中立目标(避免 google 在墙内误判不通)
+  try {
+    if (proxy.protocol === 'socks5' || proxy.protocol === 'socks5h') {
+      const info = await SocksClient.createConnection({
+        proxy: { host: proxy.host, port: proxy.port, type: 5, userId: proxy.username, password: proxy.password },
+        command: 'connect', destination: target, timeout: timeoutMs,
+      });
+      try { (info.socket as net.Socket).destroy(); } catch { /* ignore */ }
+      return true;
+    }
+    return await probeHttpConnect(proxy, target.host, target.port, timeoutMs);
+  } catch { return false; }
+}
+
+// HTTP/HTTPS 代理:发 CONNECT 隧道请求,回 200 即能通。
+function probeHttpConnect(proxy: Proxy, host: string, port: number, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (ok: boolean): void => { if (done) return; done = true; try { sock.destroy(); } catch { /* ignore */ } resolve(ok); };
+    const sock = net.connect(proxy.port, proxy.host);
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    sock.on('connect', () => {
+      const auth = proxy.username
+        ? `Proxy-Authorization: Basic ${Buffer.from(`${proxy.username}:${proxy.password}`).toString('base64')}\r\n`
+        : '';
+      sock.write(`CONNECT ${host}:${port} HTTP/1.1\r\nHost: ${host}:${port}\r\n${auth}\r\n`);
+    });
+    sock.once('data', (d: Buffer) => { clearTimeout(timer); finish(/^HTTP\/1\.[01] 200/.test(d.toString('latin1', 0, 16))); });
+    sock.on('error', () => { clearTimeout(timer); finish(false); });
+  });
+}
+
 function startBridge(proxy: Proxy): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = net.createServer((client) => { handleClient(client, proxy); });

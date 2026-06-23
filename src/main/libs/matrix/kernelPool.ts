@@ -26,7 +26,8 @@ import fs from 'fs';
 import path from 'path';
 import { coworkLog } from '../coworkLogger';
 import { installedKernelPath, ensureTabGroupExtension } from './kernelInstaller';
-import { ensureProxyBridge } from './proxyBridge';
+import { ensureProxyBridge, probeProxy } from './proxyBridge';
+import { getAccount, proxyBadgeInfo } from './accountManager';
 import type { Fingerprint, Proxy } from './types';
 
 export interface KernelSession {
@@ -96,9 +97,20 @@ let nextSlot = 0;                // 第几个窗口(错开层叠位置用)
  * 防风控:① 账号名文字放进 closed shadowRoot —— 页面 JS 读不到内容;② 宿主元素不带
  * id/class、状态只存闭包(不挂 window)—— 抖音侧基本无法枚举/识别这个角标。
  */
-function badgeScript(label: string): string {
+// 绿色身份角标 + 第二行【代理IP】角标。proxyMode:'ok'=能通/本机(绿)、'down'=代理不通(黄)、'dup'=撞IP(红+风控提示)。
+function badgeScript(label: string, proxyText: string, proxyMode: 'ok' | 'down' | 'dup'): string {
   const L = JSON.stringify(label);
-  return `(function(){var node=null;function m(){try{var root=document.body||document.documentElement;if(!root)return;if(node&&node.isConnected)return;var host=document.createElement('div');host.style.cssText='position:fixed;top:0;left:0;z-index:2147483647;pointer-events:none';var sr=host.attachShadow?host.attachShadow({mode:'closed'}):null;var b=document.createElement('div');b.textContent=${L};b.style.cssText='background:#16a34a;color:#fff;font:bold 13px/1.5 system-ui,sans-serif;padding:3px 12px;border-bottom-right-radius:8px';(sr||host).appendChild(b);root.appendChild(host);node=host;}catch(e){}}m();setInterval(m,2000);})();`;
+  let line2 = '代理IP: ' + proxyText;
+  if (proxyMode === 'dup') line2 += '  ⚠️ 多个账号都在用该IP,存在风控风险,请尽早更换代理IP';
+  else if (proxyMode === 'down') line2 += '  ⚠️ 代理不通,请检查';
+  const P = JSON.stringify(line2);
+  const bg2 = proxyMode === 'dup' ? '#dc2626' : proxyMode === 'down' ? '#d97706' : '#16a34a';
+  return `(function(){var node=null;function m(){try{var root=document.body||document.documentElement;if(!root)return;if(node&&node.isConnected)return;`
+    + `var host=document.createElement('div');host.style.cssText='position:fixed;top:0;left:0;z-index:2147483647;pointer-events:none;display:flex;flex-direction:column;align-items:flex-start';`
+    + `var sr=host.attachShadow?host.attachShadow({mode:'closed'}):null;var box=sr||host;`
+    + `var b=document.createElement('div');b.textContent=${L};b.style.cssText='background:#16a34a;color:#fff;font:bold 13px/1.5 system-ui,sans-serif;padding:3px 12px;border-bottom-right-radius:8px';box.appendChild(b);`
+    + `var p=document.createElement('div');p.textContent=${P};p.style.cssText='background:${bg2};color:#fff;font:bold 12px/1.4 system-ui,sans-serif;padding:3px 12px;border-bottom-right-radius:8px;margin-top:1px';box.appendChild(p);`
+    + `root.appendChild(host);node=host;}catch(e){}}m();setInterval(m,2000);})();`;
 }
 
 // 黄色「登录已过期」角标(左上角,closed shadow,自愈)—— 跟 badgeScript 同款隐身,黄底 + 过期文案。
@@ -376,8 +388,16 @@ async function doGetPage(s: KernelSession): Promise<KernelSession> {
   // addScriptToEvaluateOnNewDocument 让它跨整页导航也在;立即再注入一次给当前页。
   if (s.label) {
     try {
-      await send(s, 'Page.addScriptToEvaluateOnNewDocument', { source: badgeScript(s.label) });
-      await send(s, 'Runtime.evaluate', { expression: badgeScript(s.label) });
+      // 代理 IP 角标:撞 IP→红(风控提示)、有代理且探测能通→绿/不通→黄、本机默认→绿。探测仅在有代理且未撞 IP 时跑(≤6s)。
+      const info = proxyBadgeInfo(s.accountId);
+      let pmode: 'ok' | 'down' | 'dup' = 'ok';
+      if (info.duplicate) pmode = 'dup';
+      else if (info.hasProxy) {
+        try { const acc = getAccount(s.accountId); pmode = (acc?.proxy && await probeProxy(acc.proxy)) ? 'ok' : 'down'; } catch { pmode = 'ok'; }
+      }
+      const script = badgeScript(s.label, info.text, pmode);
+      await send(s, 'Page.addScriptToEvaluateOnNewDocument', { source: script });
+      await send(s, 'Runtime.evaluate', { expression: script });
     } catch { /* 角标非关键 */ }
   }
   // 错开窗口位置:多个号别完全重叠,便于分辨。

@@ -151,6 +151,20 @@ export function markAccountAlive(id: string): void {
   persist();
 }
 
+/**
+ * 角标用:该号代理 IP 展示文案 + 是否与别的号【撞 IP】(含多个号共用本机默认)+ 有无代理。
+ * 撞 IP 判定按代理 host 归桶(无代理归 '__local__');同桶 >1 个号 = 撞 IP(风控风险)。
+ */
+export function proxyBadgeInfo(id: string): { text: string; duplicate: boolean; hasProxy: boolean } {
+  const accts = loadAccounts();
+  const a = accts.find((x) => x.id === id);
+  if (!a) return { text: '本机默认', duplicate: false, hasProxy: false };
+  const bucketOf = (x: MatrixAccount): string => (x.proxy ? x.proxy.host : '__local__');
+  const bucket = bucketOf(a);
+  const count = accts.filter((x) => bucketOf(x) === bucket).length;
+  return { text: a.proxy ? a.proxy.host : '本机默认', duplicate: count > 1, hasProxy: !!a.proxy };
+}
+
 export function setAccountProxy(id: string, proxy: Proxy): void {
   const a = getAccount(id);
   if (!a) return;
