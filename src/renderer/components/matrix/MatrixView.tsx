@@ -473,8 +473,8 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
                       <button onClick={() => openEdit(a)} className={`text-xs px-2.5 py-1 rounded-lg text-white ${a.status === 'login_required' ? 'bg-violet-500 hover:bg-violet-600' : 'bg-emerald-600 hover:bg-emerald-700'}`}>编辑</button>
                       {a.status === 'login_required'
                         ? (<>
-                            {/* 已在浏览器里登录了但卡片还显示「尚未连接」→ 点这个重新检测(扫码轮询超时/手动登录后用) */}
-                            <button onClick={() => refreshIdentity(a)} className="text-xs px-2.5 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">刷新信息</button>
+                            {/* 尚未连接:只给「扫码连接」。它本身会开窗轮询登录态——若已在浏览器手动登录/扫码轮询超时,
+                                点它会立刻检测到并翻成已连接(不必真重扫),所以无需单独的「刷新信息」(那是给已连接的号刷身份用的)。 */}
                             <button onClick={() => promptScanLogin(a.id, a.platform, a.displayName, a.loginScope)} className="text-xs px-2.5 py-1 rounded-lg bg-violet-500 text-white hover:bg-violet-600">扫码连接</button>
                           </>)
                         : (<>
