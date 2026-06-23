@@ -967,10 +967,16 @@ async function runVideoPipeline(
         const masterMp3 = path.join(assetDir, 'narr_master.mp3');
         let whole: Awaited<ReturnType<typeof synthesizeWhole>> | null = null;
         let usedWholeVoice = voiceChain[0];
-        for (const v of voiceChain) {
+        for (let vi = 0; vi < voiceChain.length; vi++) {
+          const v = voiceChain[vi];
           throwIfAborted(signal);
+          // ⚠️ 这段原来全程无日志:synthesizeWhole 内部 60s×5 重试 × 多个备用音色 → 连不上微软 TTS 时
+          //   会静默 grind 十几分钟,UI 看着像「卡死无报错」。这里每个音色尝试前后都打日志 + 抛出 TTS 错因。
+          tracker.progress(`配音合成中(音色 ${v}${voiceChain.length > 1 ? ` · ${vi + 1}/${voiceChain.length}` : ''})… 连微软 TTS,网络慢会重试,请稍候`);
           const w = await synthesizeWhole(sentences.join('\n'), masterMp3, v, input.voiceRate);
           if (w.ok) { whole = w; usedWholeVoice = v; break; }
+          const reason = getLastTtsError();
+          tracker.progress(`音色 ${v} 整段合成未成功${reason ? `(${reason.slice(0, 110)})` : ''}${vi < voiceChain.length - 1 ? ',换下一个音色…' : ''}`);
         }
         if (whole) {
           const spans = alignSentencesToCues(sentences, whole.rawCues, whole.durationSec);
