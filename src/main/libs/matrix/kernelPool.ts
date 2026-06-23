@@ -52,7 +52,9 @@ export interface LaunchKernelOptions {
   fingerprint: Fingerprint;
   proxy?: Proxy;
   headless?: boolean;
-  label?: string;                 // 窗口左上角常驻角标文案(一般是账号备注名 + 分组)
+  label?: string;                 // 窗口左上角常驻角标文案(一般是账号备注名 + 分组);设了才往页面注入绿色角标
+  groupTitle?: string;            // 标签分组(蓝色 pill)标题。属浏览器 chrome、不进页面 → 跑任务也该给友好名,
+                                  //   跟 label(页面角标/足迹)解耦:不传 label 不注入页面角标,但 groupTitle 仍可友好。
   startUrl?: string;              // 启动即打开的 URL(扫码登录用):内核直接开到平台登录页,
                                   //   避免「先开新标签页再 navigate」的 target 竞态(导航落到看不见的后台 tab)。
   skipLease?: boolean;            // 不占「按账号使用互斥锁」(openLogin:用户交互、只读 cookie 轮询,不驱动页面)
@@ -185,7 +187,7 @@ function buildKernelArgs(opts: LaunchKernelOptions, debugPort: number): string[]
   // --disable-features 那条是为新版 chromium 把 --load-extension 重新放开(新版把它关进了默认禁用的
   // feature 开关);旧版/fingerprint-chromium 无此 feature 会忽略,无害。能不能真加载,mac 真机见分晓。
   try {
-    const extDir = ensureTabGroupExtension(opts.accountId, opts.label || opts.accountId);
+    const extDir = ensureTabGroupExtension(opts.accountId, opts.groupTitle || opts.label || opts.accountId);
     if (extDir) {
       args.push(`--load-extension=${extDir}`);
       args.push('--disable-features=DisableLoadExtensionCommandLineSwitch');

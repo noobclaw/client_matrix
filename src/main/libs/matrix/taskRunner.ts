@@ -15,7 +15,7 @@ import { launchKernel, kernelNavigate, kernelEval, closeKernel, NO_KERNEL_ERROR 
 import { installedKernelPath } from './kernelInstaller';
 import { runMatrixDriver } from './driverCtx';
 import {
-  getAccount, setAccountStatus, markPosted,
+  getAccount, setAccountStatus, markPosted, accountBadgeLabel,
 } from './accountManager';
 
 const DEFAULT_BASE_URL = 'https://api.noobclaw.com';
@@ -98,7 +98,9 @@ async function runOne(
       fingerprint: acc.fingerprint,
       proxy: acc.proxy,
       headless: opts.headless,
-      // 跑任务时不注入角标:降低页面足迹(风控最敏感时段),账号在进度面板里看即可。
+      // 跑任务时不注入页面角标(label):降低页面足迹(风控最敏感时段),账号在进度面板里看即可。
+      // 但标签分组标题(groupTitle,属浏览器 chrome、不进页面)仍给友好名,免得 tab 显示 raw accountId。
+      groupTitle: accountBadgeLabel(acc),
     });
 
     // 发前登录检查(用 PUBLISHER_ANCHOR_URL,driver 内部也会再导航一次)。

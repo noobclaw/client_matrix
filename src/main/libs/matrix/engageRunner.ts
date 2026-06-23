@@ -25,7 +25,7 @@ const PLATFORM_HOME: Record<string, string> = {
   shipinhao: 'https://channels.weixin.qq.com/', toutiao: 'https://mp.toutiao.com/',
 };
 import { matrixCmd } from './cdpCommands';
-import { getAccount, setAccountStatus, setAccountKeywords } from './accountManager';
+import { getAccount, setAccountStatus, setAccountKeywords, accountBadgeLabel } from './accountManager';
 import { getNoobClawAuthToken } from '../claudeSettings';
 
 const DEFAULT_BASE_URL = 'https://api.noobclaw.com';
@@ -172,7 +172,9 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string): Pr
     await launchKernel({
       accountId, kernelPath: opts.kernelPath, kernelVersion: acc.kernelVersion,
       userDataDir: acc.userDataDir, fingerprint: acc.fingerprint, proxy: acc.proxy,
-      // 跑任务时不注入角标:降低页面足迹(风控最敏感时段),账号在进度面板里看即可。
+      // 跑任务时不注入页面角标(label):降低页面足迹(风控最敏感时段),账号在进度面板里看即可。
+      // 但标签分组标题(groupTitle,属浏览器 chrome、不进页面)仍给友好名,免得 tab 显示 raw accountId。
+      groupTitle: accountBadgeLabel(acc),
     });
     await kernelNavigate(accountId, PLATFORM_HOME[opts.platform] || 'https://www.douyin.com/');
     await sleep(2000);
