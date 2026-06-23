@@ -421,16 +421,19 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {platformAccounts.map((a, idx) => {
                   // 状态小标签(挪到名字后边,表示状态;不放右侧按钮区)。
-                  const stChip = a.status === 'idle' ? 'text-green-600 dark:text-green-400 bg-green-500/15'
-                    : a.status === 'login_required' ? 'text-amber-600 dark:text-amber-400 bg-amber-500/15'
-                    : a.status === 'running' ? 'text-blue-600 dark:text-blue-400 bg-blue-500/15'
-                    : a.status === 'banned' ? 'text-red-600 dark:text-red-400 bg-red-500/15'
-                    : 'text-gray-500 bg-gray-500/15';
+                  // 状态左上角实心角标配色(更显眼):已连接绿、尚未连接黄、运行蓝、封红、其它灰,全白字。
+                  const stSolid = a.status === 'idle' ? 'bg-green-500'
+                    : a.status === 'login_required' ? 'bg-amber-500'
+                    : a.status === 'running' ? 'bg-blue-500'
+                    : a.status === 'banned' ? 'bg-red-500'
+                    : 'bg-gray-400';
                   return (
                   <div key={a.id} className={`relative rounded-xl border p-4 flex flex-col gap-2 transition-colors bg-white dark:bg-gray-900 ${(a.status === 'running' || a.status === 'idle') ? 'border-green-500' : 'border-gray-200 dark:border-gray-700'}`}>
+                    {/* 左上角状态实心角标(更显眼:已连接绿底白字 / 尚未连接黄底白字) */}
+                    <span className={`absolute top-0 left-0 px-2.5 py-0.5 text-[11px] font-semibold text-white rounded-tl-xl rounded-br-lg ${stSolid}`}>{STATUS_LABEL[a.status]}</span>
                     {/* 右上角移除 ✕ */}
                     <button onClick={() => deleteAccount(a)} title="移除该账号(彻底删除配置与 profile)" className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded-full text-gray-400 hover:text-white hover:bg-red-500/90 transition-colors text-sm leading-none">✕</button>
-                    <div className="flex items-center gap-2.5 min-w-0 pr-6">
+                    <div className="flex items-center gap-2.5 min-w-0 pr-6 mt-3">
                       {/* 头像 + 状态点角标 */}
                       <div className="relative shrink-0">
                         {/* 首字母兜底永远在底层;头像加载成功盖在上面,失败(onError 隐藏)则露出首字母 —— 不会变空白。
@@ -443,8 +446,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="text-sm font-semibold dark:text-white truncate">{a.nickname || a.displayName}</span>
-                          <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${stChip}`}>{STATUS_LABEL[a.status]}</span>
-                          <span className={`shrink-0 max-w-[9rem] truncate text-[10px] px-1.5 py-0.5 rounded-full ${a.proxy ? 'text-blue-600 dark:text-blue-400 bg-blue-500/15' : (idx === 0 ? 'text-gray-500 bg-gray-500/15' : 'text-amber-600 dark:text-amber-400 bg-amber-500/15')}`}>代理IP:{a.proxy ? (a.proxy.geo || a.proxy.host) : (idx === 0 ? '本地IP(默认)' : '尚未配置')}</span>
+                          <span className={`shrink-0 max-w-[9rem] truncate text-[10px] px-1.5 py-0.5 rounded-full ${a.proxy ? 'text-blue-600 dark:text-blue-400 bg-blue-500/15' : (idx === 0 ? 'text-green-600 dark:text-green-400 bg-green-500/15' : 'text-amber-600 dark:text-amber-400 bg-amber-500/15')}`}>代理IP:{a.proxy ? (a.proxy.geo || a.proxy.host) : (idx === 0 ? '本地IP(默认)' : '尚未配置')}</span>
                         </div>
                         <div className="text-[11px] space-y-0.5" title={a.boundUid ? `uid: ${a.boundUid}` : undefined}>
                           {a.status === 'login_required'
