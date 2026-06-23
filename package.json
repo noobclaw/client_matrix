@@ -86,6 +86,7 @@
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
+    "socks": "^2.8.9",
     "sql.js": "^1.13.0",
     "utf-8-validate": "^6.0.6",
     "uuid": "^11.1.0",

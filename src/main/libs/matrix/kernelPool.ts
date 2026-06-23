@@ -26,6 +26,7 @@ import fs from 'fs';
 import path from 'path';
 import { coworkLog } from '../coworkLogger';
 import { installedKernelPath, ensureTabGroupExtension } from './kernelInstaller';
+import { ensureProxyBridge } from './proxyBridge';
 import type { Fingerprint, Proxy } from './types';
 
 export interface KernelSession {
@@ -166,7 +167,7 @@ export async function reapOrphanKernels(userDataDirs: string[]): Promise<void> {
 
 // ── 启动参数:指纹 + 代理 + 防泄漏 ──
 
-function buildKernelArgs(opts: LaunchKernelOptions, debugPort: number): string[] {
+function buildKernelArgs(opts: LaunchKernelOptions, debugPort: number, bridgePort?: number | null): string[] {
   const { fingerprint: fp, proxy } = opts;
   const args = [
     `--remote-debugging-port=${debugPort}`,
@@ -186,11 +187,15 @@ function buildKernelArgs(opts: LaunchKernelOptions, debugPort: number): string[]
   if (fp.timezone) args.push(`--timezone=${fp.timezone}`);
 
   if (proxy) {
-    // socks5h 在 chromium 里用 socks5(socks5 默认远程 DNS,防 DNS 泄漏)。
-    // 带 auth 的代理【不内联账密】(Chromium 不支持)→ 经 CDP Fetch.authRequired
-    // 在 getPage 里提供凭据。
-    const scheme = proxy.protocol === 'socks5h' ? 'socks5' : proxy.protocol;
-    args.push(`--proxy-server=${scheme}://${proxy.host}:${proxy.port}`);
+    if (bridgePort) {
+      // 带账密 SOCKS5:Chromium 不支持 SOCKS5 账密 → 指向本地无认证中转(proxyBridge),由它替我们做上游账密握手。
+      args.push(`--proxy-server=socks5://127.0.0.1:${bridgePort}`);
+    } else {
+      // socks5h 在 chromium 里用 socks5(socks5 默认远程 DNS,防 DNS 泄漏)。
+      // 带 auth 的 HTTP/HTTPS 代理【不内联账密】(Chromium 不支持)→ 经 CDP Fetch.authRequired 在 getPage 里提供凭据。
+      const scheme = proxy.protocol === 'socks5h' ? 'socks5' : proxy.protocol;
+      args.push(`--proxy-server=${scheme}://${proxy.host}:${proxy.port}`);
+    }
     args.push('--disable-non-proxied-udp'); // 防 WebRTC 漏真实 IP
   }
 
@@ -266,7 +271,13 @@ async function doLaunch(opts: LaunchKernelOptions): Promise<KernelSession> {
     clearSingletonLocks(opts.userDataDir);
   }
   const debugPort = prev?.debugPort ?? nextDebugPort++;
-  const args = buildKernelArgs(opts, debugPort);
+  // 带账密 SOCKS5:先起本地无认证中转(Chromium 不支持 SOCKS5 账密),拿到本地端口让 args 指向它。
+  //   失败回退 null → 直连(仍连不上认证 SOCKS5,但不比现状差);HTTP/HTTPS 认证不走这里(还是 Fetch.authRequired)。
+  let bridgePort: number | null = null;
+  if (opts.proxy?.username && opts.proxy?.password && (opts.proxy.protocol === 'socks5' || opts.proxy.protocol === 'socks5h')) {
+    try { bridgePort = await ensureProxyBridge(opts.proxy); } catch { bridgePort = null; }
+  }
+  const args = buildKernelArgs(opts, debugPort, bridgePort);
 
   // 把内核 stdout/stderr 落到 profile 下的 kernel.log:崩了能看到真实原因(原来 stdio:'ignore' 完全瞎)。
   let outFd: number | 'ignore' = 'ignore';
@@ -302,7 +313,8 @@ async function doLaunch(opts: LaunchKernelOptions): Promise<KernelSession> {
     pageInit: null,
     msgId: 1,
     pending: new Map(),
-    proxyAuth: (opts.proxy?.username && opts.proxy?.password)
+    // 走了本地中转(bridgePort)就不再开 Fetch 认证(中转已替我们认证);仅 HTTP/HTTPS 认证代理才需 Fetch.authRequired。
+    proxyAuth: (!bridgePort && opts.proxy?.username && opts.proxy?.password)
       ? { username: opts.proxy.username, password: opts.proxy.password }
       : undefined,
     label: opts.label,
