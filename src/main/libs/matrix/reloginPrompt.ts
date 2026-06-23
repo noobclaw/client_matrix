@@ -30,7 +30,7 @@ const LOGIN_URL: Record<string, string> = {
   binance: 'https://www.binance.com/zh-CN/square', youtube: 'https://www.youtube.com/',
   shipinhao: 'https://channels.weixin.qq.com/', toutiao: 'https://mp.toutiao.com/',
 };
-function loginUrlFor(platform: string, loginScope?: string): string {
+export function loginUrlFor(platform: string, loginScope?: string): string {
   if (platform === 'kuaishou') return loginScope === 'creator' ? 'https://cp.kuaishou.com/profile' : 'https://www.kuaishou.com/';
   return LOGIN_URL[platform] || '';
 }

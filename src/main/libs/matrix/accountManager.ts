@@ -143,6 +143,14 @@ export function setAccountStatus(id: string, status: AccountStatus): void {
   persist();
 }
 
+/** 标记「刚确认该号登录态有效」(任务/发布/保活成功时调)。主动保活据 lastAliveAt 筛「超 N 天没活跃」的号。 */
+export function markAccountAlive(id: string): void {
+  const a = getAccount(id);
+  if (!a) return;
+  a.lastAliveAt = Date.now();
+  persist();
+}
+
 export function setAccountProxy(id: string, proxy: Proxy): void {
   const a = getAccount(id);
   if (!a) return;

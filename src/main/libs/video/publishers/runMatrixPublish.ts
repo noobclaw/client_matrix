@@ -22,7 +22,7 @@
 import type { VideoPlatform, PublishInput } from './types';
 import { VIDEO_PLATFORMS } from './types';
 import type { RunPublishResult } from './runPublish';
-import { getAccount, platformKey, accountBadgeLabel, setAccountStatus } from '../../matrix/accountManager';
+import { getAccount, platformKey, accountBadgeLabel, setAccountStatus, markAccountAlive } from '../../matrix/accountManager';
 import { launchKernel, kernelNavigate, checkKernelLogin, closeKernel } from '../../matrix/kernelPool';
 import { promptReloginForExpiredAccount } from '../../matrix/reloginPrompt';
 import { runMatrixDriver } from '../../matrix/driverCtx';
@@ -141,6 +141,7 @@ export async function runMatrixPublishStep(opts: RunMatrixPublishOptions): Promi
         continue;
       }
 
+      markAccountAlive(accountId); // 确认登录有效 → 更新活跃时间,常跑的号不进主动保活名单。
       // ④ 跑发布 driver(走该号的 CDP)。
       opts.onLog?.(`📤 ${label} · 账号「${acc.displayName}」开始上传…`);
       const input: PublishInput = {

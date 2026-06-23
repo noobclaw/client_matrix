@@ -49,6 +49,7 @@ export interface MatrixAccount {
   proxy?: Proxy;
   debugPort?: number;              // 运行时分配的 CDP 调试端口
   lastPostAt?: number;
+  lastAliveAt?: number;            // 最近一次确认登录态有效的时间(任务/发布/保活成功时更新);主动保活据此筛「超 N 天没活跃」的号
   // 互动配置:赛道关键词(自动点赞/评论/关注时按这些词搜内容)+ 赛道 id(engageHistory 去重维度)
   keywords?: string[];
   track?: string;

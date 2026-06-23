@@ -25,7 +25,7 @@ const PLATFORM_HOME: Record<string, string> = {
   shipinhao: 'https://channels.weixin.qq.com/', toutiao: 'https://mp.toutiao.com/',
 };
 import { matrixCmd } from './cdpCommands';
-import { getAccount, setAccountStatus, setAccountKeywords, accountBadgeLabel } from './accountManager';
+import { getAccount, setAccountStatus, setAccountKeywords, accountBadgeLabel, markAccountAlive } from './accountManager';
 import { getNoobClawAuthToken } from '../claudeSettings';
 
 const DEFAULT_BASE_URL = 'https://api.noobclaw.com';
@@ -187,6 +187,7 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string): Pr
       log('⚠️ 登录态失效/未关联,跳过(请到「我的矩阵账号」重新扫码关联)');
       return { accountId, state: 'skipped', reason: 'login_expired' };
     }
+    markAccountAlive(accountId); // 确认登录有效 → 更新活跃时间,常跑的号不进主动保活名单。
 
     // orchestrator 需要的 task(配额从 opts.quota,缺省回落 scenario manifest 默认)
     const task: any = {

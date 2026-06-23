@@ -15,7 +15,7 @@ import { launchKernel, kernelNavigate, kernelEval, closeKernel, NO_KERNEL_ERROR 
 import { installedKernelPath } from './kernelInstaller';
 import { runMatrixDriver } from './driverCtx';
 import {
-  getAccount, setAccountStatus, markPosted, accountBadgeLabel,
+  getAccount, setAccountStatus, markPosted, accountBadgeLabel, markAccountAlive,
 } from './accountManager';
 
 const DEFAULT_BASE_URL = 'https://api.noobclaw.com';
@@ -112,6 +112,7 @@ async function runOne(
         setAccountStatus(accountId, 'login_required');
         return { accountId, state: 'skipped', reason: 'login_required' };
       }
+      markAccountAlive(accountId); // 确认登录有效 → 更新活跃时间,常跑的号不进主动保活名单。
     }
 
     const input = await opts.getInput(accountId, index);

@@ -2782,6 +2782,13 @@ if (!IS_NATIVE_MESSAGING_HOST) {
       }
     } catch { /* ignore */ }
   })();
+  // 主动保活续期:启动扫一遍 + 每 24h 扫一遍,对「超 5 天没活跃」的 idle 号 headless 访问续 cookie。
+  void (async () => {
+    try {
+      const { startKeepAliveScheduler } = await import('./libs/matrix/keepAlive');
+      startKeepAliveScheduler();
+    } catch { /* ignore */ }
+  })();
 }
 
 export { broadcastSSE, PORT };
