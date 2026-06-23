@@ -153,26 +153,26 @@ export function markAccountAlive(id: string): void {
 
 /**
  * 角标用:该号代理 IP 展示文案 + 是否与别的号【撞 IP】+ 有无代理。
- * 撞 IP 判定规则(2026-06-23 用户明确):
+ * 撞 IP 判定规则(2026-06-23 用户明确,本机/代理统一):
  *   · 只在【同一平台】内算(按 platformKey:快手创作端 cp 与主站 www 分开算两个平台);
- *   · 本机 IP:同平台第一个用本机的号【免提示】,只有第 2 个起还用本机(没配代理)的才标红;
- *   · 代理 IP:同平台有 ≥2 个号用了【同一个代理 host】才标红(代理本该一号一个,撞了就是配置错)。
+ *   · 同平台 + 同 IP(本机默认 或 同一个代理 host)的号,按列表顺序【第一个免提示】,第 2 个起复用才标红;
+ *   · 本机和代理一视同仁:本机第一个 OK、第 2 个本机号标红;某代理 host 第一个 OK、第 2 个用同 host 的号标红。
  */
 export function proxyBadgeInfo(id: string): { text: string; duplicate: boolean; hasProxy: boolean } {
   const accts = loadAccounts();
   const a = accts.find((x) => x.id === id);
   if (!a) return { text: '本机默认', duplicate: false, hasProxy: false };
   const pk = platformKey(a);
-  if (a.proxy) {
-    // 同平台用同一个代理 host 的号数 >1 → 撞 IP(代理应一号一个)。
-    const host = a.proxy.host;
-    const cnt = accts.filter((x) => x.proxy && x.proxy.host === host && platformKey(x) === pk).length;
-    return { text: host, duplicate: cnt > 1, hasProxy: true };
-  }
-  // 本机默认:同平台所有「没配代理」的号,按列表顺序第一个免提示,第 2 个起才标红。
-  const localsOnPlatform = accts.filter((x) => !x.proxy && platformKey(x) === pk);
-  const isFirst = localsOnPlatform.length > 0 && localsOnPlatform[0].id === a.id;
-  return { text: '本机默认', duplicate: localsOnPlatform.length > 1 && !isFirst, hasProxy: false };
+  const ipIdOf = (x: MatrixAccount): string => (x.proxy ? x.proxy.host : '__local__');
+  const ipId = ipIdOf(a);
+  // 同平台 + 同 IP 的号,按列表顺序:第一个免提示,第 2 个起复用才标红。
+  const sameBucket = accts.filter((x) => platformKey(x) === pk && ipIdOf(x) === ipId);
+  const isFirst = sameBucket.length > 0 && sameBucket[0].id === a.id;
+  return {
+    text: a.proxy ? a.proxy.host : '本机默认',
+    duplicate: sameBucket.length > 1 && !isFirst,
+    hasProxy: !!a.proxy,
+  };
 }
 
 export function setAccountProxy(id: string, proxy: Proxy): void {
