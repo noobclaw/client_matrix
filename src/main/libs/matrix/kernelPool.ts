@@ -822,6 +822,16 @@ export async function checkKernelLogin(accountId: string, platform: string): Pro
         if (v === '1') return true; if (v === '0') return false;
       } catch { /* 落 ③ */ }
     }
+    if (platform === 'douyin') {
+      // 本地实测游客态:/aweme/v1/web/user/profile/self/ 返回 status_code:8「用户未登录」user:null;登录态 status_code:0 + user。
+      //   ⚠️ 须当前页在 www.douyin.com(同源)才拿得到 cookie:about:blank/跨子域会被 CORS 挡 → "?" 落 ③(故调用方发布走
+      //   creator.douyin.com 跳转判,取材路径要先导航到 www.douyin.com 再调,见 hotspotDouyinSource)。登录态可能要 X-Bogus
+      //   签名 → 拿不到本人时返回 "?" 不误杀;但游客「用户未登录」不需签名,故登出能被准确判出(修复 cookie 在但 session 死的误判)。
+      try {
+        const v = await kernelEval(accountId, '(async function(){try{var r=await fetch("https://www.douyin.com/aweme/v1/web/user/profile/self/",{credentials:"include"});var j=await r.json();if(j){if(j.status_code===0&&j.user)return "1";if(j.status_code===8||/未登录/.test(String(j.status_msg||"")))return "0";}return "?";}catch(e){return "?";}})()');
+        if (v === '1') return true; if (v === '0') return false;
+      } catch { /* 落 ③ */ }
+    }
     // ③ 通用兜底:当前页被重定向到登录页 = 服务端已判未登录(cookie 还在但失效)。读不到 URL 就只信 cookie。
     try {
       const href = await kernelEval(accountId, 'location.href');

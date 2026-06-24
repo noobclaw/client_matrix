@@ -55,7 +55,7 @@ async function fetchDouyinClipsViaKernel(
   if (signal?.aborted) { diag.reason = 'aborted'; return { paths: [], titles: [], diag }; }
   // 懒加载矩阵模块(避免顶层循环依赖)。
   const { accountsByPlatform, accountBadgeLabel } = require('../matrix/accountManager');
-  const { launchKernel, checkKernelLogin, closeKernel } = require('../matrix/kernelPool');
+  const { launchKernel, kernelNavigate, checkKernelLogin, closeKernel } = require('../matrix/kernelPool');
   const { runMatrixDouyinSearch } = require('../matrix/driverCtx');
 
   const usable = (accountsByPlatform('douyin') as any[]).filter((a) => a.status !== 'login_required' && a.status !== 'banned' && a.status !== 'limited');
@@ -77,6 +77,9 @@ async function fetchDouyinClipsViaKernel(
     try {
       await launchKernel({ accountId: cand.id, kernelVersion: cand.kernelVersion, userDataDir: cand.userDataDir, fingerprint: cand.fingerprint, proxy: cand.proxy, label: accountBadgeLabel(cand) });
     } catch { onLog(`   「${cand.displayName}」内核启动失败,换下一个…`); continue; }
+    // 先导航到 www.douyin.com 再验登录:checkKernelLogin('douyin') 走 user/profile/self 接口判定,须同源(在 about:blank
+    //   上跨域拿不到 cookie → 会误判已登录,正是"卡片已连接但抖音 session 已死→搜索撞登录墙→0 条"的根因)。
+    try { await kernelNavigate(cand.id, 'https://www.douyin.com/'); await sleep(2500); } catch { /* 导航失败也继续,checkKernelLogin 自身兜底 */ }
     const loggedIn = await checkKernelLogin(cand.id, 'douyin').catch(() => false);
     if (loggedIn) { accountId = cand.id; onLog(`🧬 用抖音账号「${cand.displayName}」的指纹浏览器取材`); break; }
     onLog(`   「${cand.displayName}」登录态失效,换下一个…`);
