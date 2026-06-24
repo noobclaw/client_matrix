@@ -810,8 +810,9 @@ export async function checkKernelLogin(accountId: string, platform: string): Pro
       // social-auto-upload:未登录的 studio 上传页有 select.tiktok-*-SelectFormContainer*(地区/登录选择表单)。
       probe = '(function(){try{if(document.querySelector(\'select[class*="SelectFormContainer"]\'))return "0";return "?";}catch(e){return "?";}})()';
     } else if (platform === 'binance') {
-      // 币安:顶部 header 有可见的 login/register CTA(Sign up/Login/登录/注册)= 未登录(登录态是头像,无此 CTA)。
-      probe = '(function(){try{var ns=document.querySelectorAll("a,button,[role=button]");for(var i=0;i<ns.length;i++){var el=ns[i];var rc=el.getBoundingClientRect();if(!(rc.width>0&&rc.height>0))continue;if(rc.top<0||rc.top>200)continue;var hf=((el.getAttribute&&el.getAttribute("href"))||"").toLowerCase();var tx=(el.textContent||"").replace(/\\s+/g,"").toLowerCase();if(hf.indexOf("/login")>=0||hf.indexOf("/register")>=0)return "0";if(tx==="signup"||tx==="login"||tx==="登录"||tx==="注册")return "0";}return "?";}catch(e){return "?";}})()';
+      // 币安广场:照抖音思路用【登录墙文字检测】+ 顶部 login/register CTA 双保险。未登录的广场登录墙才有这些文案/按钮;
+      //   登录态是头像、看到的是 feed,没有。只在检到才判未登录,否则 "?" → 绝不误判好号。
+      probe = '(function(){try{var t=(document.body&&document.body.innerText)||"";if(/Sign up to earn rewards|Join global crypto users|Discover real insights from verified|Log in to Binance|登录后即可|扫码登录/i.test(t))return "0";var ns=document.querySelectorAll("a,button,[role=button]");for(var i=0;i<ns.length;i++){var el=ns[i];var rc=el.getBoundingClientRect();if(!(rc.width>0&&rc.height>0))continue;if(rc.top<0||rc.top>200)continue;var hf=((el.getAttribute&&el.getAttribute("href"))||"").toLowerCase();var tx=(el.textContent||"").replace(/\\s+/g,"").toLowerCase();if(hf.indexOf("/login")>=0||hf.indexOf("/register")>=0)return "0";if(tx==="signup"||tx==="login"||tx==="登录"||tx==="注册")return "0";}return "?";}catch(e){return "?";}})()';
     }
     if (probe) {
       try {

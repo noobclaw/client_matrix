@@ -141,8 +141,10 @@ async function fetchDouyinClipsViaKernel(
     onLog(`✅ 抖音素材就绪:${paths.length}/${urls.length} 个${titles.length ? ` · ${titles.length} 个标题` : ''}`);
     return { paths, titles, diag };
   } finally {
-    // 取完 closeKernel(引用计数 -1):别的流程还用着这个号就不会真关,归 0 才优雅关闭。
-    try { closeKernel(accountId); } catch { /* ignore */ }
+    // 取完【强制关】取材窗:取材走 runExclusiveDouyin 串行锁,跑完时本流程是该号唯一使用者,直接关掉别留窗。
+    //   (普通 closeKernel 是引用计数式,若之前「扫码连接/刷新信息」等漏关留了计数 → 归不了 0 → 窗口不关;
+    //    force 跳过计数确保关闭。后续发布到抖音会自己重新起内核,不受影响。)
+    try { if (accountId) closeKernel(accountId, { force: true }); } catch { /* ignore */ }
   }
 }
 

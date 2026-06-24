@@ -1705,6 +1705,15 @@ const VideoTaskDetail: React.FC<{
           {isZh ? '尚未运行。点上方「开始创作 / 重新跑」启动一次。' : 'Not run yet. Start a run above.'}
         </div>
       )}
+      {/* 发布时有账号登录过期 → 给个跳转「我的矩阵账号」的按钮,方便用户点去重扫(对齐用户要求)。 */}
+      {latestRun && latestRun.logs.some((l: any) => String(l?.message || '').includes('登录过期')) && (
+        <button
+          onClick={() => window.dispatchEvent(new CustomEvent('noobclaw:show-matrix-accounts', { detail: {} }))}
+          className="mt-2 w-full text-left text-sm px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/40 text-red-600 dark:text-red-400 hover:bg-red-500/20 transition-colors font-medium"
+        >
+          🔑 {isZh ? '有账号登录过期 · 点这里去「我的矩阵账号」重新扫码连接 →' : 'Some accounts expired · go to My Matrix Accounts to re-login →'}
+        </button>
+      )}
 
       {/* 历史运行不再内嵌在任务详情里(对齐币安:详情页只看「当前运行明细」,
           往期记录走侧栏「运行记录」tab)。「上次运行」卡片可点进最近一条记录。 */}
