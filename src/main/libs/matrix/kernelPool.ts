@@ -784,54 +784,41 @@ export async function checkKernelLogin(accountId: string, platform: string): Pro
     const need = LOGIN_COOKIES[platform] || [];
     // ① cookie 快筛
     if (!need.some((n) => names.has(n))) return false;
-    // ② 服务器活体确认(有接口的平台,权威):明确答案直接返回,"?"(接口异常)落到 ③ 不误杀。
+    // ② 活体判定:对齐成熟开源 social-auto-upload(导航到创作/上传页 → 检测登录墙标记)。
+    //   【铁律:只在检到「明确未登录」证据(登录墙文字/元素、或接口明说未登录)时才判未登录;否则一律 "?" 交回 ③/cookie
+    //    → 绝不把登录着的好号误判过期】。有官方 isLogin 接口的(小红书/B站)用接口最准;其余用 social-auto-upload 的 DOM 标记。
+    //   ⚠️ DOM 标记须【已导航到创作页】后查(调用方 runMatrixPublish/taskRunner 发布前已导航 PUBLISHER_ANCHOR_URL=各创作页)。
+    let probe = '';
     if (platform === 'xhs') {
-      // 小红书 web_session 游客也下发 → 必须问 /me 的 guest 标志。
-      try {
-        const v = await kernelEval(accountId, '(async function(){try{var r=await fetch("https://edith.xiaohongshu.com/api/sns/web/v2/user/me",{credentials:"include"});var j=await r.json();var d=(j&&j.data)||{};return (d&&d.guest===false&&d.user_id)?"1":"0";}catch(e){return "?";}})()');
-        if (v === '1') return true; if (v === '0') return false;
-      } catch { /* 异常不误杀,落 ③ */ }
+      // 小红书:/me 的 guest 标志(web_session 游客也下发 → 必须问接口)。guest:true=未登录,guest:false+user_id=已登录。
+      probe = '(async function(){try{var r=await fetch("https://edith.xiaohongshu.com/api/sns/web/v2/user/me",{credentials:"include"});var j=await r.json();var d=(j&&j.data)||{};if(d.guest===true)return "0";if(d.guest===false&&d.user_id)return "1";return "?";}catch(e){return "?";}})()';
+    } else if (platform === 'bilibili') {
+      probe = '(async function(){try{var r=await fetch("https://api.bilibili.com/x/web-interface/nav",{credentials:"include"});var j=await r.json();var d=(j&&j.data)||{};if(d.isLogin===true)return "1";if(d.isLogin===false)return "0";return "?";}catch(e){return "?";}})()';
+    } else if (platform === 'toutiao') {
+      // 头条创作端:get_media_info 游客明说「user not login」(code 100004);登录态 code:0+data。
+      probe = '(async function(){try{var r=await fetch("https://mp.toutiao.com/mp/agw/media/get_media_info",{credentials:"include"});var j=await r.json();if(j){if(j.code===100004||/not login/i.test(String(j.message||"")))return "0";if(j.code===0&&j.data)return "1";}return "?";}catch(e){return "?";}})()';
+    } else if (platform === 'douyin') {
+      // social-auto-upload:creator.douyin.com 上传页未登录有「手机号登录/扫码登录」文字。登录着的页面没有。
+      probe = '(function(){try{var t=(document.body&&document.body.innerText)||"";if(/手机号登录|扫码登录|验证码登录|二维码登录|登录后即可/.test(t))return "0";return "?";}catch(e){return "?";}})()';
+    } else if (platform === 'kuaishou' || platform === 'kuaishou_creator') {
+      // social-auto-upload:cp.kuaishou.com 未登录落到带「机构服务」的落地页;补登录弹窗文字。
+      probe = '(function(){try{var t=(document.body&&document.body.innerText)||"";if(/机构服务/.test(t)||/扫码登录|手机号登录/.test(t))return "0";return "?";}catch(e){return "?";}})()';
+    } else if (platform === 'shipinhao') {
+      // social-auto-upload:channels 发表页未登录有「扫码登录」,登录态有「发表视频」。
+      probe = '(function(){try{var t=(document.body&&document.body.innerText)||"";if(/扫码登录/.test(t))return "0";if(/发表视频/.test(t))return "1";return "?";}catch(e){return "?";}})()';
+    } else if (platform === 'tiktok') {
+      // social-auto-upload:未登录的 studio 上传页有 select.tiktok-*-SelectFormContainer*(地区/登录选择表单)。
+      probe = '(function(){try{if(document.querySelector(\'select[class*="SelectFormContainer"]\'))return "0";return "?";}catch(e){return "?";}})()';
+    } else if (platform === 'binance') {
+      // 币安:顶部 header 有可见的 login/register CTA(Sign up/Login/登录/注册)= 未登录(登录态是头像,无此 CTA)。
+      probe = '(function(){try{var ns=document.querySelectorAll("a,button,[role=button]");for(var i=0;i<ns.length;i++){var el=ns[i];var rc=el.getBoundingClientRect();if(!(rc.width>0&&rc.height>0))continue;if(rc.top<0||rc.top>200)continue;var hf=((el.getAttribute&&el.getAttribute("href"))||"").toLowerCase();var tx=(el.textContent||"").replace(/\\s+/g,"").toLowerCase();if(hf.indexOf("/login")>=0||hf.indexOf("/register")>=0)return "0";if(tx==="signup"||tx==="login"||tx==="登录"||tx==="注册")return "0";}return "?";}catch(e){return "?";}})()';
     }
-    if (platform === 'bilibili') {
+    if (probe) {
       try {
-        const v = await kernelEval(accountId, '(async function(){try{var r=await fetch("https://api.bilibili.com/x/web-interface/nav",{credentials:"include"});var j=await r.json();return (j&&j.data&&j.data.isLogin)?"1":"0";}catch(e){return "?";}})()');
+        const v = await kernelEval(accountId, probe);
         if (v === '1') return true; if (v === '0') return false;
-      } catch { /* 落 ③ */ }
+      } catch { /* "?"/异常 → 落 ③,绝不误杀 */ }
     }
-    if (platform === 'binance') {
-      // 币安登录失效【不跳登录 URL、logined/p20t cookie 还残留】→ ①③ 都抓不到 → 必 false positive(实测)。
-      // 本地实测游客态:base-detail 返回 401 code:100001005「Please log in first」;登录态返回 success+data。
-      //   → 问服务器最权威。"?"(csrf/异常)落 ③ 不误杀。带 csrftoken 头(从 cookie 取,登录态有)。
-      try {
-        const v = await kernelEval(accountId, '(async function(){try{function gc(n){var m=document.cookie.match(new RegExp("(^|; )"+n+"=([^;]+)"));return m?m[2]:"";}var csrf="";try{csrf=gc("csrftoken")||localStorage.getItem("csrftoken")||"";}catch(e){csrf=gc("csrftoken");}var r=await fetch("https://www.binance.com/bapi/accounts/v1/private/account/user/base-detail",{method:"POST",credentials:"include",headers:{"content-type":"application/json","clienttype":"web","csrftoken":csrf},body:"{}"});var j=await r.json();if(j&&j.success===true&&j.data)return "1";var c=String((j&&j.code)||"");if(c==="100001005"||/log in/i.test(String((j&&j.message)||"")))return "0";return "?";}catch(e){return "?";}})()');
-        if (v === '1') return true; if (v === '0') return false;
-      } catch { /* 落 ③ */ }
-    }
-    if (platform === 'tiktok') {
-      // 本地实测游客态:/passport/web/account/info/ 返回 error_code:13 / name:session_expired;登录态返回 user_id 等。
-      try {
-        const v = await kernelEval(accountId, '(async function(){try{var r=await fetch("https://www.tiktok.com/passport/web/account/info/",{credentials:"include"});var j=await r.json();var d=(j&&j.data)||null;if(d){if(d.error_code===13||d.name==="session_expired")return "0";if(d.user_id||d.username||d.uid||d.sec_user_id)return "1";}return "?";}catch(e){return "?";}})()');
-        if (v === '1') return true; if (v === '0') return false;
-      } catch { /* 落 ③ */ }
-    }
-    if (platform === 'toutiao') {
-      // 本地实测游客态:/mp/agw/media/get_media_info 返回 code:100004「user not login」;登录态 code:0 + data。
-      try {
-        const v = await kernelEval(accountId, '(async function(){try{var r=await fetch("https://mp.toutiao.com/mp/agw/media/get_media_info",{credentials:"include"});var j=await r.json();if(j){if(j.code===100004||/not login/i.test(String(j.message||"")))return "0";if(j.code===0&&j.data)return "1";}return "?";}catch(e){return "?";}})()');
-        if (v === '1') return true; if (v === '0') return false;
-      } catch { /* 落 ③ */ }
-    }
-    if (platform === 'shipinhao') {
-      // 视频号 auth_data(身份那条复用):登录态有 data.finderUser;游客态 errCode:300330 无 finderUser。
-      try {
-        const v = await kernelEval(accountId, '(async function(){try{var r=await fetch("/cgi-bin/mmfinderassistant-bin/auth/auth_data",{method:"POST",headers:{"content-type":"application/json"},credentials:"include",body:JSON.stringify({scene:7,timestamp:Date.now()})});var j=await r.json();var f=j&&j.data&&j.data.finderUser;if(f&&(f.nickname||f.uniqId))return "1";var ec=j&&(j.errCode||j.errcode||0);if(ec)return "0";return "?";}catch(e){return "?";}})()');
-        if (v === '1') return true; if (v === '0') return false;
-      } catch { /* 落 ③ */ }
-    }
-    // 抖音:【不接接口判定】。曾用 /aweme/v1/web/user/profile/self/,但该 content API 需 X-Bogus 签名 → 登录态
-    //   未签名请求也回 status_code:8「用户未登录」→ 把【登录着的好号误判过期】(2026-06-24 实测误杀)。撤回,只靠
-    //   cookie + ③ 跳转。代价:cookie 在但 session 死的抖音号检不出(取材顶多 0 条退文字卡)——比误杀好号轻得多。
-    //   要做准须用不需签名的 passport 接口(/passport/web/account/info/),待真机确认登录态返回后再补。
     // ③ 通用兜底:当前页被重定向到登录页 = 服务端已判未登录(cookie 还在但失效)。读不到 URL 就只信 cookie。
     try {
       const href = await kernelEval(accountId, 'location.href');
