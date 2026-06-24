@@ -183,6 +183,15 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
   // 快手按子 tab 过滤(老号无 loginScope → 当主站);其它平台不分。
   const platformAccounts = accounts.filter((a) => a.platform === platform && (platform !== 'kuaishou' || (a.loginScope || 'main') === ksScope));
   const platformTasks = tasks.filter((t) => t.platform === platform);
+  // 各平台「登录过期」账号数 —— 在平台 tab 右上角红圈角标展示。
+  // 「登录过期」= login_required 但连过有身份(过期流程只翻状态不清身份),与卡片角标判定一致。
+  const expiredCountByPlatform = React.useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const a of accounts) {
+      if (a.status === 'login_required' && !!(a.nickname || a.avatar || a.displayId)) m[a.platform] = (m[a.platform] || 0) + 1;
+    }
+    return m;
+  }, [accounts]);
   const kernelReady = !!kernel.installed || !!kernelPath.trim();
   const requireKernel = (): boolean => { if (kernelReady) return true; setShowKernelModal(true); return false; };
   // 未登录则弹登录窗(NoobClaw 账号),拦在所有矩阵操作(建号/编辑/删除/建任务/运行等)前面。
@@ -441,9 +450,18 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
             </div>
             {/* 平台 tab 切换(跟新建页一致),按平台分别管理账号 */}
             <div className="flex flex-wrap gap-2 mb-4">
-              {PLATFORMS.map((p) => (
-                <button key={p} onClick={() => setPlatform(p)} className={`px-3.5 py-1.5 rounded-full text-sm border transition-colors ${platform === p ? 'border-violet-500 bg-violet-500/10 text-violet-500 font-medium' : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-violet-500/50'}`}>{PLATFORM_LABEL[p]}</button>
-              ))}
+              {PLATFORMS.map((p) => {
+                const expiredCount = expiredCountByPlatform[p] || 0;
+                return (
+                <button key={p} onClick={() => setPlatform(p)} className={`relative px-3.5 py-1.5 rounded-full text-sm border transition-colors ${platform === p ? 'border-violet-500 bg-violet-500/10 text-violet-500 font-medium' : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-violet-500/50'}`}>
+                  {PLATFORM_LABEL[p]}
+                  {/* 该平台有登录过期账号 → 红圈计数角标(提醒去重新扫码连接) */}
+                  {expiredCount > 0 && (
+                    <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold leading-none ring-2 ring-white dark:ring-gray-900">{expiredCount}</span>
+                  )}
+                </button>
+                );
+              })}
             </div>
             {/* 快手:创作者中心(发布)/ 主站(涨粉)两类账号分开管理(两端登录互不覆盖)。 */}
             {platform === 'kuaishou' && (
