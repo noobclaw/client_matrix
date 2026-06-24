@@ -175,8 +175,10 @@ export async function runMatrixPublishStep(opts: RunMatrixPublishOptions): Promi
       result.failedCount++;
       result.details.push({ platform: id, status: 'failed', reason: 'driver_threw' });
     } finally {
-      // 关掉该号内核,释放资源(账号是平台维度,下个平台是另一个号、另一个内核)。
-      try { closeKernel(accountId); } catch { /* ignore */ }
+      // 【强制关】该平台发布窗:发布是逐平台串行的,本平台跑完它就是该号唯一使用者,直接关掉别留窗。
+      //   (普通 closeKernel 是引用计数式,若该号之前被「扫码连接/刷新信息」等漏关留了计数 → 归不了 0 →
+      //    窗口堆着不关、多次运行还会在同一内核里累积标签页。force 跳过计数确保每个平台跑完就关窗。)
+      try { closeKernel(accountId, { force: true }); } catch { /* ignore */ }
     }
   }
 
