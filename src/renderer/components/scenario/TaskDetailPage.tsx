@@ -1715,6 +1715,9 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
         // 在「当前运行明细」上方放一排账号 tab,点 tab 切换显示该账号的运行明细;默认选第一个账号。
         const matrixAccts = progress?.accounts || [];
         const hasAccts = matrixAccts.length > 0;
+        // 矩阵号发布时若有账号登录过期(日志里点名过),尾巴上给个跳转「我的矩阵账号」的按钮去重扫;没有就不显示。
+        const loginExpired = hasAccts && (progress?.steps || []).some((s: { logs?: Array<{ message?: string }> }) =>
+          (s.logs || []).some((l) => typeof l.message === 'string' && l.message.includes('登录过期')));
         const selAcct = hasAccts
           ? (acctTab && matrixAccts.some(a => a.id === acctTab) ? acctTab : matrixAccts[0].id)
           : null;
@@ -1740,6 +1743,13 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
                 </span>
               )}
             </div>
+            {/* 矩阵号:本次有账号登录过期 → 提示 + 跳「我的矩阵账号」去重扫(复用全局事件,App 切到 matrix 页)。 */}
+            {loginExpired && (
+              <div className="mb-4 flex items-center flex-wrap gap-2 text-xs px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30">
+                <span className="text-red-500 font-medium">⚠️ 本次有账号登录过期,需重新扫码登录</span>
+                <button onClick={() => window.dispatchEvent(new CustomEvent('noobclaw:show-matrix-accounts', { detail: {} }))} className="ml-auto px-2.5 py-1 rounded-lg bg-violet-500 hover:bg-violet-600 text-white">去我的矩阵账号处理 →</button>
+              </div>
+            )}
             {/* 矩阵号:账号 tab —— 点一个号切换显示它独立的运行明细(各号配额 + 完成数也在 tab 上)。 */}
             {hasAccts && (
               <div className="flex flex-wrap gap-2 mb-4">
