@@ -316,7 +316,8 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
       setPendingProxySave(() => async () => { setPendingProxySave(null); setProxyMsg(null); await save(proxy); }); // 跳过校验保存(不带 health,待下次探测)
       return;
     }
-    setProxyMsg({ kind: 'ok', text: '✅ 代理IP正常工作' });
+    setProxyMsg({ kind: 'ok', text: '✅ 代理IP正常工作,即将保存…' });
+    await new Promise((r) => setTimeout(r, 1500)); // 让用户看清「正常工作」再保存关窗(原来一闪而过看不清)
     await save({ ...proxy, health: 'ok' });
   };
 
@@ -325,7 +326,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
     const acc = accounts.find((x) => x.id === proxyFor);
     await guardProxyThen(proxy, proxyFor || undefined, acc?.platform || '', acc?.loginScope, async (p) => {
       await M()?.setAccountProxy({ id: proxyFor, proxy: p });
-      setProxyFor(null); setProxyMsg(null); await reload(); setNotice('已绑定代理 IP');
+      setProxyFor(null); setProxyMsg(null); await reload(); setNotice(`✅ 代理IP ${p.host} 正常工作,已绑定`);
     });
   };
 
