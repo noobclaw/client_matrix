@@ -463,16 +463,21 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {platformAccounts.map((a, idx) => {
                   // 状态小标签(挪到名字后边,表示状态;不放右侧按钮区)。
-                  // 状态左上角实心角标配色(更显眼):已连接绿、尚未连接黄、运行蓝、封红、其它灰,全白字。
+                  // 「登录过期」= login_required 但【连过有身份】(过期流程只翻状态不清身份);login_required 且无身份 = 尚未连接(从没连过)。
+                  const expired = a.status === 'login_required' && !!(a.nickname || a.avatar || a.displayId);
+                  // 状态左上角实心角标配色:已连接绿、登录过期橙(连过但失效·可重扫)、尚未连接黄、运行蓝、封红、其它灰,全白字。
                   const stSolid = a.status === 'idle' ? 'bg-green-500'
+                    : expired ? 'bg-orange-500'
                     : a.status === 'login_required' ? 'bg-amber-500'
                     : a.status === 'running' ? 'bg-blue-500'
                     : a.status === 'banned' ? 'bg-red-500'
                     : 'bg-gray-400';
+                  const stLabel = expired ? '登录过期' : STATUS_LABEL[a.status];
+                  const stDot = expired ? 'bg-orange-500' : STATUS_DOT[a.status];
                   return (
                   <div key={a.id} className="relative rounded-xl border border-gray-200 dark:border-gray-700 p-4 flex flex-col gap-2 transition-colors bg-white dark:bg-gray-900">
                     {/* 左上角状态实心角标(更显眼:已连接绿底白字 / 尚未连接黄底白字) */}
-                    <span className={`absolute -top-px -left-px px-2.5 py-0.5 text-[11px] font-semibold text-white rounded-tl-xl rounded-br-lg ${stSolid}`}>{STATUS_LABEL[a.status]}</span>
+                    <span className={`absolute -top-px -left-px px-2.5 py-0.5 text-[11px] font-semibold text-white rounded-tl-xl rounded-br-lg ${stSolid}`}>{stLabel}</span>
                     {/* 右上角移除 ✕ */}
                     <button onClick={() => deleteAccount(a)} title="移除该账号(彻底删除配置与 profile)" className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded-full text-gray-400 hover:text-white hover:bg-red-500/90 transition-colors text-sm leading-none">✕</button>
                     <div className="flex items-center gap-2.5 min-w-0 pr-6 mt-3">
@@ -482,7 +487,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
                             B站等 CDN 返回 http:// 头像,在 webview(https/app://)是混合内容会被拦,统一升 https。 */}
                         <div className="w-9 h-9 rounded-full bg-violet-500/20 text-violet-500 flex items-center justify-center text-sm font-bold">{(a.nickname || a.displayName || '?').slice(0, 1)}</div>
                         {a.avatar && <img src={a.avatar.replace(/^http:/, 'https:')} referrerPolicy="no-referrer" alt="" className="absolute inset-0 w-9 h-9 rounded-full object-cover bg-gray-200 dark:bg-gray-700" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />}
-                        <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white dark:border-gray-900 ${STATUS_DOT[a.status]}`} />
+                        <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white dark:border-gray-900 ${stDot}`} />
                       </div>
                       {/* 昵称(真实)+ 平台号 + 备注 */}
                       <div className="min-w-0 flex-1">
@@ -492,7 +497,13 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
                         </div>
                         <div className="text-[11px] space-y-0.5" title={a.boundUid ? `uid: ${a.boundUid}` : undefined}>
                           {a.status === 'login_required'
-                            ? <div className="text-amber-500 truncate">请点击下方扫码连接进行连接</div>
+                            ? (expired
+                                ? (<>
+                                    {a.displayId && <div className="text-gray-600 dark:text-gray-300 truncate">{platformIdLabel(a.platform)}:{a.displayId}</div>}
+                                    <div className="text-gray-500 dark:text-gray-400 truncate">备注:{a.displayName}</div>
+                                    <div className="text-orange-500 truncate">⚠️ 登录过期,请点下方「扫码连接」重新登录</div>
+                                  </>)
+                                : <div className="text-amber-500 truncate">请点击下方扫码连接进行连接</div>)
                             : (<>
                                 {a.displayId && <div className="text-gray-600 dark:text-gray-300 truncate">{platformIdLabel(a.platform)}:{a.displayId}</div>}
                                 {/* 已连接但还没读到平台号/昵称(老建的号或读取失败)→ 明确提示去刷新,别让用户以为该功能没有 */}
