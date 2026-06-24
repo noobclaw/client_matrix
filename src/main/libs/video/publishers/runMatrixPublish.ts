@@ -192,6 +192,9 @@ export async function runMatrixPublishStep(opts: RunMatrixPublishOptions): Promi
   if (pub.length) opts.onLog?.(`   ✅ 已发(${pub.length}):${named(pub, false)}`);
   if (skip.length) opts.onLog?.(`   ⏭️ 跳过(${skip.length}):${named(skip, true)}`);
   if (fail.length) opts.onLog?.(`   ❌ 失败(${fail.length}):${named(fail, true)}`);
+  // 登录过期单独点名 + 引导去「我的矩阵账号」重扫(那些号卡片已标红「登录过期」)。
+  const expiredList = skip.filter((d) => (d.reason || '').startsWith('not_logged_in'));
+  if (expiredList.length) opts.onLog?.(`   🔑 登录过期(${expiredList.length}):${named(expiredList, false)} —— 请去「我的矩阵账号」点对应红卡片「扫码连接」重新登录`);
   if (!pub.length && !skip.length && !fail.length) opts.onLog?.('   (无平台结果)');
 
   return result;
