@@ -11,11 +11,11 @@
 
 import { coworkLog } from '../coworkLogger';
 import type { VideoPlatform, PublishInput } from '../video/publishers/types';
-import { launchKernel, kernelNavigate, kernelEval, closeKernel, NO_KERNEL_ERROR } from './kernelPool';
+import { launchKernel, kernelNavigate, checkKernelLogin, closeKernel, NO_KERNEL_ERROR } from './kernelPool';
 import { installedKernelPath } from './kernelInstaller';
 import { runMatrixDriver } from './driverCtx';
 import {
-  getAccount, setAccountStatus, markPosted, accountBadgeLabel, markAccountAlive,
+  getAccount, setAccountStatus, markPosted, accountBadgeLabel, markAccountAlive, platformKey,
 } from './accountManager';
 
 const DEFAULT_BASE_URL = 'https://api.noobclaw.com';
@@ -57,15 +57,12 @@ export interface MatrixTaskReport {
   charged?: { charged: number; balanceAfter?: number };
 }
 
-const LOGIN_URL_HINT = /(login|passport|signin|sign-in|account\/security)/i;
-
-/** 发前登录检查:起内核 → 导航创作者中心 → 看是否被重定向到登录页。 */
-async function checkLogin(accountId: string, anchor: string): Promise<boolean> {
+/** 发前登录检查:导航创作者中心 → 统一活体校验 checkKernelLogin(cookie 快筛 + 接口/跳转,见 kernelPool)。 */
+async function checkLogin(accountId: string, platform: string, anchor: string): Promise<boolean> {
   try {
     await kernelNavigate(accountId, anchor);
     await sleep(2000);
-    const href = String(await kernelEval(accountId, 'location.href') || '');
-    return !LOGIN_URL_HINT.test(href);
+    return await checkKernelLogin(accountId, platform);
   } catch {
     return false;
   }
@@ -107,7 +104,7 @@ async function runOne(
     const anchorMod = await import('../video/publishers/publisherUtils');
     const anchor = anchorMod.PUBLISHER_ANCHOR_URL[opts.platform];
     if (anchor) {
-      const ok = await checkLogin(accountId, anchor);
+      const ok = await checkLogin(accountId, platformKey(acc), anchor);
       if (!ok) {
         setAccountStatus(accountId, 'login_required');
         return { accountId, state: 'skipped', reason: 'login_required' };

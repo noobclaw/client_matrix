@@ -673,9 +673,13 @@ const LOGIN_COOKIES: Record<string, string[]> = {
   youtube: ['SID', 'SAPISID', 'LOGIN_INFO'],             // 新增(实测)
 };
 
-/** 该号当前是否已登录对应平台(按标志性 cookie 判断)。session 不在/读失败返回 false。
- *  ⚠️ 用 getAllCookies(读 profile 里【所有域】的 cookie),而不是当前页域 —— 否则在创作者中心
- *  子域(creator./member./cp./mp.toutiao 等)判断时会漏掉挂在主站父域的登录 cookie。 */
+/** 该号当前【是否真的登录】对应平台 —— 统一活体校验(发布/涨粉/保活都调它)。分层:
+ *  ① cookie 快筛:标志性 cookie 不在 → 必然没登录(不开窗折腾);
+ *  ② 服务器活体确认:有认证接口的平台(小红书 /me、B站 /nav)直接问服务器,给明确答案就以它为准(最准);
+ *  ③ 通用兜底:没接口的平台,看【当前页是否被重定向到登录页】= 服务端判未登录(cookie 还在但已失效)。
+ *     仅当调用方已导航到【需登录才能进的页】(创作中心)时有意义;游客可看的首页 URL 不变 → 退回 cookie 结果。
+ *  关键认知:cookie 在 ≠ 登录有效(服务端可作废 session,cookie 仍在 profile 里)→ 必须有 ②/③ 的活体确认。
+ *  ⚠️ cookie 用 getAllCookies(读所有域),否则在 creator./cp./mp. 子域会漏掉挂在父域的登录 cookie。 */
 export async function checkKernelLogin(accountId: string, platform: string): Promise<boolean> {
   if (!sessions.get(accountId)) return false;
   try {
@@ -685,15 +689,27 @@ export async function checkKernelLogin(accountId: string, platform: string): Pro
     if (!cookies.length) { const r2 = await send(s, 'Network.getCookies', {}); cookies = r2?.cookies || []; }
     const names = new Set<string>(cookies.map((c: any) => String(c.name)));
     const need = LOGIN_COOKIES[platform] || [];
+    // ① cookie 快筛
     if (!need.some((n) => names.has(n))) return false;
-    // ⚠️ 小红书的 web_session 对【未登录游客】也会下发 → cookie 命中不代表已登录(否则一打开登录页
-    // 就被误判「已关联」)。用 /me 接口的 guest 标志二次确认;接口异常不误杀(回落 cookie 结果)。
+    // ② 服务器活体确认(有接口的平台,权威):明确答案直接返回,"?"(接口异常)落到 ③ 不误杀。
     if (platform === 'xhs') {
+      // 小红书 web_session 游客也下发 → 必须问 /me 的 guest 标志。
       try {
         const v = await kernelEval(accountId, '(async function(){try{var r=await fetch("https://edith.xiaohongshu.com/api/sns/web/v2/user/me",{credentials:"include"});var j=await r.json();var d=(j&&j.data)||{};return (d&&d.guest===false&&d.user_id)?"1":"0";}catch(e){return "?";}})()');
-        if (v === '0') return false; // 明确是游客 → 未登录
-      } catch { /* 接口异常不误杀 */ }
+        if (v === '1') return true; if (v === '0') return false;
+      } catch { /* 异常不误杀,落 ③ */ }
     }
+    if (platform === 'bilibili') {
+      try {
+        const v = await kernelEval(accountId, '(async function(){try{var r=await fetch("https://api.bilibili.com/x/web-interface/nav",{credentials:"include"});var j=await r.json();return (j&&j.data&&j.data.isLogin)?"1":"0";}catch(e){return "?";}})()');
+        if (v === '1') return true; if (v === '0') return false;
+      } catch { /* 落 ③ */ }
+    }
+    // ③ 通用兜底:当前页被重定向到登录页 = 服务端已判未登录(cookie 还在但失效)。读不到 URL 就只信 cookie。
+    try {
+      const href = await kernelEval(accountId, 'location.href');
+      if (/(login|passport|signin|sign-in|account\/security)/i.test(String(href || ''))) return false;
+    } catch { /* ignore */ }
     return true;
   } catch { return false; }
 }
