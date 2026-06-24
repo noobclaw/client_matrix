@@ -24,7 +24,6 @@ import { VIDEO_PLATFORMS } from './types';
 import type { RunPublishResult } from './runPublish';
 import { getAccount, platformKey, accountBadgeLabel, setAccountStatus, markAccountAlive } from '../../matrix/accountManager';
 import { launchKernel, kernelNavigate, checkKernelLogin, closeKernel } from '../../matrix/kernelPool';
-import { promptReloginForExpiredAccount } from '../../matrix/reloginPrompt';
 import { runMatrixDriver } from '../../matrix/driverCtx';
 import { PUBLISHER_ANCHOR_URL } from './publisherUtils';
 import { getVideoConfig } from '../videoConfig';
@@ -128,14 +127,11 @@ export async function runMatrixPublishStep(opts: RunMatrixPublishOptions): Promi
       //   快手创作端账号用 'kuaishou_creator' 查 cp 登录态(主站 cookie 不算 cp 登录)。
       const loggedIn = await checkKernelLogin(accountId, acc ? platformKey(acc) : id).catch(() => false);
       if (!loggedIn) {
-        // 矩阵号登录态在「我的矩阵账号」里扫码维护;这里不在出片流程里硬等登录(会卡死定时任务)。
-        // ⚠️ 翻状态:对齐 engageRunner/taskRunner —— 检到登录失效就把账号标 login_required,
-        //   列表立刻显示「需重新扫码」而不是继续假装「已登录」(否则定时发布每次静默跳过、用户无感)。
+        // ⚠️【2026-06-24 改】检到登录失效:【静默标红「登录过期」】(身份保留 → 卡片显示登录过期),
+        //   【不在运行中弹浏览器窗口】——多平台批量会弹一堆、用户切走时还抢焦点。改为:跑完出汇总 +
+        //   「我的矩阵账号」卡片标红登录过期,用户回来逐个重扫。状态翻了卡片立刻能看到。
         setAccountStatus(accountId, 'login_required');
-        // 弹该号窗口置顶 + 红色过期角标 + 导航登录页,后台等扫码成功自动翻 idle + 推 SSE 更新列表。
-        //   await 只等到 setup 完(refCount+1,保证下面 finally 的 closeKernel 不会真关掉这个窗),轮询是 detached。
-        try { await promptReloginForExpiredAccount(accountId); } catch { /* 非关键:状态已翻 */ }
-        opts.onLog?.(`⚠️ ${label} 账号「${acc.displayName}」登录已失效 · 已弹窗提示重新扫码 · 跳过本条`);
+        opts.onLog?.(`⚠️ ${label} 账号「${acc.displayName}」登录已失效 · 已标「登录过期」· 跳过本条(去「我的矩阵账号」重扫)`);
         result.skippedCount++;
         result.details.push({ platform: id, status: 'skipped', reason: 'not_logged_in' });
         continue;
