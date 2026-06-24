@@ -476,7 +476,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
                   const stLabel = expired ? '登录过期' : STATUS_LABEL[a.status];
                   const stDot = expired ? 'bg-red-500' : STATUS_DOT[a.status];
                   return (
-                  <div key={a.id} className="relative rounded-xl border border-gray-200 dark:border-gray-700 p-4 flex flex-col gap-2 transition-colors bg-white dark:bg-gray-900">
+                  <div key={a.id} className="relative h-full rounded-xl border border-gray-200 dark:border-gray-700 p-4 flex flex-col gap-2 transition-colors bg-white dark:bg-gray-900">
                     {/* 左上角状态实心角标(更显眼:已连接绿底白字 / 尚未连接黄底白字) */}
                     <span className={`absolute -top-px -left-px px-2.5 py-0.5 text-[11px] font-semibold text-white rounded-tl-xl rounded-br-lg ${stSolid}`}>{stLabel}</span>
                     {/* 右上角移除 ✕ */}
@@ -521,7 +521,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
                       <div className="text-gray-500 dark:text-gray-400 truncate">🏷️ 关键词:{a.keywords && a.keywords.length ? <span className="text-gray-700 dark:text-gray-300">{a.keywords.join(' · ')}</span> : <span className="text-amber-500">未配(互动需要)</span>}</div>
                     </div>
                     {/* 右侧可点击按钮:全色按钮 */}
-                    <div className="flex items-center gap-2 flex-wrap pt-1">
+                    <div className="flex items-center gap-2 flex-wrap pt-1 mt-auto">
                       {/* 未连接:配置IP/编辑/扫码连接 统一紫色;已连接:配置IP/编辑/刷新信息 统一绿色。 */}
                       <button onClick={() => openProxy(a)} className={`text-xs px-2.5 py-1 rounded-lg text-white ${a.status === 'login_required' ? 'bg-violet-500 hover:bg-violet-600' : 'bg-emerald-600 hover:bg-emerald-700'}`}>配置IP</button>
                       <button onClick={() => openEdit(a)} className={`text-xs px-2.5 py-1 rounded-lg text-white ${a.status === 'login_required' ? 'bg-violet-500 hover:bg-violet-600' : 'bg-emerald-600 hover:bg-emerald-700'}`}>编辑</button>
