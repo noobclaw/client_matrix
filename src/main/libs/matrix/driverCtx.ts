@@ -15,7 +15,7 @@ import { coworkLog } from '../coworkLogger';
 import type { VideoPlatform, PublishInput, PublishResult } from '../video/publishers/types';
 import { PUBLISHER_ANCHOR_URL } from '../video/publishers/publisherUtils';
 import { matrixCmd } from './cdpCommands';
-import { kernelNavigate, kernelSetFileInput } from './kernelPool';
+import { kernelNavigate, kernelSetFileInput, kernelSetFileInputViaDataTransfer } from './kernelPool';
 
 const DEFAULT_BASE_URL = 'https://api.noobclaw.com';
 function baseUrl(): string {
@@ -102,7 +102,16 @@ function buildMatrixDriverCtx(
     input: { title: input.title, description: input.description, tags: input.tags },
     cmd: (command: string, params: any, timeoutMs?: number) =>
       matrixCmd(accountId, command, params, timeoutMs),
-    uploadVideo: async (targetSelector: string, _opts?: { mimeType?: string; ttlMs?: number }) => {
+    uploadVideo: async (targetSelector: string, opts?: { mimeType?: string; ttlMs?: number }) => {
+      // 【TikTok 专用】先走页面世界 DataTransfer 注入(照旧 client):TikTok 的反爬 SDK(webmssdk)能识别/拒绝
+      //   CDP DOM.setFileInputFiles → 上传到一半崩成「出错了请重试」(手动 + 旧 client 扩展注入都正常,正说明问题
+      //   在 CDP 注入这步)。DataTransfer 是"真人选文件"的样子,TikTok 认。失败再回落 CDP。
+      //   其它平台 CDP 一直好用 → 维持不动(不引入回归)。
+      if (platform === 'tiktok') {
+        const dt = await kernelSetFileInputViaDataTransfer(accountId, input.videoPath, { mimeType: opts?.mimeType, ttlMs: opts?.ttlMs });
+        if (dt.ok) return { ok: true };
+        onLog('   ⚠️ DataTransfer 注入未成(' + (dt.reason || '?') + '),回落 CDP setFileInputFiles…');
+      }
       const r = await kernelSetFileInput(accountId, targetSelector, [input.videoPath]);
       return r.ok ? { ok: true } : { ok: false, reason: r.reason || 'set_file_input_failed' };
     },

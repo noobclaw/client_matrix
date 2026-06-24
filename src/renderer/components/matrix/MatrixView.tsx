@@ -16,6 +16,7 @@ interface MatrixAccount {
   proxy?: { protocol?: string; host: string; port: number; username?: string; password?: string; geo?: string; health?: string };
   keywords?: string[]; kernelVersion?: string; nickname?: string; displayId?: string; avatar?: string; boundUid?: string;
   loginScope?: 'main' | 'creator';   // 仅快手:主站 / 创作者中心
+  egressIp?: string;                 // 无代理号的真实本机出口 IP(内核侧探到才有,后端 listAccounts 附上)
 }
 interface MatrixTask {
   id: string; platform: string; type: 'engage'; name: string; enabled: boolean; accountIds: string[];
@@ -493,7 +494,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="text-sm font-semibold dark:text-white truncate">{a.nickname || a.displayName}</span>
-                          <span className={`shrink-0 max-w-[11rem] truncate text-[10px] px-1.5 py-0.5 rounded-full ${a.proxy ? (a.proxy.health === 'ok' ? 'text-green-600 dark:text-green-400 bg-green-500/15' : a.proxy.health === 'dead' ? 'text-red-600 dark:text-red-400 bg-red-500/15' : 'text-blue-600 dark:text-blue-400 bg-blue-500/15') : (idx === 0 ? 'text-green-600 dark:text-green-400 bg-green-500/15' : 'text-amber-600 dark:text-amber-400 bg-amber-500/15')}`}>代理IP:{a.proxy ? ((a.proxy.geo || a.proxy.host) + (a.proxy.health === 'dead' ? ' ·不通' : '')) : (idx === 0 ? '本地IP(默认)' : '尚未配置')}</span>
+                          <span className={`shrink-0 max-w-[11rem] truncate text-[10px] px-1.5 py-0.5 rounded-full ${a.proxy ? (a.proxy.health === 'ok' ? 'text-green-600 dark:text-green-400 bg-green-500/15' : a.proxy.health === 'dead' ? 'text-red-600 dark:text-red-400 bg-red-500/15' : 'text-blue-600 dark:text-blue-400 bg-blue-500/15') : (idx === 0 ? 'text-green-600 dark:text-green-400 bg-green-500/15' : 'text-amber-600 dark:text-amber-400 bg-amber-500/15')}`}>代理IP:{a.proxy ? ((a.proxy.geo || a.proxy.host) + (a.proxy.health === 'dead' ? ' ·不通' : '')) : (a.egressIp ? `本机 ${a.egressIp}` : (idx === 0 ? '本地IP(默认)' : '尚未配置'))}</span>
                         </div>
                         <div className="text-[11px] space-y-0.5" title={a.boundUid ? `uid: ${a.boundUid}` : undefined}>
                           {a.status === 'login_required'

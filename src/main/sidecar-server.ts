@@ -1261,8 +1261,11 @@ const server = http.createServer(async (req, res) => {
           // ── Matrix(矩阵号:多账号同平台铺内容)──
           // 账号池全本地;driver/计费走 backend/matrix。进度经 matrix:progress SSE。
           case 'matrix:listAccounts': {
-            const { listAccounts } = await import('./libs/matrix/accountManager');
-            return writeJSON(res, 200, { ok: true, accounts: listAccounts() });
+            const { listAccounts, getLocalEgressIp } = await import('./libs/matrix/accountManager');
+            // 无代理号附上真实本机出口 IP(内核侧探到的),供卡片显示「本机 <ip>」而非「本地IP(默认)」。
+            const localIp = getLocalEgressIp();
+            const accounts = listAccounts().map((a: any) => (a.proxy ? a : { ...a, egressIp: localIp || undefined }));
+            return writeJSON(res, 200, { ok: true, accounts });
           }
           case 'matrix:createAccount': {
             const { createAccount } = await import('./libs/matrix/accountManager');

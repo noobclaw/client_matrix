@@ -151,6 +151,24 @@ export function markAccountAlive(id: string): void {
   persist();
 }
 
+// ── 本机出口 IP(无代理号的真实公网出口)──
+// 内核里 fetch ip 服务读到的出口 IP(反映是否走 VPN);主进程 undici 不一定走 VPN,所以必须由内核侧探测后写进来
+// (见 kernelPool 起内核后的探测)。所有【无代理】号同机同路由共用一个出口,故全局存一个值即可,落小文件跨重启保留。
+let localEgressIp: string | null | undefined;  // undefined=未从盘加载, null=未知, string=已知
+function localIpFile(): string { return path.join(baseDir(), 'local_ip.json'); }
+export function getLocalEgressIp(): string | null {
+  if (localEgressIp === undefined) {
+    try { const j = JSON.parse(fs.readFileSync(localIpFile(), 'utf8')); localEgressIp = (j && typeof j.ip === 'string') ? j.ip : null; } catch { localEgressIp = null; }
+  }
+  return localEgressIp || null;
+}
+export function setLocalEgressIp(ip: string | null): void {
+  const v = (ip || '').trim() || null;
+  if (v === getLocalEgressIp()) return;  // 没变化不写盘
+  localEgressIp = v;
+  try { ensureDirs(); fs.writeFileSync(localIpFile(), JSON.stringify({ ip: v, at: Date.now() }), 'utf8'); } catch { /* ignore */ }
+}
+
 /**
  * 角标用:该号代理 IP 展示文案 + 是否与别的号【撞 IP】+ 有无代理。
  * 撞 IP 判定规则(2026-06-23 用户明确,本机/代理统一):
@@ -168,8 +186,10 @@ export function proxyBadgeInfo(id: string): { text: string; duplicate: boolean; 
   // 同平台 + 同 IP 的号,按列表顺序:第一个免提示,第 2 个起复用才标红。
   const sameBucket = accts.filter((x) => platformKey(x) === pk && ipIdOf(x) === ipId);
   const isFirst = sameBucket.length > 0 && sameBucket[0].id === a.id;
+  // 无代理号:显示【真实本机出口 IP】(探到才有),没探到回落「本机默认」。
+  const localText = getLocalEgressIp() ? `本机 ${getLocalEgressIp()}` : '本机默认';
   return {
-    text: a.proxy ? a.proxy.host : '本机默认',
+    text: a.proxy ? a.proxy.host : localText,
     duplicate: sameBucket.length > 1 && !isFirst,
     hasProxy: !!a.proxy,
   };

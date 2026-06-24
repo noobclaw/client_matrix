@@ -121,10 +121,21 @@ export async function runMatrixPublishStep(opts: RunMatrixPublishOptions): Promi
     }
 
     try {
-      // ③ 导航到该平台创作中心/上传页,检【真】登录态。checkKernelLogin 已是统一活体校验
-      //   (cookie 快筛 + 有接口走接口、没接口看是否被跳登录页),见 kernelPool。导航到创作中心(需登录才进的页)
-      //   再查,过期号会被服务端跳登录页 → 这里就能判出来,不会"绿色已连接却没真登录"。
-      //   快手创作端账号用 'kuaishou_creator' 查 cp 登录态(主站 cookie 不算 cp 登录)。
+      // ③ 【必须先导航到创作中心/上传页,再检【真】登录态】。
+      //   ⚠️【2026-06-24 修关键 bug】之前这里漏了导航:内核刚 launch 还停在 about:blank,
+      //   checkKernelLogin 第③层「看当前页是否被跳登录页」检的是 about:blank → 永远不是登录页 →
+      //   只凭 cookie 在就判「已登录」。而 binance(logined/p20t)、tiktok(sessionid/sid_tt)等平台
+      //   会话失效后 cookie 仍残留在 profile 里 → false positive,把过期号当登录号放行(就是币安那次)。
+      //   导航到创作中心(需登录才进的页)后,过期号被服务端跳登录页 → 第③层才判得出来。
+      //   (taskRunner.checkLogin 一直是先导航再查;这里对齐它。)
+      //   快手创作端账号用 platformKey → 'kuaishou_creator' 查 cp 登录态(主站 cookie 不算 cp 登录)。
+      const anchor = PUBLISHER_ANCHOR_URL[id as VideoPlatform];
+      if (anchor) {
+        opts.onLog?.(`   🔐 ${label} · 检查登录态(导航到创作中心)…`);
+        try { await kernelNavigate(accountId, anchor); await sleep(2500); } catch { /* 导航失败也继续,checkKernelLogin 自身兜底 */ }
+      } else {
+        opts.onLog?.(`   🔐 ${label} · 检查登录态…`);
+      }
       const loggedIn = await checkKernelLogin(accountId, acc ? platformKey(acc) : id).catch(() => false);
       if (!loggedIn) {
         // ⚠️【2026-06-24 改】检到登录失效:【静默标红「登录过期」】(身份保留 → 卡片显示登录过期),
@@ -137,6 +148,7 @@ export async function runMatrixPublishStep(opts: RunMatrixPublishOptions): Promi
         continue;
       }
 
+      opts.onLog?.(`   ✅ ${label} · 登录有效`);
       markAccountAlive(accountId); // 确认登录有效 → 更新活跃时间,常跑的号不进主动保活名单。
       // ④ 跑发布 driver(走该号的 CDP)。
       opts.onLog?.(`📤 ${label} · 账号「${acc.displayName}」开始上传…`);

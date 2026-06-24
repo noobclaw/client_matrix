@@ -400,6 +400,27 @@ async function doGetPage(s: KernelSession): Promise<KernelSession> {
       await send(s, 'Runtime.evaluate', { expression: script });
     } catch { /* 角标非关键 */ }
   }
+  // 本机出口 IP 探测(仅【无代理】号):内核里 fetch ip 服务读真实出口,反映这个内核到底走没走 VPN
+  //   (主进程 undici 不一定走 VPN,所以必须内核侧探)。后台 fire-and-forget,不阻塞起窗;探到写进 accountManager
+  //   供角标/卡片显示「本机 <ip>」而非笼统「本机默认」。失败/拿不到忽略。
+  try {
+    const accForIp = getAccount(s.accountId);
+    if (accForIp && !accForIp.proxy) {
+      void (async () => {
+        try {
+          const ip = await kernelEval(s.accountId, '(async function(){try{var r=await fetch("https://api.ipify.org?format=text",{cache:"no-store"});var t=((await r.text())||"").trim();return /^[0-9a-fA-F:.]{3,45}$/.test(t)?t:"";}catch(e){return "";}})()');
+          if (ip) {
+            const { setLocalEgressIp } = await import('./accountManager');
+            setLocalEgressIp(String(ip));
+            // 探到后立刻刷新【当前窗口】角标(否则首次起窗要等下次才显示真实 IP)。
+            if (s.label) {
+              try { const info2 = proxyBadgeInfo(s.accountId); const sc = badgeScript(s.label, info2.text, info2.duplicate ? 'dup' : 'ok'); await send(s, 'Runtime.evaluate', { expression: sc }); } catch { /* 角标非关键 */ }
+            }
+          }
+        } catch { /* 探测失败忽略 */ }
+      })();
+    }
+  } catch { /* ignore */ }
   // 错开窗口位置:多个号别完全重叠,便于分辨。
   try {
     const win = await send(s, 'Browser.getWindowForTarget', { targetId: s.pageTargetId });
@@ -643,6 +664,72 @@ export async function kernelSetFileInput(
   if (anySet) return { ok: true, found: n, attached };
   // 找到了候选但每个 setFileInputFiles 都抛 → 真失败,带出 CDP 错误便于定位。
   return { ok: false, reason: 'set_files_all_threw(found=' + n + (firstErr ? ',cdpErr=' + firstErr : '') + ')', found: n, attached: 0 };
+}
+
+/**
+ * 文件注入(页面世界 DataTransfer)—— 照旧 client 的 upload_file_from_url / uploadVideoToInputDeep:
+ *   sidecar 把视频注册成本地 http URL → 页面里 fetch 拿 blob → new File → DataTransfer → input.files →
+ *   派 change/input 事件。这是【真人选文件】的样子。
+ *
+ * 为什么需要它(2026-06-24):矩阵版 uploadVideo 原本走 CDP DOM.setFileInputFiles(省事),但 TikTok 创作端的
+ *   反爬 SDK(webmssdk)能识别 / 拒绝 CDP 注入 → 上传到一半「task not exist」崩成「出错了请重试」(手动上传与
+ *   旧 client 扩展注入都正常,正说明问题在 CDP 注入这一步)。这条还原旧 client 的页面世界注入,TikTok 认。
+ *   字节走本地 sidecar HTTP(不把几十 MB base64 塞进 CDP 通道);fetch 本地 URL 可能被页面 CSP(connect-src)
+ *   拦 → 先 Page.setBypassCSP 豁免。三层深遍历(顶层 + 同源 iframe + open shadowRoot)定位 input。
+ */
+export async function kernelSetFileInputViaDataTransfer(
+  accountId: string,
+  filePath: string,
+  opts?: { mimeType?: string; ttlMs?: number },
+): Promise<{ ok: boolean; reason?: string; bytes?: number }> {
+  if (!sessions.get(accountId)) return { ok: false, reason: 'no_session' };
+  const fsMod = require('fs');
+  if (!fsMod.existsSync(filePath)) return { ok: false, reason: 'file_not_found' };
+  const s = await getPage(accountId);
+  const { registerFile, buildUrl, unregister } = require('../localFileServer');
+  const pathMod = require('path');
+  const fileName = pathMod.basename(filePath);
+  const mime = opts?.mimeType || 'video/mp4';
+  const ttl = opts?.ttlMs || 10 * 60 * 1000;
+  const token = registerFile(filePath, { mimeType: mime, fileName, ttlMs: ttl });
+  // sidecar 端口:与 sidecar-server 同一取法(首个纯数字 argv,缺省 18801)。同进程,argv 一致。
+  const port = parseInt(process.argv.slice(2).find((a: string) => /^\d+$/.test(a)) || '18801', 10);
+  const fileUrl = buildUrl(token, port);
+  // 三层深遍历底座(对齐旧 client uploadVideoToInputDeep 的 nbDeepAll)。
+  const DEEP = 'function nbDeepAll(sel){var out=[];function walk(root,d){if(!root||d>6)return;'
+    + 'try{var m=root.querySelectorAll(sel);for(var i=0;i<m.length;i++)out.push(m[i]);}catch(e){}'
+    + 'var all=[];try{all=root.querySelectorAll("*");}catch(e){}'
+    + 'for(var k=0;k<all.length;k++){var sr=null;try{sr=all[k].shadowRoot;}catch(e){}if(sr)walk(sr,d+1);}'
+    + 'var fr=[];try{fr=root.querySelectorAll("iframe,frame");}catch(e){}'
+    + 'for(var j=0;j<fr.length;j++){var idoc=null;try{idoc=fr[j].contentDocument;}catch(e){}if(idoc)walk(idoc,d+1);}}'
+    + 'walk(document,0);return out;}';
+  const expr = '(async function(){' + DEEP
+    + 'var ins=nbDeepAll(\'input[type="file"]\');var input=null;'
+    + 'for(var i=0;i<ins.length;i++){var ac=ins[i].getAttribute("accept")||"";if(ac.indexOf("video")>=0||ac.indexOf("mp4")>=0){input=ins[i];break;}}'
+    + 'if(!input&&ins.length)input=ins[0];'
+    + 'if(!input)return {ok:false,reason:"no_input(deep="+ins.length+")"};'
+    + 'try{var resp=await fetch(' + JSON.stringify(fileUrl) + ',{cache:"no-store"});'
+    + 'if(!resp||!resp.ok)return {ok:false,reason:"fetch_"+(resp&&resp.status)};'
+    + 'var blob=await resp.blob();'
+    + 'var win=(input.ownerDocument&&input.ownerDocument.defaultView)||window;'
+    + 'var file=new win.File([blob],' + JSON.stringify(fileName) + ',{type:' + JSON.stringify(mime) + '});'
+    + 'var dt=new win.DataTransfer();dt.items.add(file);input.files=dt.files;'
+    + 'input.dispatchEvent(new win.Event("change",{bubbles:true}));'
+    + 'input.dispatchEvent(new win.Event("input",{bubbles:true}));'
+    + 'return {ok:true,bytes:blob.size};'
+    + '}catch(e){return {ok:false,reason:"inject_"+String(e&&e.message||e).slice(0,80)};}})()';
+  try {
+    // 先豁免页面 CSP,避免 fetch 本地 sidecar URL 被 connect-src 拦。
+    try { await send(s, 'Page.setBypassCSP', { enabled: true }); } catch { /* 非关键 */ }
+    const r: any = await send(s, 'Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true });
+    const v = r?.result?.value;
+    if (v && v.ok === true) return { ok: true, bytes: v.bytes };
+    return { ok: false, reason: (v && v.reason) || 'inject_no_result' };
+  } catch (e: any) {
+    return { ok: false, reason: 'dt_inject_threw:' + String(e?.message || e).slice(0, 100) };
+  } finally {
+    try { unregister(token); } catch { /* ignore */ }
+  }
 }
 
 // 清空该号浏览器全部 cookie(断开关联用:登出但保留 profile/指纹/配置)。
