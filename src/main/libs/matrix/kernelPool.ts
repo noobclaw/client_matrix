@@ -792,6 +792,36 @@ export async function checkKernelLogin(accountId: string, platform: string): Pro
         if (v === '1') return true; if (v === '0') return false;
       } catch { /* 落 ③ */ }
     }
+    if (platform === 'binance') {
+      // 币安登录失效【不跳登录 URL、logined/p20t cookie 还残留】→ ①③ 都抓不到 → 必 false positive(实测)。
+      // 本地实测游客态:base-detail 返回 401 code:100001005「Please log in first」;登录态返回 success+data。
+      //   → 问服务器最权威。"?"(csrf/异常)落 ③ 不误杀。带 csrftoken 头(从 cookie 取,登录态有)。
+      try {
+        const v = await kernelEval(accountId, '(async function(){try{function gc(n){var m=document.cookie.match(new RegExp("(^|; )"+n+"=([^;]+)"));return m?m[2]:"";}var csrf="";try{csrf=gc("csrftoken")||localStorage.getItem("csrftoken")||"";}catch(e){csrf=gc("csrftoken");}var r=await fetch("https://www.binance.com/bapi/accounts/v1/private/account/user/base-detail",{method:"POST",credentials:"include",headers:{"content-type":"application/json","clienttype":"web","csrftoken":csrf},body:"{}"});var j=await r.json();if(j&&j.success===true&&j.data)return "1";var c=String((j&&j.code)||"");if(c==="100001005"||/log in/i.test(String((j&&j.message)||"")))return "0";return "?";}catch(e){return "?";}})()');
+        if (v === '1') return true; if (v === '0') return false;
+      } catch { /* 落 ③ */ }
+    }
+    if (platform === 'tiktok') {
+      // 本地实测游客态:/passport/web/account/info/ 返回 error_code:13 / name:session_expired;登录态返回 user_id 等。
+      try {
+        const v = await kernelEval(accountId, '(async function(){try{var r=await fetch("https://www.tiktok.com/passport/web/account/info/",{credentials:"include"});var j=await r.json();var d=(j&&j.data)||null;if(d){if(d.error_code===13||d.name==="session_expired")return "0";if(d.user_id||d.username||d.uid||d.sec_user_id)return "1";}return "?";}catch(e){return "?";}})()');
+        if (v === '1') return true; if (v === '0') return false;
+      } catch { /* 落 ③ */ }
+    }
+    if (platform === 'toutiao') {
+      // 本地实测游客态:/mp/agw/media/get_media_info 返回 code:100004「user not login」;登录态 code:0 + data。
+      try {
+        const v = await kernelEval(accountId, '(async function(){try{var r=await fetch("https://mp.toutiao.com/mp/agw/media/get_media_info",{credentials:"include"});var j=await r.json();if(j){if(j.code===100004||/not login/i.test(String(j.message||"")))return "0";if(j.code===0&&j.data)return "1";}return "?";}catch(e){return "?";}})()');
+        if (v === '1') return true; if (v === '0') return false;
+      } catch { /* 落 ③ */ }
+    }
+    if (platform === 'shipinhao') {
+      // 视频号 auth_data(身份那条复用):登录态有 data.finderUser;游客态 errCode:300330 无 finderUser。
+      try {
+        const v = await kernelEval(accountId, '(async function(){try{var r=await fetch("/cgi-bin/mmfinderassistant-bin/auth/auth_data",{method:"POST",headers:{"content-type":"application/json"},credentials:"include",body:JSON.stringify({scene:7,timestamp:Date.now()})});var j=await r.json();var f=j&&j.data&&j.data.finderUser;if(f&&(f.nickname||f.uniqId))return "1";var ec=j&&(j.errCode||j.errcode||0);if(ec)return "0";return "?";}catch(e){return "?";}})()');
+        if (v === '1') return true; if (v === '0') return false;
+      } catch { /* 落 ③ */ }
+    }
     // ③ 通用兜底:当前页被重定向到登录页 = 服务端已判未登录(cookie 还在但失效)。读不到 URL 就只信 cookie。
     try {
       const href = await kernelEval(accountId, 'location.href');
