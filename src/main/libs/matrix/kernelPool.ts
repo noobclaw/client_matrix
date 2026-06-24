@@ -27,7 +27,7 @@ import path from 'path';
 import { coworkLog } from '../coworkLogger';
 import { installedKernelPath, ensureTabGroupExtension } from './kernelInstaller';
 import { ensureProxyBridge, probeProxy } from './proxyBridge';
-import { getAccount, proxyBadgeInfo } from './accountManager';
+import { getAccount, proxyBadgeInfo, getLocalEgressIp } from './accountManager';
 import type { Fingerprint, Proxy } from './types';
 
 export interface KernelSession {
@@ -384,11 +384,32 @@ async function doGetPage(s: KernelSession): Promise<KernelSession> {
       await send(s, 'Runtime.evaluate', { expression: execSrc });
     }
   } catch { /* 非关键:kernelExec 调用时会再确保 */ }
-  // 账号角标:窗口左上角常驻账号名,多窗叠在一起也能分清扫哪个码。
-  // addScriptToEvaluateOnNewDocument 让它跨整页导航也在;立即再注入一次给当前页。
+  // 本机出口 IP 探测(仅【无代理】号):内核里 fetch ip 服务读真实出口(反映这个内核到底走没走 VPN;主进程 undici
+  //   不一定走 VPN,必须内核侧探)。【在注入角标之前探】→ 角标一次性带上「本机 <ip>」,不再二次重注入。
+  //   ⚠️ 之前探到后二次注入 badgeScript 会叠出【第二个角标】(各自 setInterval 维护、互不删)→ 两个角标重叠串成
+  //   「本机默认 …206.35」那种乱码。改为:没缓存就等(封顶 3s)再注入;有缓存先用、后台刷新供下次起窗。
+  const IPIFY_EXPR = '(async function(){try{var r=await fetch("https://api.ipify.org?format=text",{cache:"no-store"});var t=((await r.text())||"").trim();return /^[0-9a-fA-F:.]{3,45}$/.test(t)?t:"";}catch(e){return "";}})()';
+  try {
+    const accForIp = getAccount(s.accountId);
+    if (accForIp && !accForIp.proxy) {
+      if (!getLocalEgressIp()) {
+        const ip = await Promise.race([
+          kernelEval(s.accountId, IPIFY_EXPR).catch(() => ''),
+          new Promise<string>((r) => setTimeout(() => r(''), 3000)),
+        ]);
+        if (ip) { const { setLocalEgressIp } = await import('./accountManager'); setLocalEgressIp(String(ip)); }
+      } else {
+        void (async () => {
+          try { const ip = await kernelEval(s.accountId, IPIFY_EXPR); if (ip) { const { setLocalEgressIp } = await import('./accountManager'); setLocalEgressIp(String(ip)); } } catch { /* ignore */ }
+        })();
+      }
+    }
+  } catch { /* ignore */ }
+  // 账号角标:窗口左上角常驻账号名 + 代理/本机 IP(IP 已在上面探好、写进 proxyBadgeInfo)。
+  //   addScriptToEvaluateOnNewDocument 让它跨整页导航也在;立即再注入一次给当前页。【只注入这一次】,别在别处二次注入。
   if (s.label) {
     try {
-      // 代理 IP 角标:撞 IP→红(风控提示)、有代理且探测能通→绿/不通→黄、本机默认→绿。探测仅在有代理且未撞 IP 时跑(≤6s)。
+      // 代理 IP 角标:撞 IP→红(风控提示)、有代理且探测能通→绿/不通→黄、本机→绿。探测仅在有代理且未撞 IP 时跑(≤6s)。
       const info = proxyBadgeInfo(s.accountId);
       let pmode: 'ok' | 'down' | 'dup' = 'ok';
       if (info.duplicate) pmode = 'dup';
@@ -400,27 +421,6 @@ async function doGetPage(s: KernelSession): Promise<KernelSession> {
       await send(s, 'Runtime.evaluate', { expression: script });
     } catch { /* 角标非关键 */ }
   }
-  // 本机出口 IP 探测(仅【无代理】号):内核里 fetch ip 服务读真实出口,反映这个内核到底走没走 VPN
-  //   (主进程 undici 不一定走 VPN,所以必须内核侧探)。后台 fire-and-forget,不阻塞起窗;探到写进 accountManager
-  //   供角标/卡片显示「本机 <ip>」而非笼统「本机默认」。失败/拿不到忽略。
-  try {
-    const accForIp = getAccount(s.accountId);
-    if (accForIp && !accForIp.proxy) {
-      void (async () => {
-        try {
-          const ip = await kernelEval(s.accountId, '(async function(){try{var r=await fetch("https://api.ipify.org?format=text",{cache:"no-store"});var t=((await r.text())||"").trim();return /^[0-9a-fA-F:.]{3,45}$/.test(t)?t:"";}catch(e){return "";}})()');
-          if (ip) {
-            const { setLocalEgressIp } = await import('./accountManager');
-            setLocalEgressIp(String(ip));
-            // 探到后立刻刷新【当前窗口】角标(否则首次起窗要等下次才显示真实 IP)。
-            if (s.label) {
-              try { const info2 = proxyBadgeInfo(s.accountId); const sc = badgeScript(s.label, info2.text, info2.duplicate ? 'dup' : 'ok'); await send(s, 'Runtime.evaluate', { expression: sc }); } catch { /* 角标非关键 */ }
-            }
-          }
-        } catch { /* 探测失败忽略 */ }
-      })();
-    }
-  } catch { /* ignore */ }
   // 错开窗口位置:多个号别完全重叠,便于分辨。
   try {
     const win = await send(s, 'Browser.getWindowForTarget', { targetId: s.pageTargetId });
@@ -828,16 +828,10 @@ export async function checkKernelLogin(accountId: string, platform: string): Pro
         if (v === '1') return true; if (v === '0') return false;
       } catch { /* 落 ③ */ }
     }
-    if (platform === 'douyin') {
-      // 本地实测游客态:/aweme/v1/web/user/profile/self/ 返回 status_code:8「用户未登录」user:null;登录态 status_code:0 + user。
-      //   ⚠️ 须当前页在 www.douyin.com(同源)才拿得到 cookie:about:blank/跨子域会被 CORS 挡 → "?" 落 ③(故调用方发布走
-      //   creator.douyin.com 跳转判,取材路径要先导航到 www.douyin.com 再调,见 hotspotDouyinSource)。登录态可能要 X-Bogus
-      //   签名 → 拿不到本人时返回 "?" 不误杀;但游客「用户未登录」不需签名,故登出能被准确判出(修复 cookie 在但 session 死的误判)。
-      try {
-        const v = await kernelEval(accountId, '(async function(){try{var r=await fetch("https://www.douyin.com/aweme/v1/web/user/profile/self/",{credentials:"include"});var j=await r.json();if(j){if(j.status_code===0&&j.user)return "1";if(j.status_code===8||/未登录/.test(String(j.status_msg||"")))return "0";}return "?";}catch(e){return "?";}})()');
-        if (v === '1') return true; if (v === '0') return false;
-      } catch { /* 落 ③ */ }
-    }
+    // 抖音:【不接接口判定】。曾用 /aweme/v1/web/user/profile/self/,但该 content API 需 X-Bogus 签名 → 登录态
+    //   未签名请求也回 status_code:8「用户未登录」→ 把【登录着的好号误判过期】(2026-06-24 实测误杀)。撤回,只靠
+    //   cookie + ③ 跳转。代价:cookie 在但 session 死的抖音号检不出(取材顶多 0 条退文字卡)——比误杀好号轻得多。
+    //   要做准须用不需签名的 passport 接口(/passport/web/account/info/),待真机确认登录态返回后再补。
     // ③ 通用兜底:当前页被重定向到登录页 = 服务端已判未登录(cookie 还在但失效)。读不到 URL 就只信 cookie。
     try {
       const href = await kernelEval(accountId, 'location.href');
