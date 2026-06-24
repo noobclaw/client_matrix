@@ -465,15 +465,15 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
                   // 状态小标签(挪到名字后边,表示状态;不放右侧按钮区)。
                   // 「登录过期」= login_required 但【连过有身份】(过期流程只翻状态不清身份);login_required 且无身份 = 尚未连接(从没连过)。
                   const expired = a.status === 'login_required' && !!(a.nickname || a.avatar || a.displayId);
-                  // 状态左上角实心角标配色:已连接绿、登录过期橙(连过但失效·可重扫)、尚未连接黄、运行蓝、封红、其它灰,全白字。
+                  // 状态左上角实心角标配色:已连接绿、登录过期红(连过但失效·可重扫)、尚未连接黄、运行蓝、封红、其它灰,全白字。
                   const stSolid = a.status === 'idle' ? 'bg-green-500'
-                    : expired ? 'bg-orange-500'
+                    : expired ? 'bg-red-500'
                     : a.status === 'login_required' ? 'bg-amber-500'
                     : a.status === 'running' ? 'bg-blue-500'
                     : a.status === 'banned' ? 'bg-red-500'
                     : 'bg-gray-400';
                   const stLabel = expired ? '登录过期' : STATUS_LABEL[a.status];
-                  const stDot = expired ? 'bg-orange-500' : STATUS_DOT[a.status];
+                  const stDot = expired ? 'bg-red-500' : STATUS_DOT[a.status];
                   return (
                   <div key={a.id} className="relative rounded-xl border border-gray-200 dark:border-gray-700 p-4 flex flex-col gap-2 transition-colors bg-white dark:bg-gray-900">
                     {/* 左上角状态实心角标(更显眼:已连接绿底白字 / 尚未连接黄底白字) */}
@@ -501,7 +501,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
                                 ? (<>
                                     {a.displayId && <div className="text-gray-600 dark:text-gray-300 truncate">{platformIdLabel(a.platform)}:{a.displayId}</div>}
                                     <div className="text-gray-500 dark:text-gray-400 truncate">备注:{a.displayName}</div>
-                                    <div className="text-orange-500 truncate">⚠️ 登录过期,请点下方「扫码连接」重新登录</div>
+                                    <div className="text-red-500 truncate">⚠️ 登录过期,请点下方「扫码连接」重新登录</div>
                                   </>)
                                 : <div className="text-amber-500 truncate">请点击下方扫码连接进行连接</div>)
                             : (<>
