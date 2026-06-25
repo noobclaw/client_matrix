@@ -106,10 +106,10 @@ function badgeScript(label: string, proxyText: string, proxyMode: 'ok' | 'down' 
   const P = JSON.stringify(line2);
   const bg2 = proxyMode === 'dup' ? '#dc2626' : proxyMode === 'down' ? '#d97706' : '#16a34a';
   return `(function(){var node=null;function m(){try{var root=document.body||document.documentElement;if(!root)return;if(node&&node.isConnected)return;`
-    + `var host=document.createElement('div');host.style.cssText='position:fixed;top:0;left:0;z-index:2147483647;pointer-events:none;display:flex;flex-direction:column;align-items:flex-start';`
+    + `var host=document.createElement('div');host.style.cssText='position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:2147483647;pointer-events:none;display:flex;flex-direction:column;align-items:center';`
     + `var sr=host.attachShadow?host.attachShadow({mode:'closed'}):null;var box=sr||host;`
-    + `var b=document.createElement('div');b.textContent=${L};b.style.cssText='background:#16a34a;color:#fff;font:bold 13px/1.5 system-ui,sans-serif;padding:3px 12px;border-bottom-right-radius:8px';box.appendChild(b);`
-    + `var p=document.createElement('div');p.textContent=${P};p.style.cssText='background:${bg2};color:#fff;font:bold 12px/1.4 system-ui,sans-serif;padding:3px 12px;border-bottom-right-radius:8px;margin-top:1px';box.appendChild(p);`
+    + `var b=document.createElement('div');b.textContent=${L};b.style.cssText='background:#16a34a;color:#fff;font:bold 13px/1.5 system-ui,sans-serif;padding:3px 12px;border-radius:0 0 8px 8px';box.appendChild(b);`
+    + `var p=document.createElement('div');p.textContent=${P};p.style.cssText='background:${bg2};color:#fff;font:bold 12px/1.4 system-ui,sans-serif;padding:3px 12px;border-radius:0 0 8px 8px;margin-top:1px';box.appendChild(p);`
     + `root.appendChild(host);node=host;}catch(e){}}m();setInterval(m,2000);})();`;
 }
 
@@ -120,8 +120,8 @@ function expiredBadgeScript(text: string): string {
   const T = JSON.stringify(text);
   return `(function(){var node=null;`
     // 隐藏绿色身份角标:它是 body 直接子节点、position:fixed、top/left:0、z-index 拉满的 div(badgeScript 的签名);排除自己(node)。
-    + `function hideGreen(root){try{var ch=root.children;for(var i=0;i<ch.length;i++){var el=ch[i];if(el!==node&&el.tagName==='DIV'&&el.style&&el.style.position==='fixed'&&el.style.top==='0px'&&el.style.left==='0px'&&el.style.zIndex==='2147483647'){el.style.display='none';}}}catch(e){}}`
-    + `function m(){try{var root=document.body||document.documentElement;if(!root)return;hideGreen(root);if(node&&node.isConnected)return;var host=document.createElement('div');host.style.cssText='position:fixed;top:0;left:0;z-index:2147483647;pointer-events:none';var sr=host.attachShadow?host.attachShadow({mode:'closed'}):null;var b=document.createElement('div');b.textContent=${T};b.style.cssText='background:#facc15;color:#1f2937;font:bold 13px/1.5 system-ui,sans-serif;padding:4px 14px;border-bottom-right-radius:8px;box-shadow:0 1px 6px rgba(0,0,0,.3)';(sr||host).appendChild(b);root.appendChild(host);node=host;}catch(e){}}m();setInterval(m,2000);})();`;
+    + `function hideGreen(root){try{var ch=root.children;for(var i=0;i<ch.length;i++){var el=ch[i];if(el!==node&&el.tagName==='DIV'&&el.style&&el.style.position==='fixed'&&el.style.top==='0px'&&el.style.zIndex==='2147483647'){el.style.display='none';}}}catch(e){}}`
+    + `function m(){try{var root=document.body||document.documentElement;if(!root)return;hideGreen(root);if(node&&node.isConnected)return;var host=document.createElement('div');host.style.cssText='position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:2147483647;pointer-events:none';var sr=host.attachShadow?host.attachShadow({mode:'closed'}):null;var b=document.createElement('div');b.textContent=${T};b.style.cssText='background:#facc15;color:#1f2937;font:bold 13px/1.5 system-ui,sans-serif;padding:4px 14px;border-radius:0 0 8px 8px;box-shadow:0 1px 6px rgba(0,0,0,.3)';(sr||host).appendChild(b);root.appendChild(host);node=host;}catch(e){}}m();setInterval(m,2000);})();`;
 }
 
 // 内核缺失的统一错误标记:UI 据此弹「去下载内核」引导,不再回退系统 Chrome。
