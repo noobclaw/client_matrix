@@ -3529,33 +3529,18 @@ const VideoConfigModal: React.FC<{
                     return (
                       <div key={pid} className="flex items-center gap-3">
                         <div className="w-28 shrink-0 text-sm font-medium dark:text-gray-200">{label}</div>
-                        {accs.length === 0 ? (
-                          <button
-                            type="button"
-                            onClick={() => { window.dispatchEvent(new CustomEvent('noobclaw:show-matrix-accounts', { detail: { platform: pid } })); onClose(); }}
-                            className="flex-1 text-left px-3 py-2 rounded-lg border border-dashed border-rose-400 text-rose-500 text-xs hover:bg-rose-500/5"
-                          >
-                            {isZh ? '⚠️ 暂无该平台账号 · 点此去「我的矩阵账号」添加 →' : '⚠️ No account · add one in "My Matrix Accounts" →'}
-                          </button>
-                        ) : (
-                          <select
-                            value={accountByPlatform[pid] || ''}
-                            onChange={(e) => setAccountByPlatform((m) => ({ ...m, [pid]: e.target.value }))}
-                            className="flex-1 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm dark:text-gray-200"
-                          >
-                            <option value="">{isZh ? '— 选择账号 —' : '— pick account —'}</option>
-                            {accs.map((a) => (
-                              <option key={a.id} value={a.id}>
-                                {a.displayName}{a.status && a.status !== 'idle' ? ` (${a.status})` : ''}
-                              </option>
-                            ))}
-                          </select>
-                        )}
+                        <MatrixAccountSelect
+                          isZh={isZh}
+                          accounts={accs}
+                          value={accountByPlatform[pid] || ''}
+                          onChange={(id) => setAccountByPlatform((m) => ({ ...m, [pid]: id }))}
+                          onAddAccount={() => { window.dispatchEvent(new CustomEvent('noobclaw:show-matrix-accounts', { detail: { platform: pid } })); onClose(); }}
+                        />
                       </div>
                     );
                   })}
                   <p className="text-[11px] text-gray-500 dark:text-gray-400 pt-1">
-                    {isZh ? '每个平台最多选 1 个账号;发布时用该号的指纹浏览器登录态上传(未登录会在运行时跳过)。' : 'Max 1 account per platform; published via that account\'s fingerprint browser.'}
+                    {isZh ? '每个平台必须选一个【已连接】账号;未连接的已置灰不可选,选好才能下一步。发布时用该号的指纹浏览器上传。' : 'Each platform needs a LINKED account (unlinked ones are greyed out). Published via that account\'s fingerprint browser.'}
                   </p>
                   {submitError && (
                     <div className="rounded-lg border border-red-500/40 bg-red-500/5 p-3 text-xs text-red-500">{submitError}</div>
@@ -5168,33 +5153,18 @@ export const TemplateSpeedModal: React.FC<{ isZh: boolean; matrixMode?: boolean;
                     return (
                       <div key={pid} className="flex items-center gap-3">
                         <div className="w-28 shrink-0 text-sm font-medium dark:text-gray-200">{label}</div>
-                        {accs.length === 0 ? (
-                          <button
-                            type="button"
-                            onClick={() => { window.dispatchEvent(new CustomEvent('noobclaw:show-matrix-accounts', { detail: { platform: pid } })); onClose(); }}
-                            className="flex-1 text-left px-3 py-2 rounded-lg border border-dashed border-fuchsia-400 text-fuchsia-500 text-xs hover:bg-fuchsia-500/5"
-                          >
-                            {isZh ? '⚠️ 暂无该平台账号 · 点此去「我的矩阵账号」添加 →' : '⚠️ No account · add one in "My Matrix Accounts" →'}
-                          </button>
-                        ) : (
-                          <select
-                            value={accountByPlatform[pid] || ''}
-                            onChange={(e) => setAccountByPlatform((m) => ({ ...m, [pid]: e.target.value }))}
-                            className="flex-1 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm dark:text-gray-200"
-                          >
-                            <option value="">{isZh ? '— 选择账号 —' : '— pick account —'}</option>
-                            {accs.map((a) => (
-                              <option key={a.id} value={a.id}>
-                                {a.displayName}{a.status && a.status !== 'idle' ? ` (${a.status})` : ''}
-                              </option>
-                            ))}
-                          </select>
-                        )}
+                        <MatrixAccountSelect
+                          isZh={isZh}
+                          accounts={accs}
+                          value={accountByPlatform[pid] || ''}
+                          onChange={(id) => setAccountByPlatform((m) => ({ ...m, [pid]: id }))}
+                          onAddAccount={() => { window.dispatchEvent(new CustomEvent('noobclaw:show-matrix-accounts', { detail: { platform: pid } })); onClose(); }}
+                        />
                       </div>
                     );
                   })}
                   <p className="text-[11px] text-gray-500 dark:text-gray-400 pt-1">
-                    {isZh ? '每个平台最多选 1 个账号;发布时用该号的指纹浏览器登录态上传(未登录会在运行时跳过)。' : 'Max 1 account per platform; published via that account\'s fingerprint browser.'}
+                    {isZh ? '每个平台必须选一个【已连接】账号;未连接的已置灰不可选,选好才能下一步。发布时用该号的指纹浏览器上传。' : 'Each platform needs a LINKED account (unlinked ones are greyed out). Published via that account\'s fingerprint browser.'}
                   </p>
                 </div>
               )}
