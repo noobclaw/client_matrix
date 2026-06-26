@@ -793,6 +793,44 @@ export async function kernelSetFileInputViaChooser(
   }
 }
 
+/**
+ * 往可编辑框「真键盘」打字(CDP Input 域,isTrusted=true)—— TikTok caption 专用:
+ *   合成打字(execCommand insertText,isTrusted=false)会被 webmssdk 识破 → 上传后「出错了」掐掉。
+ *   手动填描述是真键盘,所以没事。本函数复刻:可信点击聚焦 → 真键 Ctrl+A/Cmd+A 全选清空预填文件名 →
+ *   Input.insertText 原生提交文本(isTrusted=true)。selector 支持逗号多选,取首个匹配。
+ */
+export async function kernelTypeIntoEditorNative(
+  accountId: string,
+  selector: string,
+  text: string,
+): Promise<{ ok: boolean; reason?: string }> {
+  if (!sessions.get(accountId)) return { ok: false, reason: 'no_session' };
+  const s = await getPage(accountId);
+  try {
+    const findExpr = '(function(){var el=document.querySelector(' + JSON.stringify(selector) + ');if(!el)return null;'
+      + 'try{el.scrollIntoView({block:"center"});}catch(e){}var r=el.getBoundingClientRect();'
+      + 'if(r.width<1||r.height<1)return null;return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+Math.min(r.height/2,18))};})()';
+    const posRes: any = await send(s, 'Runtime.evaluate', { expression: findExpr, returnByValue: true });
+    const pos = posRes?.result?.value;
+    if (!pos || typeof pos.x !== 'number') return { ok: false, reason: 'editor_not_found' };
+    // 可信点击聚焦(Input 域 = isTrusted=true)。
+    await send(s, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x: pos.x, y: pos.y });
+    await send(s, 'Input.dispatchMouseEvent', { type: 'mousePressed', x: pos.x, y: pos.y, button: 'left', buttons: 1, clickCount: 1 });
+    await send(s, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x: pos.x, y: pos.y, button: 'left', buttons: 0, clickCount: 1 });
+    await new Promise((r) => setTimeout(r, 200));
+    // 真键全选(清掉 TikTok 预填的文件名)—— Ctrl+A(modifiers:2)与 Cmd+A(modifiers:8)各发一次,内核按仿真 OS 认其一。
+    for (const mod of [2, 8]) {
+      await send(s, 'Input.dispatchKeyEvent', { type: 'keyDown', modifiers: mod, key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65 });
+      await send(s, 'Input.dispatchKeyEvent', { type: 'keyUp', modifiers: mod, key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65 });
+    }
+    // 原生提交文本(替换选区,isTrusted=true)。
+    await send(s, 'Input.insertText', { text });
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, reason: 'type_native_threw:' + String(e?.message || e).slice(0, 100) };
+  }
+}
+
 // 清空该号浏览器全部 cookie(断开关联用:登出但保留 profile/指纹/配置)。
 export async function kernelClearCookies(accountId: string): Promise<void> {
   const s = await getPage(accountId);

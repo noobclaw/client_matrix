@@ -15,7 +15,7 @@ import { coworkLog } from '../coworkLogger';
 import type { VideoPlatform, PublishInput, PublishResult } from '../video/publishers/types';
 import { PUBLISHER_ANCHOR_URL } from '../video/publishers/publisherUtils';
 import { matrixCmd } from './cdpCommands';
-import { kernelNavigate, kernelSetFileInput, kernelSetFileInputViaDataTransfer, kernelSetFileInputViaChooser } from './kernelPool';
+import { kernelNavigate, kernelSetFileInput, kernelSetFileInputViaDataTransfer, kernelSetFileInputViaChooser, kernelTypeIntoEditorNative } from './kernelPool';
 
 // TikTok 上传按钮定位:返回可见上传触发块的中心【视口坐标】{x,y}(找不到返回 null)。
 //   webmssdk 拒合成注入 → 必须点站点真实按钮触发文件选择器(见 kernelSetFileInputViaChooser)。
@@ -127,8 +127,8 @@ function buildMatrixDriverCtx(
       //   → DOM.setFileInputFiles。失败再回落 DataTransfer / CDP(不引入回归)。
       if (platform === 'tiktok') {
         const ch = await kernelSetFileInputViaChooser(accountId, input.videoPath, TIKTOK_UPLOAD_BUTTON_EXPR);
-        if (ch.ok) { onLog('   ✓ 经真实文件选择器注入(点上传按钮+拦截)'); return { ok: true }; }
-        onLog('   ⚠️ 文件选择器注入未成(' + (ch.reason || '?') + '),回落 DataTransfer…');
+        if (ch.ok) { onLog('   ✓ 视频已选好'); return { ok: true }; }
+        onLog('   选择文件未成(' + (ch.reason || '?') + '),换备用方式…');
         const dt = await kernelSetFileInputViaDataTransfer(accountId, input.videoPath, { mimeType: opts?.mimeType, ttlMs: opts?.ttlMs });
         if (dt.ok) return { ok: true };
         onLog('   ⚠️ DataTransfer 注入未成(' + (dt.reason || '?') + '),回落 CDP setFileInputFiles…');
@@ -153,6 +153,9 @@ function buildMatrixDriverCtx(
       clickWithText(accountId, opts),
     insertEditorText: (selector: string, text: string) =>
       insertEditorText(accountId, selector, text),
+    // 真键盘打字(CDP Input.insertText,isTrusted=true)—— TikTok caption 专用,合成打字会被 webmssdk 识破→「出错了」。
+    typeNative: (selector: string, text: string) =>
+      kernelTypeIntoEditorNative(accountId, selector, text),
     setInputValue: (selector: string, value: string) =>
       setInputValue(accountId, selector, value),
     mainWorldClick: (selector: string) => mainWorldClick(accountId, selector),
