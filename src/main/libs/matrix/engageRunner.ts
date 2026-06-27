@@ -334,7 +334,10 @@ export async function runEngageTask(opts: EngageTaskOptions): Promise<EngageRepo
     throw new Error(`${NO_KERNEL_ERROR}: 指纹浏览器内核未安装,请先到「我的矩阵账号」下载内核`);
   }
   const k = Math.max(1, Math.min(opts.concurrency ?? 3, 10));
-  const scenarioId = opts.platform === 'douyin' ? 'douyin_auto_engage' : `${opts.platform}_auto_engage`;
+  // 平台 → 后端 backend/matrix/scenarios 的剧本 id。币安是 binance_SQUARE_auto_engage(非 binance_auto_engage),
+  // 别的都是 `<平台>_auto_engage`。漏了币安这个特例会取不到剧本 → 指纹浏览器都不唤起、无日志。
+  const ENGAGE_SCENARIO_ID: Record<string, string> = { binance: 'binance_square_auto_engage' };
+  const scenarioId = ENGAGE_SCENARIO_ID[opts.platform] || `${opts.platform}_auto_engage`;
   const pack = await fetchEngagePack(scenarioId);
   if (!pack || !pack.orchestrator) {
     return { platform: opts.platform, total: opts.accountIds.length, success: 0, failed: 0, skipped: opts.accountIds.length,
