@@ -207,7 +207,9 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     try {
       const r = await (window as any).electron?.matrix?.listAccounts?.();
       const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
-      setMatrixAccounts(accs.filter((a) => a.platform === platform).map((a) => ({ id: a.id, displayName: a.displayName, status: a.status, keywords: a.keywords, group: a.group, platform: a.platform, nickname: a.nickname, displayId: a.displayId, avatar: a.avatar })));
+      // 互动涨粉走【主站】(浏览首页/搜索做赞关评),只能选主站账号;快手「创作者中心」(loginScope='creator')
+      // 是发布端登录态,不能拿来互动 → 过滤掉。非快手账号无 loginScope(默认主站)不受影响。
+      setMatrixAccounts(accs.filter((a) => a.platform === platform && (a.loginScope || 'main') === 'main').map((a) => ({ id: a.id, displayName: a.displayName, status: a.status, keywords: a.keywords, group: a.group, platform: a.platform, nickname: a.nickname, displayId: a.displayId, avatar: a.avatar })));
     } catch { setMatrixAccounts([]); }
     setMatrixWizardTask(null);          // 新建:清掉编辑态(否则会被上次编辑的任务回填)
     setMatrixWizardPlatform(platform);
@@ -220,7 +222,8 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     try {
       const r = await (window as any).electron?.matrix?.listAccounts?.();
       const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
-      setMatrixAccounts(accs.filter((a) => a.platform === plat).map((a) => ({ id: a.id, displayName: a.displayName, status: a.status, keywords: a.keywords, group: a.group, platform: a.platform, nickname: a.nickname, displayId: a.displayId, avatar: a.avatar })));
+      // 同上:互动涨粉只选主站账号,排除快手创作者中心账号(loginScope='creator')。
+      setMatrixAccounts(accs.filter((a) => a.platform === plat && (a.loginScope || 'main') === 'main').map((a) => ({ id: a.id, displayName: a.displayName, status: a.status, keywords: a.keywords, group: a.group, platform: a.platform, nickname: a.nickname, displayId: a.displayId, avatar: a.avatar })));
     } catch { setMatrixAccounts([]); }
     setMatrixWizardTask({
       id: task.id,
