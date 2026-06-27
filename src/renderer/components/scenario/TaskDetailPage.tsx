@@ -596,6 +596,21 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
 
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
 
+  // 矩阵号:加载本任务各账号详情(平台号/昵称/赛道/人设/关键词),详情页按账号展示。
+  const [matrixAccts, setMatrixAccts] = useState<any[]>([]);
+  useEffect(() => {
+    const ids: string[] = Array.isArray((task as any)?.account_ids) ? (task as any).account_ids : [];
+    if (!ids.length) { setMatrixAccts([]); return; }
+    let alive = true;
+    (async () => {
+      try {
+        const r = await (window.electron as any)?.matrix?.listAccounts?.();
+        if (alive && r?.ok) setMatrixAccts(Array.isArray(r.accounts) ? r.accounts : []);
+      } catch { /* 拉不到账号详情不影响详情页其余部分 */ }
+    })();
+    return () => { alive = false; };
+  }, [(task as any)?.id]);
+
   const showToast = (kind: 'ok' | 'warn' | 'err', text: string) => {
     if (!mountedRef.current) return;
     setToast({ kind, text });
@@ -1070,13 +1085,41 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
               return (
                 <>
                   {/* 矩阵号:展示账号数(各账号自有赛道/关键词/人设),不显示「赛道: matrix」+ 空关键词 */}
-                  {isMatrix && (
-                    <div className="flex items-center gap-3">
-                      <span className="text-gray-400">{isZh ? '账号:' : 'Accounts:'}</span>
-                      <span className="dark:text-white font-medium">{isZh ? `${matrixAccountIds.length} 个(各用自己的赛道关键词)` : `${matrixAccountIds.length} (each uses its own keywords)`}</span>
-                      <span className="text-[10px] text-gray-500 font-mono">#{task.id.slice(0, 8)}</span>
-                    </div>
-                  )}
+                  {isMatrix && (() => {
+                    // 每个账号自有赛道/人设/关键词 → 列出来(可滚动,30 个也放得下)。
+                    const PL: Record<string, string> = { douyin: '抖音', xhs: '小红书', bilibili: 'B站', kuaishou: '快手', tiktok: 'TikTok', x: 'X', binance: '币安广场', youtube: 'YouTube', shipinhao: '视频号', toutiao: '头条' };
+                    const EM: Record<string, string> = { douyin: '🎵', xhs: '📕', bilibili: '📺', kuaishou: '⚡', tiktok: '🎬', x: '🐦', binance: '🟡', youtube: '▶️', shipinhao: '🟢', toutiao: '🟠' };
+                    const idLabel = (p: string) => { const l = PL[p] || ''; return l ? (l.endsWith('号') ? l : l + '号') : ''; };
+                    const accMap = new Map<string, any>(matrixAccts.map((a: any) => [a.id, a]));
+                    const accs = matrixAccountIds.map((id) => accMap.get(id)).filter(Boolean);
+                    return (
+                      <div>
+                        <div className="flex items-center gap-3 mb-1.5">
+                          <span className="text-gray-400">{isZh ? '账号:' : 'Accounts:'}</span>
+                          <span className="dark:text-white font-medium">{isZh ? `${matrixAccountIds.length} 个 · 各用自己的赛道/人设/关键词` : `${matrixAccountIds.length} accounts · each uses its own track/persona/keywords`}</span>
+                          <span className="text-[10px] text-gray-500 font-mono">#{task.id.slice(0, 8)}</span>
+                        </div>
+                        {accs.length > 0 ? (
+                          <div className="max-h-72 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-800">
+                            {accs.map((a: any) => (
+                              <div key={a.id} className="px-3 py-2 text-xs leading-relaxed">
+                                <div className="flex items-center gap-1.5">
+                                  <span>{EM[a.platform] || '•'}</span>
+                                  <span className="font-medium dark:text-gray-200 truncate">{a.nickname || a.displayName}</span>
+                                  {a.displayId && <span className="text-gray-500 dark:text-gray-400 truncate">· {idLabel(a.platform)}:{a.displayId}</span>}
+                                  <span className="ml-auto shrink-0 text-gray-500 dark:text-gray-400">🎯 {a.group ? a.group : <span className="text-amber-500">赛道未设</span>}</span>
+                                </div>
+                                <div className="text-gray-500 dark:text-gray-400 truncate">🏷️ {a.keywords && a.keywords.length ? a.keywords.join(' · ') : <span className="text-amber-500">未配关键词(互动需要)</span>}</div>
+                                {a.persona && <div className="text-gray-400 dark:text-gray-500 truncate" title={a.persona}>🎭 {a.persona}</div>}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-[11px] text-gray-400 py-1">{isZh ? '账号详情加载中…(如长期不出,去「我的矩阵账号」确认账号仍在)' : 'Loading account details…'}</div>
+                        )}
+                      </div>
+                    );
+                  })()}
                   {/* v4.28.x: 链接仿写场景(XHS link mode / x_link_rewrite / binance_from_x_link)
                       隐藏「赛道/人设: 🔗 ...」整行 —— 上面已经有 type badge 标明任务类型,
                       这一行的 link-mode label 跟 badge 完全重复,#ID 也已在标题区显示;

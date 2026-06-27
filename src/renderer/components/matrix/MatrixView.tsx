@@ -31,6 +31,8 @@ function parseKeywords(s: string): string[] { return s.split(/[\s,，、\n]+/).m
 
 // 对齐支持「互动涨粉」的平台(与新建页一致)。
 const PLATFORMS = ['douyin', 'xhs', 'kuaishou', 'bilibili', 'shipinhao', 'toutiao', 'x', 'binance', 'youtube', 'tiktok'];
+// 每个平台最多添加的账号数(快手两端合并按平台总数计)。
+const MAX_ACCOUNTS_PER_PLATFORM = 30;
 const PLATFORM_LABEL: Record<string, string> = { douyin: '抖音', xhs: '小红书', bilibili: 'B站', kuaishou: '快手', tiktok: 'TikTok', x: 'X', binance: '币安广场', youtube: 'YouTube', shipinhao: '视频号', toutiao: '头条' };
 // 平台号的标签:平台名已以「号」结尾(视频号)就不再加「号」,否则拼「号」(抖音号/快手号…)。
 const platformIdLabel = (p: string): string => { const l = PLATFORM_LABEL[p] || ''; return l.endsWith('号') ? l : l + '号'; };
@@ -201,6 +203,9 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
   const openAdd = () => {
     if (!requireLogin()) return;
     if (!requireKernel()) return;
+    // 每个平台最多 30 个账号(快手两端按平台总数合并计):达上限不开弹窗,只提示。
+    const platformTotal = accounts.filter((a) => a.platform === platform).length;
+    if (platformTotal >= MAX_ACCOUNTS_PER_PLATFORM) { setNotice(`${PLATFORM_LABEL[platform]}账号已达上限(每个平台最多 ${MAX_ACCOUNTS_PER_PLATFORM} 个),如需添加请先移除部分账号`); return; }
     setEditId(null); setNewName(`账号${platformAccounts.length + 1}-`); setNewScope(ksScope);
     // 默认选中一个赛道并带出人设 + 关键词(可再改)。
     const def = TRACK_PRESETS.find((t) => t.name === DEFAULT_TRACK) || TRACK_PRESETS[0];
@@ -252,7 +257,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
     setConfirmDlg({
       title: `扫码连接${platName}${scopeName ? ' · ' + scopeName : ''}`,
       body: `即将打开指纹浏览器访问${platName}${scopeName ? scopeName : ''},需要您在弹出的浏览器里扫码登录。扫码成功后状态会自动变「已连接」。`,
-      okText: '好的,请打开',
+      okText: '打开浏览器登录',
       onYes: async () => {
         setConfirmDlg(null);
         if (!requireKernel()) return;
@@ -446,7 +451,11 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
           <div className="max-w-6xl mx-auto">
             <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
               <h2 className="text-lg font-bold dark:text-white">🧬 我的矩阵账号</h2>
-              <button onClick={openAdd} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-white text-sm font-semibold bg-violet-500 hover:bg-violet-600 shadow-sm shadow-violet-500/25 active:scale-95 transition-all">+ 连接{PLATFORM_LABEL[platform]}账号</button>
+              <div className="flex items-center gap-2.5">
+                {/* 当前平台账号数 / 上限,提示用户每个平台最多 30 个 */}
+                <span className="text-xs text-gray-400 dark:text-gray-500">{accounts.filter((a) => a.platform === platform).length}/{MAX_ACCOUNTS_PER_PLATFORM}</span>
+                <button onClick={openAdd} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-white text-sm font-semibold bg-violet-500 hover:bg-violet-600 shadow-sm shadow-violet-500/25 active:scale-95 transition-all">+ 连接{PLATFORM_LABEL[platform]}账号</button>
+              </div>
             </div>
             {/* 平台 tab 切换(跟新建页一致),按平台分别管理账号 */}
             <div className="flex flex-wrap gap-2 mb-4">
