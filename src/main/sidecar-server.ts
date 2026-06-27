@@ -183,9 +183,12 @@ const sseClients = new Set<http.ServerResponse>();
 // 对齐 Electron main.ts 的 activeVideoRuns;Tauri 下视频跑在 sidecar,停止必须在这里 abort。
 const activeVideoRuns = new Map<string, AbortController>();
 
-// 矩阵号「全局同时只跑一个任务」的运行时锁(产品约束:一次只一个平台多窗)。
-let matrixRunning = false;
-let matrixAbort: AbortController | null = null; // 当前运行的停止句柄(matrix:stopTask 用)
+// 矩阵号运行锁:按【平台】并发(参照老客户端 scenarioManager 的 runningByResource 按资源并发)——
+// 不同平台的任务可同时跑(各平台账号是独立指纹内核,互不冲突);同一平台同时只跑一个。封顶防开爆内核。
+const MATRIX_MAX_CONCURRENT = 3;
+const runningPlatforms = new Set<string>();                 // 正在跑的平台集合(并发锁的键)
+const abortByPlatform = new Map<string, AbortController>();  // 各平台的停止句柄(matrix:stopTask 用)
+const anyMatrixRunning = (): boolean => runningPlatforms.size > 0;
 
 // 实时进度(供 matrix:getRunProgress 轮询 → 适配成 ScenarioRunProgress 给真 TaskDetailPage)。
 // 老 scenario 进度面板是「轮询」不是 SSE,所以这里把运行态聚合存成模块变量;N 账号求和。
@@ -203,7 +206,8 @@ interface MatrixLiveProgress {
   logs: Array<{ ts: number; accountId: string; msg: string }>;
   error?: string;
 }
-let matrixLiveProgress: MatrixLiveProgress | null = null;
+// 实时进度按【任务】隔离:并发跑多个任务时各自进度互不覆盖。getRunProgress(taskId) 取对应那条。
+const liveProgressByTask = new Map<string, MatrixLiveProgress>();
 
 function broadcastSSE(event: string, data: unknown): void {
   const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -214,21 +218,24 @@ function broadcastSSE(event: string, data: unknown): void {
 
 // 矩阵任务运行(手动 IPC 与定时调度共用,保证「全局同时只跑一个」+ 进度 SSE 一致)。
 async function runMatrixTaskById(taskId: string, kernelPath?: string): Promise<{ ok: boolean; error?: string }> {
-  if (matrixRunning) return { ok: false, error: 'another_task_running' };
-  matrixRunning = true; // 同步占锁:必须在任何 await 之前,杜绝 手动+定时 同时进来的 TOCTOU 双跑
+  // 按【平台】并发:先取任务拿平台,再做「同平台已在跑?」+「并发已满?」检查;check→add 之间无 await(原子占锁,杜绝双跑)。
+  const { getTask, setTaskLastRun } = await import('./libs/matrix/taskStore');
+  const task = getTask(taskId);
+  if (!task) return { ok: false, error: 'task_not_found' };
+  if (task.type !== 'engage') return { ok: false, error: 'unsupported_task_type' };
+  const platform = task.platform;
+  if (runningPlatforms.has(platform)) return { ok: false, error: 'another_task_running' };       // 同平台已在跑
+  if (runningPlatforms.size >= MATRIX_MAX_CONCURRENT) return { ok: false, error: 'concurrency_full' }; // 并发已满
+  runningPlatforms.add(platform);
+  const abort = new AbortController();
+  abortByPlatform.set(platform, abort);
+  const release = () => { runningPlatforms.delete(platform); abortByPlatform.delete(platform); };
   try {
-    const { getTask, setTaskLastRun } = await import('./libs/matrix/taskStore');
     const { runEngageTask } = await import('./libs/matrix/engageRunner');
     const { addRun } = await import('./libs/matrix/runStore');
     const { getAccount } = await import('./libs/matrix/accountManager');
-    const task = getTask(taskId);
-    if (!task) { matrixRunning = false; return { ok: false, error: 'task_not_found' }; }
-    if (task.type !== 'engage') { matrixRunning = false; return { ok: false, error: 'unsupported_task_type' }; }
     const startedAt = Date.now();
     const collected = new Map<string, any>(); // 每号最后一条结果(用于运行记录)
-    matrixAbort = new AbortController();
-    // 进度初值:target 先按配额上限×账号数兜底(没收到 setActionTargets 前也有个分母);
-    // 收到每号真实 target 后用 perAccountTargets 求和覆盖,进度条能跑满。
     const accIds: string[] = task.accountIds || [];
     const accN = accIds.length || 1;
     const q: any = task.quota || {};
@@ -238,86 +245,78 @@ async function runMatrixTaskById(taskId: string, kernelPath?: string): Promise<{
       perAccount[aid] = {
         displayName: getAccount(aid)?.displayName || aid,
         status: 'running',
-        targets: { like: q.daily_like_max || 0, follow: q.daily_follow_max || 0, comment: q.daily_comment_max || 0 }, // 收到真实 setActionTargets 前用配额上限兜底
+        targets: { like: q.daily_like_max || 0, follow: q.daily_follow_max || 0, comment: q.daily_comment_max || 0 },
         done: zero(), cost: { credits: 0, usd: 0 }, logs: [],
       };
     }
-    matrixLiveProgress = {
+    // 本任务独立进度(并发时各任务互不覆盖),存进 liveProgressByTask[taskId]。
+    const live: MatrixLiveProgress = {
       taskId: task.id, status: 'running', startedAt,
       targets: { like: (q.daily_like_max || 0) * accN, follow: (q.daily_follow_max || 0) * accN, comment: (q.daily_comment_max || 0) * accN },
       done: zero(),
       cost: { credits: 0, usd: 0 },
       perAccountTargets: {}, perAccount, logs: [],
     };
+    liveProgressByTask.set(task.id, live);
     const pushLog = (accountId: string, msg: string) => {
-      if (!matrixLiveProgress) return;
-      matrixLiveProgress.logs.push({ ts: Date.now(), accountId, msg });
-      if (matrixLiveProgress.logs.length > 400) matrixLiveProgress.logs.splice(0, matrixLiveProgress.logs.length - 400);
-      const pa = matrixLiveProgress.perAccount[accountId];
+      live.logs.push({ ts: Date.now(), accountId, msg });
+      if (live.logs.length > 400) live.logs.splice(0, live.logs.length - 400);
+      const pa = live.perAccount[accountId];
       if (pa) { pa.logs.push({ ts: Date.now(), msg }); if (pa.logs.length > 200) pa.logs.splice(0, pa.logs.length - 200); }
     };
     const recomputeTargets = () => {
-      if (!matrixLiveProgress) return;
-      const pa = matrixLiveProgress.perAccountTargets;
+      const pa = live.perAccountTargets;
       if (!Object.keys(pa).length) return;
       const sum = zero();
       for (const t of Object.values(pa)) { sum.like += t.like || 0; sum.follow += t.follow || 0; sum.comment += t.comment || 0; }
-      matrixLiveProgress.targets = sum;
+      live.targets = sum;
     };
     broadcastSSE('matrix:progress', { type: 'taskStart', taskId: task.id });
     runEngageTask({
-      platform: task.platform, accountIds: accIds, quota: task.quota, concurrency: task.concurrency, kernelPath, signal: matrixAbort.signal,
-      onLog: (accountId, msg) => { pushLog(accountId, msg); broadcastSSE('matrix:progress', { type: 'log', accountId, msg }); },
+      platform: task.platform, accountIds: accIds, quota: task.quota, concurrency: task.concurrency, kernelPath, signal: abort.signal,
+      onLog: (accountId, msg) => { pushLog(accountId, msg); broadcastSSE('matrix:progress', { type: 'log', accountId, msg, taskId: task.id }); },
       onTargets: (accountId, t) => {
-        if (!matrixLiveProgress) return;
         const tg = { like: t.like || 0, follow: t.follow || 0, comment: t.comment || 0 };
-        matrixLiveProgress.perAccountTargets[accountId] = tg;
-        if (matrixLiveProgress.perAccount[accountId]) matrixLiveProgress.perAccount[accountId].targets = tg; // 该号真实随机配额覆盖兜底
+        live.perAccountTargets[accountId] = tg;
+        if (live.perAccount[accountId]) live.perAccount[accountId].targets = tg; // 该号真实随机配额覆盖兜底
         recomputeTargets();
       },
       onItem: (item) => {
         collected.set(item.accountId, item);
-        if (matrixLiveProgress) {
-          // 聚合 done = 各号最新累计 counts 之和;同时记每号自己的 done(详情页切换看)。
-          const sum = zero();
-          // 聚合 cost = 各号最新累计扣费之和(每号 chargedCredits 是该号到目前的累计,直接相加不会重复计)。
-          const costSum = { credits: 0, usd: 0 };
-          for (const it of collected.values()) {
-            sum.like += it.counts?.like || 0; sum.follow += it.counts?.follow || 0; sum.comment += it.counts?.comment || 0;
-            costSum.credits += it.chargedCredits || 0; costSum.usd += it.chargedUsd || 0;
-          }
-          matrixLiveProgress.done = sum;
-          matrixLiveProgress.cost = costSum;
-          const pa = matrixLiveProgress.perAccount[item.accountId];
-          if (pa) {
-            if (item.counts) pa.done = { like: item.counts.like || 0, follow: item.counts.follow || 0, comment: item.counts.comment || 0 };
-            pa.cost = { credits: item.chargedCredits || 0, usd: item.chargedUsd || 0 };
-          }
+        // 聚合 done = 各号最新累计 counts 之和;聚合 cost = 各号最新累计扣费之和(每号是到目前的累计,直接相加不重复)。
+        const sum = zero();
+        const costSum = { credits: 0, usd: 0 };
+        for (const it of collected.values()) {
+          sum.like += it.counts?.like || 0; sum.follow += it.counts?.follow || 0; sum.comment += it.counts?.comment || 0;
+          costSum.credits += it.chargedCredits || 0; costSum.usd += it.chargedUsd || 0;
         }
-        broadcastSSE('matrix:progress', { type: 'item', accountId: item.accountId, state: item.state, reason: item.reason, counts: item.counts, chargedCredits: item.chargedCredits, chargedUsd: item.chargedUsd });
+        live.done = sum;
+        live.cost = costSum;
+        const pa = live.perAccount[item.accountId];
+        if (pa) {
+          if (item.counts) pa.done = { like: item.counts.like || 0, follow: item.counts.follow || 0, comment: item.counts.comment || 0 };
+          pa.cost = { credits: item.chargedCredits || 0, usd: item.chargedUsd || 0 };
+        }
+        broadcastSSE('matrix:progress', { type: 'item', accountId: item.accountId, state: item.state, reason: item.reason, counts: item.counts, chargedCredits: item.chargedCredits, chargedUsd: item.chargedUsd, taskId: task.id });
       },
     }).then((report) => {
-      // 收尾:把每号最终状态(success/failed/skipped)写回 perAccount。
-      if (matrixLiveProgress && matrixLiveProgress.taskId === task.id) {
-        for (const it of (report?.items || [])) { const pa = matrixLiveProgress.perAccount[it.accountId]; if (pa) pa.status = it.state; }
-      }
-      if (matrixLiveProgress && matrixLiveProgress.taskId === task.id) matrixLiveProgress.status = 'done';
+      for (const it of (report?.items || [])) { const pa = live.perAccount[it.accountId]; if (pa) pa.status = it.state; }
+      live.status = 'done';
       setTaskLastRun(task.id, Date.now());
       // 存运行记录(供「矩阵涨粉运行记录」页)
       try {
         const items = Array.from(collected.values()).map((it: any) => ({ accountId: it.accountId, displayName: getAccount(it.accountId)?.displayName, state: it.state, reason: it.reason, counts: it.counts, chargedCredits: it.chargedCredits, chargedUsd: it.chargedUsd }));
         const totals = items.reduce((acc, it: any) => ({ like: acc.like + (it.counts?.like || 0), follow: acc.follow + (it.counts?.follow || 0), comment: acc.comment + (it.counts?.comment || 0) }), { like: 0, follow: 0, comment: 0 });
-        // 本次运行总扣费 = 各号实际扣费之和(写进运行记录 → 累计消耗才算得对)。
         const cost = items.reduce((acc, it: any) => ({ credits: acc.credits + (it.chargedCredits || 0), usd: acc.usd + (it.chargedUsd || 0) }), { credits: 0, usd: 0 });
         addRun({ taskId: task.id, taskName: task.name, platform: task.platform, startedAt, finishedAt: Date.now(), success: report?.success ?? 0, failed: report?.failed ?? 0, skipped: report?.skipped ?? 0, totals, cost, items });
       } catch (e) { coworkLog('WARN', 'sidecar-server', 'addRun failed', { err: String(e) }); }
       broadcastSSE('matrix:progress', { type: 'done', report, taskId: task.id });
     })
-      .catch((e: any) => { if (matrixLiveProgress && matrixLiveProgress.taskId === task.id) { matrixLiveProgress.status = 'error'; matrixLiveProgress.error = e?.message || String(e); } broadcastSSE('matrix:progress', { type: 'error', error: e?.message || String(e) }); })
-      .finally(() => { matrixRunning = false; matrixAbort = null; });
+      .catch((e: any) => { live.status = 'error'; live.error = e?.message || String(e); broadcastSSE('matrix:progress', { type: 'error', error: e?.message || String(e), taskId: task.id }); })
+      .finally(() => { release(); });
     return { ok: true };
   } catch (e: any) {
-    matrixRunning = false; matrixAbort = null;
+    release();
     return { ok: false, error: e?.message || String(e) };
   }
 }
@@ -327,7 +326,6 @@ async function runMatrixTaskById(taskId: string, kernelPath?: string): Promise<{
 function startMatrixScheduler(): void {
   setInterval(async () => {
     try {
-      if (matrixRunning) return;
       const { dueTasks } = await import('./libs/matrix/taskStore');
       const due = dueTasks(Date.now());
       if (!due.length) return;
@@ -336,7 +334,12 @@ function startMatrixScheduler(): void {
       const { installedKernelPath } = await import('./libs/matrix/kernelInstaller');
       if (!installedKernelPath()) return;
       due.sort((a, b) => (a.nextPlannedRunAt || 0) - (b.nextPlannedRunAt || 0));
-      await runMatrixTaskById(due[0].id);
+      // 按平台并发:每个【平台空闲】的到点任务都起一个(runMatrixTaskById 内部再做原子占锁 + 封顶,races 也安全)。
+      for (const t of due) {
+        if (runningPlatforms.size >= MATRIX_MAX_CONCURRENT) break;
+        if (runningPlatforms.has(t.platform)) continue;
+        await runMatrixTaskById(t.id);
+      }
     } catch (e) { coworkLog('WARN', 'sidecar-server', 'matrix scheduler tick failed', { err: String(e) }); }
   }, 60_000);
 }
@@ -1486,61 +1489,85 @@ const server = http.createServer(async (req, res) => {
             }
           }
           case 'matrix:runEngage': {
-            // 多号自动互动(点赞/评论/关注)即时跑。全局同时只跑一个任务。
+            // 多号自动互动(点赞/评论/关注)即时跑。按平台并发:同平台同时只跑一个。
             try {
-              if (matrixRunning) return writeJSON(res, 200, { ok: false, error: 'another_task_running' });
-              matrixRunning = true; // 同步占锁(在 await 前),防与定时调度 TOCTOU 双跑
-              matrixAbort = new AbortController();
-              const { runEngageTask } = await import('./libs/matrix/engageRunner');
               const a = args[0] as any;
-              broadcastSSE('matrix:progress', { type: 'taskStart' });
-              runEngageTask({
-                platform: a?.platform || 'douyin',
-                accountIds: a?.accountIds || [],
-                quota: a?.quota,
-                concurrency: a?.concurrency,
-                kernelPath: a?.kernelPath,
-                authToken: a?.authToken,
-                signal: matrixAbort.signal,
-                onLog: (accountId, msg) => broadcastSSE('matrix:progress', { type: 'log', accountId, msg }),
-                onItem: (item) => broadcastSSE('matrix:progress', { type: 'item', accountId: item.accountId, state: item.state, reason: item.reason, counts: item.counts }),
-              }).then((report) => {
-                broadcastSSE('matrix:progress', { type: 'done', report });
-              }).catch((e: any) => {
-                broadcastSSE('matrix:progress', { type: 'error', error: e?.message || String(e) });
-              }).finally(() => { matrixRunning = false; matrixAbort = null; });
-              return writeJSON(res, 200, { ok: true, status: 'started' });
+              const platform = a?.platform || 'douyin';
+              if (runningPlatforms.has(platform)) return writeJSON(res, 200, { ok: false, error: 'another_task_running' });
+              if (runningPlatforms.size >= MATRIX_MAX_CONCURRENT) return writeJSON(res, 200, { ok: false, error: 'concurrency_full' });
+              runningPlatforms.add(platform);          // 占锁:check→add 无 await(原子)
+              const abort = new AbortController();
+              abortByPlatform.set(platform, abort);
+              const release = () => { runningPlatforms.delete(platform); abortByPlatform.delete(platform); };
+              try {
+                const { runEngageTask } = await import('./libs/matrix/engageRunner');
+                broadcastSSE('matrix:progress', { type: 'taskStart' });
+                runEngageTask({
+                  platform,
+                  accountIds: a?.accountIds || [],
+                  quota: a?.quota,
+                  concurrency: a?.concurrency,
+                  kernelPath: a?.kernelPath,
+                  authToken: a?.authToken,
+                  signal: abort.signal,
+                  onLog: (accountId, msg) => broadcastSSE('matrix:progress', { type: 'log', accountId, msg }),
+                  onItem: (item) => broadcastSSE('matrix:progress', { type: 'item', accountId: item.accountId, state: item.state, reason: item.reason, counts: item.counts }),
+                }).then((report) => {
+                  broadcastSSE('matrix:progress', { type: 'done', report });
+                }).catch((e: any) => {
+                  broadcastSSE('matrix:progress', { type: 'error', error: e?.message || String(e) });
+                }).finally(() => { release(); });
+                return writeJSON(res, 200, { ok: true, status: 'started' });
+              } catch (e: any) {
+                release();
+                return writeJSON(res, 200, { ok: false, error: e?.message || String(e) });
+              }
             } catch (e: any) {
-              matrixRunning = false; matrixAbort = null;
               return writeJSON(res, 200, { ok: false, error: e?.message || String(e) });
             }
           }
           case 'matrix:stopTask': {
-            // 停止当前矩阵任务:abort 信号(未开始的号跳过、运行中的号下个动作前退出)
-            // + 强关所有指纹窗口立即止损。matrixRunning 由 runEngageTask 收尾时释放。
+            // 停止矩阵任务:传 platform → 只停该平台(abort 信号,运行中的号下个动作前优雅退出);
+            // 不传 platform → 全停(abort 所有 + 强关全部窗口立即止损,跟以前一致)。
             try {
-              if (!matrixRunning) return writeJSON(res, 200, { ok: true, status: 'idle' });
-              if (matrixAbort) matrixAbort.abort();
+              const sp = (args[0] as any)?.platform as string | undefined;
+              if (sp) {
+                if (!runningPlatforms.has(sp)) return writeJSON(res, 200, { ok: true, status: 'idle' });
+                abortByPlatform.get(sp)?.abort();
+                broadcastSSE('matrix:progress', { type: 'log', accountId: '系统', msg: `⏹ 已请求停止 ${sp},正在收尾…` });
+                return writeJSON(res, 200, { ok: true, status: 'stopping' });
+              }
+              if (!runningPlatforms.size) return writeJSON(res, 200, { ok: true, status: 'idle' });
+              for (const [, c] of abortByPlatform) c.abort();
               const { closeAllKernels } = await import('./libs/matrix/kernelPool');
               closeAllKernels();
-              broadcastSSE('matrix:progress', { type: 'log', accountId: '系统', msg: '⏹ 已请求停止,正在关闭窗口…' });
+              broadcastSSE('matrix:progress', { type: 'log', accountId: '系统', msg: '⏹ 已请求停止全部,正在关闭窗口…' });
               return writeJSON(res, 200, { ok: true, status: 'stopping' });
             } catch (e: any) {
               return writeJSON(res, 200, { ok: false, error: e?.message || String(e) });
             }
           }
-          // ── 矩阵任务(可保存 + 调度;每平台≤5、同类型唯一、全局只跑一个)──
+          // ── 矩阵任务(可保存 + 调度;每平台≤5、同类型唯一、按平台并发)──
           case 'matrix:listTasks': {
             const { listTasks } = await import('./libs/matrix/taskStore');
-            return writeJSON(res, 200, { ok: true, tasks: listTasks(), running: matrixRunning });
+            // running:整体是否有在跑;runningPlatforms:具体哪些平台在跑(渲染端按平台判断各任务状态)。
+            return writeJSON(res, 200, { ok: true, tasks: listTasks(), running: anyMatrixRunning(), runningPlatforms: Array.from(runningPlatforms) });
           }
           case 'matrix:listRuns': {
             const { listRuns } = await import('./libs/matrix/runStore');
             return writeJSON(res, 200, { ok: true, runs: listRuns((args[0] as any)?.taskId) });
           }
           case 'matrix:getRunProgress': {
-            // 实时进度轮询(真 TaskDetailPage 每 2s 拉一次)。返回原始聚合,渲染端 scenario.ts 适配成 ScenarioRunProgress。
-            return writeJSON(res, 200, { ok: true, running: matrixRunning, progress: matrixLiveProgress });
+            // 实时进度轮询(真 TaskDetailPage 每 2s 拉一次,带本任务 taskId)。按任务隔离:并发时各取各的进度。
+            // 不传 taskId(老调用)→ 兜底返回任一在跑的进度。
+            const wantTaskId = (args[0] as any)?.taskId as string | undefined;
+            const progress = wantTaskId
+              ? (liveProgressByTask.get(wantTaskId) || null)
+              : (liveProgressByTask.size ? Array.from(liveProgressByTask.values()).find((p) => p.status === 'running') || Array.from(liveProgressByTask.values()).pop() || null : null);
+            const isRunning = wantTaskId
+              ? (liveProgressByTask.get(wantTaskId)?.status === 'running')
+              : anyMatrixRunning();
+            return writeJSON(res, 200, { ok: true, running: isRunning, progress });
           }
           case 'matrix:saveTask': {
             const { saveTask } = await import('./libs/matrix/taskStore');

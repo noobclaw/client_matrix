@@ -306,7 +306,9 @@ class ScenarioService {
       if (!ensureMatrixLogin()) return { status: 'skipped', reason: 'login_required' };
       const r = await MX()?.runTaskById?.({ taskId: id });
       if (r?.ok) return { status: 'started' };
-      return { status: 'skipped', reason: r?.error === 'another_task_running' ? 'concurrency_limit_reached' : (r?.error || 'unknown') };
+      // another_task_running = 同平台已在跑;concurrency_full = 并发已达上限。都归到「上限」提示(TaskDetailPage 有人话)。
+      const reason = (r?.error === 'another_task_running' || r?.error === 'concurrency_full') ? 'concurrency_limit_reached' : (r?.error || 'unknown');
+      return { status: 'skipped', reason };
     }
     return window.electron.scenario.runTaskNow(id);
   }
@@ -452,7 +454,8 @@ class ScenarioService {
   async getRunProgress(taskId?: string): Promise<ScenarioRunProgress | null> {
     if (MATRIX_EDITION) {
       if (!taskId) return null;
-      try { const r = await MX()?.getRunProgress?.(); return mxProgressToScenario(taskId, r); } catch { return null; }
+      // 按任务取进度(并发跑多个任务时各取各的,不串台)。
+      try { const r = await MX()?.getRunProgress?.(taskId); return mxProgressToScenario(taskId, r); } catch { return null; }
     }
     try {
       return await window.electron.scenario.getRunProgress(taskId) || null;
@@ -477,7 +480,15 @@ class ScenarioService {
   }
 
   async requestAbort(_taskId?: string): Promise<void> {
-    if (MATRIX_EDITION) { try { await MX()?.stopTask?.(); } catch {} return; }
+    if (MATRIX_EDITION) {
+      // 按平台并发:只停【这个任务所在平台】,不连累其它平台正在跑的任务。拿不到平台才全停。
+      try {
+        let platform: string | undefined;
+        if (_taskId) { const t = await this.getTask(_taskId); platform = t ? MATRIX_ENGAGE_ID_TO_PLATFORM[(t as any).scenario_id] : undefined; }
+        await MX()?.stopTask?.(platform ? { platform } : undefined);
+      } catch {}
+      return;
+    }
     try {
       await window.electron.scenario.requestAbort(_taskId);
     } catch {}
