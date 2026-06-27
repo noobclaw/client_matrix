@@ -533,16 +533,21 @@ function matrixApiBase(): string {
   return process.env.NOOBCLAW_API_BASE_URL || 'https://api.noobclaw.com';
 }
 let executorSource: string | null = null;        // lastGood 缓存
+let executorFetchedAt = 0;                         // 上次成功拉取时间(TTL 刷新用)
+const EXECUTOR_TTL_MS = 60_000;                    // 缓存新鲜窗口:超过则下次取用前刷新
 let executorFetch: Promise<string | null> | null = null;
 async function getExecutorSource(): Promise<string | null> {
-  if (executorSource) return executorSource;
+  // 旧实现永久缓存(进程一辈子只拉一次)→ 改后端要重启 app 才生效。改成 TTL 刷新:
+  //   TTL 内复用(避免一次运行内 N 个账号各拉一遍),超过 TTL 下次取用前重拉 →
+  //   后端 git pull + restart 后,下一轮任务(>60s)自动拿到新执行器,不用重启客户端。
+  if (executorSource && (Date.now() - executorFetchedAt) < EXECUTOR_TTL_MS) return executorSource;
   if (executorFetch) return executorFetch;
   executorFetch = (async () => {
     try {
       const res = await fetch(`${matrixApiBase()}/api/matrix/command-executor`, { signal: AbortSignal.timeout(10_000) });
       if (!res.ok) throw new Error(`http_${res.status}`);
       const data: any = await res.json();
-      if (typeof data?.source === 'string' && data.source) { executorSource = data.source; return executorSource; }
+      if (typeof data?.source === 'string' && data.source) { executorSource = data.source; executorFetchedAt = Date.now(); return executorSource; }
       throw new Error('no_source');
     } catch (e) {
       coworkLog('WARN', 'kernelPool', 'fetch command-executor failed', { err: String(e) });
