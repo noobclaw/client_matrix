@@ -96,7 +96,7 @@ function engageHistoryFor(accountId: string) {
 // ── 简化版 aiCall(写评论/衍生关键词):POST /api/ai/chat/completions ──
 // onCost:写评论等 AI 调用也是真扣积分(_noobclaw.billableTokens/costUsd),回传给上层累进「本次消耗」,
 //        否则评论的 token 费看不见 → 消耗算少了。
-function makeAiCall(pack: any, authToken: string | undefined, report: (m: string) => void, onCost?: (credits: number, usd: number) => void) {
+function makeAiCall(pack: any, authToken: string | undefined, report: (m: string) => void, onCost?: (credits: number, usd: number) => void, signal?: AbortSignal) {
   return async (promptNameOrRaw: string, promptOrInput: any, rawInput?: string, opts?: any) => {
     const prompt = promptNameOrRaw === '__raw__' ? String(promptOrInput) : String(pack?.prompts?.[promptNameOrRaw] || '');
     const userMessage = promptNameOrRaw === '__raw__'
@@ -115,6 +115,7 @@ function makeAiCall(pack: any, authToken: string | undefined, report: (m: string
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
       body: JSON.stringify(body),
+      signal, // 点停止时立即 abort 这次 AI 调用(否则要等 AI 回完才退)
     });
     const data: any = await res.json().catch(() => ({}));
     // AI 调用的权威扣费(同视频管线口径):billableTokens=实扣积分,costUsd=权威美元。累进「本次消耗」。
@@ -204,7 +205,7 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string): Pr
     const aiCall = makeAiCall(pack, authToken, log, (credits: number, usd: number) => {
       chargedCredits += credits; chargedUsd += usd;
       try { opts.onItem?.({ accountId, state: 'success', counts: { ...counts }, chargedCredits, chargedUsd }); } catch { /* ignore */ }
-    });
+    }, opts.signal); // 传 abort signal:点停止时这次 AI 调用立即中断
     const browserFn: any = (command: string, params?: any, timeout?: number) => matrixCmd(accountId, command, params, timeout);
     // task-tab 对象:orchestrator 在 _activeTab 上调 browser/navigate/scroll/id。
     // 内核单页,全部路由到本账号的 CDP(之前只返回 {id} 导致 _activeTab.navigate is not a function)。
@@ -272,8 +273,13 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string): Pr
           return { ok: false, reason: String(err?.message || err) };
         }
       },
-      // 工具
-      sleep: async (min: number, max?: number) => { await sleep(max ? randInt(min, max) : min); },
+      // 工具。sleep 可被停止打断:点停止后 abort 立即唤醒,不再傻等动作间延时跑完(否则停了要等当前 sleep 结束才退)。
+      sleep: (min: number, max?: number) => new Promise<void>((resolve) => {
+        const ms = max ? randInt(min, max) : min;
+        if (opts.signal?.aborted) return resolve();
+        const t = setTimeout(resolve, ms);
+        try { opts.signal?.addEventListener('abort', () => { clearTimeout(t); resolve(); }, { once: true }); } catch { /* ignore */ }
+      }),
       randInt,
       log: (m: string) => coworkLog('INFO', 'engage-orch', m),
     };

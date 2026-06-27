@@ -188,6 +188,7 @@ const activeVideoRuns = new Map<string, AbortController>();
 const MATRIX_MAX_CONCURRENT = 3;
 const runningPlatforms = new Set<string>();                 // 正在跑的平台集合(并发锁的键)
 const abortByPlatform = new Map<string, AbortController>();  // 各平台的停止句柄(matrix:stopTask 用)
+const runAccountsByPlatform = new Map<string, string[]>();  // 各平台正在跑的账号(停某平台时强关这些号的窗口,立即止损)
 const anyMatrixRunning = (): boolean => runningPlatforms.size > 0;
 
 // 实时进度(供 matrix:getRunProgress 轮询 → 适配成 ScenarioRunProgress 给真 TaskDetailPage)。
@@ -227,9 +228,10 @@ async function runMatrixTaskById(taskId: string, kernelPath?: string): Promise<{
   if (runningPlatforms.has(platform)) return { ok: false, error: 'another_task_running' };       // 同平台已在跑
   if (runningPlatforms.size >= MATRIX_MAX_CONCURRENT) return { ok: false, error: 'concurrency_full' }; // 并发已满
   runningPlatforms.add(platform);
+  runAccountsByPlatform.set(platform, task.accountIds || []); // 供 stopTask 强关本平台窗口
   const abort = new AbortController();
   abortByPlatform.set(platform, abort);
-  const release = () => { runningPlatforms.delete(platform); abortByPlatform.delete(platform); };
+  const release = () => { runningPlatforms.delete(platform); abortByPlatform.delete(platform); runAccountsByPlatform.delete(platform); };
   try {
     const { runEngageTask } = await import('./libs/matrix/engageRunner');
     const { addRun } = await import('./libs/matrix/runStore');
@@ -1496,9 +1498,10 @@ const server = http.createServer(async (req, res) => {
               if (runningPlatforms.has(platform)) return writeJSON(res, 200, { ok: false, error: 'another_task_running' });
               if (runningPlatforms.size >= MATRIX_MAX_CONCURRENT) return writeJSON(res, 200, { ok: false, error: 'concurrency_full' });
               runningPlatforms.add(platform);          // 占锁:check→add 无 await(原子)
+              runAccountsByPlatform.set(platform, a?.accountIds || []); // 供 stopTask 强关本平台窗口
               const abort = new AbortController();
               abortByPlatform.set(platform, abort);
-              const release = () => { runningPlatforms.delete(platform); abortByPlatform.delete(platform); };
+              const release = () => { runningPlatforms.delete(platform); abortByPlatform.delete(platform); runAccountsByPlatform.delete(platform); };
               try {
                 const { runEngageTask } = await import('./libs/matrix/engageRunner');
                 broadcastSSE('matrix:progress', { type: 'taskStart' });
@@ -1534,7 +1537,12 @@ const server = http.createServer(async (req, res) => {
               if (sp) {
                 if (!runningPlatforms.has(sp)) return writeJSON(res, 200, { ok: true, status: 'idle' });
                 abortByPlatform.get(sp)?.abort();
-                broadcastSSE('matrix:progress', { type: 'log', accountId: '系统', msg: `⏹ 已请求停止 ${sp},正在收尾…` });
+                // 强关该平台正在跑的号窗口立即止损(参照旧客户端 closeAllKernels,但只关本平台,不连累别的平台)。
+                try {
+                  const { closeKernel } = await import('./libs/matrix/kernelPool');
+                  for (const aid of (runAccountsByPlatform.get(sp) || [])) closeKernel(aid, { force: true });
+                } catch { /* ignore */ }
+                broadcastSSE('matrix:progress', { type: 'log', accountId: '系统', msg: `⏹ 已停止 ${sp},正在关闭窗口…` });
                 return writeJSON(res, 200, { ok: true, status: 'stopping' });
               }
               if (!runningPlatforms.size) return writeJSON(res, 200, { ok: true, status: 'idle' });
