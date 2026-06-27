@@ -17,6 +17,7 @@ import { runMatrixDriver } from './driverCtx';
 import {
   getAccount, setAccountStatus, markPosted, accountBadgeLabel, markAccountAlive, platformKey,
 } from './accountManager';
+import { promptReloginForExpiredAccount } from './reloginPrompt';
 
 const DEFAULT_BASE_URL = 'https://api.noobclaw.com';
 function baseUrl(): string { return process.env.NOOBCLAW_API_BASE_URL || DEFAULT_BASE_URL; }
@@ -108,6 +109,9 @@ async function runOne(
       const ok = await checkLogin(accountId, platformKey(acc), anchor);
       if (!ok) {
         setAccountStatus(accountId, 'login_required');
+        // 命中失效 → 弹该号扫码窗(置顶 + 红角标 + 后台轮询扫码成功翻 idle),跟「刷新信息」口径对齐。
+        // skipLease 自带 refCount+1 → 下面 finally 的 closeKernel 只 -1、不会关掉扫码窗。
+        try { await promptReloginForExpiredAccount(accountId); } catch { /* 弹窗失败不影响跳过 */ }
         return { accountId, state: 'skipped', reason: 'login_required' };
       }
       markAccountAlive(accountId); // 确认登录有效 → 更新活跃时间,常跑的号不进主动保活名单。
