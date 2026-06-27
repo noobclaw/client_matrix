@@ -48,13 +48,36 @@ const MX = (): any => (window as any).electron?.matrix;
 const pad2 = (n: number) => String(n).padStart(2, '0');
 const hhmmss = (ts: number) => { const d = new Date(ts); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`; };
 
+// 矩阵 8 个「互动涨粉」平台 → 后端 backend/matrix/scenarios 的剧本 id(币安是 binance_square_auto_engage)。
+// 之前 mxTaskToScenario 把所有平台任务都写成 'douyin_auto_engage' → ScenarioView 按
+// scenario.platform 过滤 tab 时,非抖音任务全被归到抖音 tab、对应平台 tab 显示为空,
+// 但 saveTask 是按真实 platform 存的 → 再建会撞 duplicate_type。这里按真实 platform 映射修正。
+const MATRIX_ENGAGE_SCENARIO_ID: Record<string, string> = {
+  douyin: 'douyin_auto_engage', xhs: 'xhs_auto_engage', kuaishou: 'kuaishou_auto_engage',
+  bilibili: 'bilibili_auto_engage', x: 'x_auto_engage', binance: 'binance_square_auto_engage',
+  youtube: 'youtube_auto_engage', tiktok: 'tiktok_auto_engage',
+};
+const MATRIX_ENGAGE_ID_TO_PLATFORM: Record<string, string> =
+  Object.fromEntries(Object.entries(MATRIX_ENGAGE_SCENARIO_ID).map(([p, id]) => [id, p]));
+// 平台展示名/图标:给客户端快照里缺失的 engage 场景兜底。打包快照只从 backend/scenarios 生成,
+// 而 xhs_auto_engage 只在 backend/matrix/scenarios → 快照里没有,不补就 lookup 不到 platform → tab 仍为空。
+const MATRIX_ENGAGE_META: Record<string, { name_zh: string; icon: string }> = {
+  douyin: { name_zh: '抖音 互动涨粉', icon: '🎶' }, xhs: { name_zh: '小红书 互动涨粉', icon: '📕' },
+  kuaishou: { name_zh: '快手 互动涨粉', icon: '⚡' }, bilibili: { name_zh: '哔哩哔哩 互动涨粉', icon: '📺' },
+  x: { name_zh: '推特 互动涨粉', icon: '🐦' }, binance: { name_zh: '币安广场互动涨粉', icon: '🤝' },
+  youtube: { name_zh: 'YouTube 互动涨粉', icon: '▶️' }, tiktok: { name_zh: 'TikTok 互动涨粉', icon: '🎬' },
+};
+const engageScenarioIdForPlatform = (platform?: string): string =>
+  (platform && MATRIX_ENGAGE_SCENARIO_ID[platform]) || 'douyin_auto_engage';
+
 /** 矩阵任务 → 旧 ScenarioTaskIPC(赛道/关键词在账号上,task 这两个字段留空;
  *  配额映射到 daily_*_min/max 这套 douyin_auto_engage 字段)。 */
 function mxTaskToScenario(t: any): ScenarioTaskIPC {
   const q = t?.quota || {};
   return {
     id: t.id,
-    scenario_id: 'douyin_auto_engage',
+    // 按任务真实 platform 映射到对应 engage 剧本 id(原来写死 douyin → 非抖音 tab 看不到任务)。
+    scenario_id: engageScenarioIdForPlatform(t.platform),
     track: 'matrix',
     keywords: [],
     persona: '',
@@ -77,9 +100,12 @@ function mxTaskToScenario(t: any): ScenarioTaskIPC {
 /** 旧 createTask/updateTask 入参(ScenarioTaskIPC 形状)→ 矩阵 saveTask 入参。 */
 function scenarioInputToMxSave(input: any, id?: string): any {
   const accountIds: string[] = input.account_ids || [];
+  // 真实 platform 从 scenario_id 反推(原来写死 douyin)。matrix engage 主路径走 ScenarioView.saveMatrixTask
+  // 直传 platform、不经此函数;这里是 scenarioService.create/updateTask 的兜底,保持平台一致。
+  const platform = MATRIX_ENGAGE_ID_TO_PLATFORM[input.scenario_id] || 'douyin';
   return {
     id,
-    platform: 'douyin',
+    platform,
     type: 'engage',
     name: input.name || (accountIds.length ? `抖音互动 · ${accountIds.length} 个号` : '抖音互动'),
     accountIds,
@@ -125,10 +151,13 @@ function mxRunToRecord(r: any): any {
     status: it.state === 'success' ? 'done' : it.state === 'failed' ? 'error' : 'running',
     message: `[${it.displayName || it.accountId}] ${it.state}${it.counts ? ` 赞${it.counts.like || 0}/关${it.counts.follow || 0}/评${it.counts.comment || 0}` : ''}${it.reason ? ` (${it.reason})` : ''}`,
   }));
+  // 运行记录也按真实 platform 还原 scenario_snapshot(原来写死抖音 → 运行记录 tab 同样错位)。
+  const rPlatform = r.platform || 'douyin';
+  const rMeta = MATRIX_ENGAGE_META[rPlatform];
   return {
     id: r.id,
     task_id: r.taskId,
-    scenario_snapshot: { id: 'douyin_auto_engage', name_zh: '抖音 · 互动涨粉', name_en: 'Douyin Engage & Grow', icon: '🎵', platform: 'douyin' },
+    scenario_snapshot: { id: engageScenarioIdForPlatform(rPlatform), name_zh: rMeta?.name_zh || '互动涨粉', name_en: '', icon: rMeta?.icon || '🤝', platform: rPlatform },
     task_snapshot: { track: 'matrix', name: r.taskName, account_ids: items.map((it) => it.accountId) },
     started_at: r.startedAt,
     finished_at: r.finishedAt,
@@ -189,8 +218,20 @@ class ScenarioService {
   // ── Catalogue ──
 
   async listScenarios(): Promise<Scenario[]> {
-    // 矩阵号:用打包内置的场景快照(只关心 douyin_auto_engage 的 manifest/STEP 名)。
-    if (MATRIX_EDITION) return DEFAULT_SCENARIOS as Scenario[];
+    // 矩阵号:用打包内置的场景快照,并补齐快照里缺失的 engage 场景(主要是 xhs_auto_engage —
+    // 快照只从 backend/scenarios 生成,而它只在 backend/matrix/scenarios)。否则按 scenario.platform
+    // 过滤任务 tab 时,小红书等平台 lookup 不到 platform → tab 永远为空。
+    if (MATRIX_EDITION) {
+      const have = new Set(DEFAULT_SCENARIOS.map((s) => s.id));
+      const synth = Object.entries(MATRIX_ENGAGE_SCENARIO_ID)
+        .filter(([, sid]) => !have.has(sid))
+        .map(([platform, sid]) => ({
+          id: sid, version: '1.0.0', platform, workflow_type: 'auto_reply', category: 'engagement',
+          name_zh: MATRIX_ENGAGE_META[platform]?.name_zh || sid, name_en: '',
+          icon: MATRIX_ENGAGE_META[platform]?.icon || '🤝',
+        }));
+      return [...DEFAULT_SCENARIOS, ...synth] as unknown as Scenario[];
+    }
     try {
       const res = await window.electron.scenario.listScenarios();
       return res?.scenarios || [];
