@@ -173,8 +173,9 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string): Pr
     await launchKernel({
       accountId, kernelPath: opts.kernelPath, kernelVersion: acc.kernelVersion,
       userDataDir: acc.userDataDir, fingerprint: acc.fingerprint, proxy: acc.proxy,
-      // 跑任务时不注入页面角标(label):降低页面足迹(风控最敏感时段),账号在进度面板里看即可。
-      // 但标签分组标题(groupTitle,属浏览器 chrome、不进页面)仍给友好名,免得 tab 显示 raw accountId。
+      // 窗口左上角常驻角标(账号名 + 代理/本机 IP):所有任务执行都显示,便于核对在哪个号、走哪个 IP(撞 IP 会红)。
+      // groupTitle 同名,免得标签页显示 raw accountId。
+      label: accountBadgeLabel(acc),
       groupTitle: accountBadgeLabel(acc),
     });
     await kernelNavigate(accountId, PLATFORM_HOME[opts.platform] || 'https://www.douyin.com/');
