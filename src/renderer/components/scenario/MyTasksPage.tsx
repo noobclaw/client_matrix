@@ -668,6 +668,14 @@ export const MyTasksPage: React.FC<Props> = ({ tasks, scenarios, loading, platfo
                         })()}
                       </div>
                     )}
+                    {/* 矩阵任务:展示这条任务跑几个账号(各账号自带赛道/人设/关键词) */}
+                    {Array.isArray((task as any).account_ids) && (task as any).account_ids.length > 0 && (
+                      <div>
+                        {isZh
+                          ? `👥 账号: ${(task as any).account_ids.length} 个`
+                          : `👥 Accounts: ${(task as any).account_ids.length}`}
+                      </div>
+                    )}
                     <div className="text-[11px] text-gray-400">
                       {isZh ? '创建于 ' : 'Created '}
                       {new Date(task.created_at || 0).toLocaleString(isZh ? 'zh-CN' : 'en-US')}

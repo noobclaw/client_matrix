@@ -376,7 +376,16 @@ class ScenarioService {
    *  can be > 1 when XHS task + Twitter task are both in flight. */
   async getRunningTaskIds(): Promise<string[]> {
     if (MATRIX_EDITION) {
-      try { const r = await MX()?.getRunProgress?.(); return r?.running && r?.progress?.taskId && r.progress.status === 'running' ? [r.progress.taskId] : []; } catch { return []; }
+      // 矩阵可【并发】跑多个平台任务(douyin + xhs 同时),但 matrix:getRunProgress 不传 taskId
+      // 只回「任一在跑」的一条 → 列表只有一个任务亮绿,其它在跑的(也是 running)显示「下次运行」。
+      // 改成逐任务查各自 running 态,汇总所有在跑的 id,列表才能把每个在跑的任务都标记运行中。
+      try {
+        const tasks = await this.listTasks();
+        const checks = await Promise.all(tasks.map(async (t) => {
+          try { const r = await MX()?.getRunProgress?.(t.id); return r?.running ? t.id : null; } catch { return null; }
+        }));
+        return checks.filter((x): x is string => !!x);
+      } catch { return []; }
     }
     try {
       const r = await window.electron.scenario.getRunningTaskIds();
