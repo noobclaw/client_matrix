@@ -244,11 +244,14 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     // 带 id = 更新现有任务(saveTask 是整体 upsert);无 id = 新建。
     const r = await m?.saveTask?.({ id: matrixWizardTask?.id, platform: matrixWizardPlatform, type: 'engage', name: input.name, accountIds: input.accountIds, quota: input.quota, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
     if (!r?.ok) throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限', duplicate_type: '该平台已有同类型(互动)任务,直接编辑它即可' } as any)[r?.error] || r?.error || '保存失败');
+    const wasEdit = !!matrixWizardTask?.id;
     const plat = matrixWizardPlatform;
     setMatrixWizardPlatform(null);
     setMatrixWizardTask(null);
     await refreshAll();
-    onSwitchToManage?.(plat as any);
+    // 编辑(从详情页进的)→ refreshAll 已就地刷新当前详情数据,不跳走(否则被踢回列表还要重新点进去);
+    // 新建 → 切到管理页看新任务。
+    if (!wasEdit) onSwitchToManage?.(plat as any);
   };
   // Link-mode edit modal (separate from the keyword wizard — they capture
   // completely different inputs and users were confusing them)
