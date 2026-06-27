@@ -263,7 +263,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 {label}
                 {/* 「我的矩阵账号」菜单:全平台登录过期账号总数红圈角标(与账号页各平台 tab 角标一致),提醒去重连 */}
                 {key === 'matrix' && matrixExpiredCount > 0 && (
-                  <span className="absolute top-1 right-1.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold leading-none ring-2 ring-white dark:ring-claude-darkBg">{matrixExpiredCount}</span>
+                  <span className="absolute top-1 right-1.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold leading-none">{matrixExpiredCount}</span>
                 )}
               </button>
             ))}

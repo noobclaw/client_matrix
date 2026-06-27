@@ -484,7 +484,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
                   {PLATFORM_LABEL[p]}
                   {/* 该平台有登录过期账号 → 红圈计数角标(提醒去重新扫码连接) */}
                   {expiredCount > 0 && (
-                    <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold leading-none ring-2 ring-white dark:ring-gray-900">{expiredCount}</span>
+                    <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold leading-none">{expiredCount}</span>
                   )}
                 </button>
                 );
