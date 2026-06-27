@@ -596,16 +596,16 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
 
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
 
-  // 矩阵号:加载本任务各账号详情(平台号/昵称/赛道/人设/关键词),详情页按账号展示。
-  const [matrixAccts, setMatrixAccts] = useState<any[]>([]);
+  // 矩阵号:加载本任务各账号详情(头像/昵称/平台号/赛道/人设/关键词),详情页 + 运行明细按账号展示。
+  const [acctDetails, setAcctDetails] = useState<any[]>([]);
   useEffect(() => {
     const ids: string[] = Array.isArray((task as any)?.account_ids) ? (task as any).account_ids : [];
-    if (!ids.length) { setMatrixAccts([]); return; }
+    if (!ids.length) { setAcctDetails([]); return; }
     let alive = true;
     (async () => {
       try {
         const r = await (window.electron as any)?.matrix?.listAccounts?.();
-        if (alive && r?.ok) setMatrixAccts(Array.isArray(r.accounts) ? r.accounts : []);
+        if (alive && r?.ok) setAcctDetails(Array.isArray(r.accounts) ? r.accounts : []);
       } catch { /* 拉不到账号详情不影响详情页其余部分 */ }
     })();
     return () => { alive = false; };
@@ -1090,7 +1090,7 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
                     const PL: Record<string, string> = { douyin: '抖音', xhs: '小红书', bilibili: 'B站', kuaishou: '快手', tiktok: 'TikTok', x: 'X', binance: '币安广场', youtube: 'YouTube', shipinhao: '视频号', toutiao: '头条' };
                     const EM: Record<string, string> = { douyin: '🎵', xhs: '📕', bilibili: '📺', kuaishou: '⚡', tiktok: '🎬', x: '🐦', binance: '🟡', youtube: '▶️', shipinhao: '🟢', toutiao: '🟠' };
                     const idLabel = (p: string) => { const l = PL[p] || ''; return l ? (l.endsWith('号') ? l : l + '号') : ''; };
-                    const accMap = new Map<string, any>(matrixAccts.map((a: any) => [a.id, a]));
+                    const accMap = new Map<string, any>(acctDetails.map((a: any) => [a.id, a]));
                     const accs = matrixAccountIds.map((id) => accMap.get(id)).filter(Boolean);
                     return (
                       <div>
@@ -1764,6 +1764,10 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
         const selAcct = hasAccts
           ? (acctTab && matrixAccts.some(a => a.id === acctTab) ? acctTab : matrixAccts[0].id)
           : null;
+        // 运行明细各账号 tab 上展示头像/昵称/平台号(从账号详情按 id join,方便辨别;运行进度本身只带 name=备注)。
+        const detailById = new Map<string, any>(acctDetails.map((d: any) => [d.id, d]));
+        const PLID: Record<string, string> = { douyin: '抖音号', xhs: '小红书号', bilibili: 'B站号', kuaishou: '快手号', tiktok: 'TikTok号', x: 'X号', binance: '币安号', youtube: 'YouTube号', shipinhao: '视频号', toutiao: '头条号' };
+        const PLATFORM_EMOJI: Record<string, string> = { douyin: '🎵', xhs: '📕', bilibili: '📺', kuaishou: '⚡', tiktok: '🎬', x: '🐦', binance: '🟡', youtube: '▶️', shipinhao: '🟢', toutiao: '🟠' };
         return (
           <>
             <div className="flex items-center justify-between mb-4 gap-3">
@@ -1799,16 +1803,25 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
                 {matrixAccts.map(a => {
                   const ap = a.action_progress || {};
                   const active = selAcct === a.id;
+                  const d = detailById.get(a.id) || {};
+                  const title = d.nickname || a.name;          // 主标题:平台真实昵称(没有就退回备注名)
+                  const note = a.name && a.name !== title ? a.name : '';  // 副标题:备注名(跟昵称不同才显示)
                   const dot = (a.status === 'success' || a.status === 'done') ? 'bg-green-500'
                     : (a.status === 'failed' || a.status === 'error') ? 'bg-red-500'
                     : a.status === 'skipped' ? 'bg-gray-400'
                     : 'bg-blue-500 animate-pulse';
                   return (
                     <button key={a.id} type="button" onClick={() => setAcctTab(a.id)}
-                      className={`text-left rounded-lg border px-3 py-2 text-xs transition-colors ${active ? 'border-green-500 bg-green-500/10' : 'border-gray-200 dark:border-gray-700 hover:border-green-500/50'}`}>
+                      className={`text-left rounded-lg border px-3 py-2 text-xs transition-colors max-w-[15rem] ${active ? 'border-green-500 bg-green-500/10' : 'border-gray-200 dark:border-gray-700 hover:border-green-500/50'}`}>
                       <div className="flex items-center gap-1.5 font-medium dark:text-gray-200">
-                        <span className={`w-2 h-2 rounded-full shrink-0 ${dot}`} />{a.name}
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${dot}`} />
+                        {d.avatar
+                          ? <img src={d.avatar} alt="" className="w-4 h-4 rounded-full shrink-0 object-cover" />
+                          : <span className="text-xs shrink-0">{PLATFORM_EMOJI[d.platform] || '👤'}</span>}
+                        <span className="truncate">{title}</span>
+                        {d.displayId && <span className="text-gray-400 font-normal shrink-0">· {PLID[d.platform] || '账号'}:{d.displayId}</span>}
                       </div>
+                      {note && <div className="mt-0.5 text-[10px] text-gray-400 truncate">备注 {note}</div>}
                       <div className="mt-1 font-mono text-gray-600 dark:text-gray-300">
                         👍 {ap.like?.done ?? 0}/{ap.like?.target ?? 0} · ➕ {ap.follow?.done ?? 0}/{ap.follow?.target ?? 0} · 💬 {ap.comment?.done ?? 0}/{ap.comment?.target ?? 0}
                       </div>
