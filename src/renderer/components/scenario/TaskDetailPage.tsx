@@ -1087,7 +1087,7 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
                   {/* 矩阵号:展示账号数(各账号自有赛道/关键词/人设),不显示「赛道: matrix」+ 空关键词 */}
                   {isMatrix && (() => {
                     // 每个账号自有赛道/人设/关键词 → 列出来(可滚动,30 个也放得下)。
-                    const PL: Record<string, string> = { douyin: '抖音', xhs: '小红书', bilibili: 'B站', kuaishou: '快手', tiktok: 'TikTok', x: 'X', binance: '币安广场', youtube: 'YouTube', shipinhao: '视频号', toutiao: '头条' };
+                    const PL: Record<string, string> = { douyin: '抖音', xhs: '小红书', bilibili: 'B站', kuaishou: '快手', tiktok: 'TikTok', x: '推特', binance: '币安广场', youtube: 'YouTube', shipinhao: '视频号', toutiao: '头条' };
                     const EM: Record<string, string> = { douyin: '🎵', xhs: '📕', bilibili: '📺', kuaishou: '⚡', tiktok: '🎬', x: '🐦', binance: '🟡', youtube: '▶️', shipinhao: '🟢', toutiao: '🟠' };
                     const idLabel = (p: string) => { const l = PL[p] || ''; return l ? (l.endsWith('号') ? l : l + '号') : ''; };
                     const accMap = new Map<string, any>(acctDetails.map((a: any) => [a.id, a]));
@@ -1766,7 +1766,7 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
           : null;
         // 运行明细各账号 tab 上展示头像/昵称/平台号(从账号详情按 id join,方便辨别;运行进度本身只带 name=备注)。
         const detailById = new Map<string, any>(acctDetails.map((d: any) => [d.id, d]));
-        const PLID: Record<string, string> = { douyin: '抖音号', xhs: '小红书号', bilibili: 'B站号', kuaishou: '快手号', tiktok: 'TikTok号', x: 'X号', binance: '币安号', youtube: 'YouTube号', shipinhao: '视频号', toutiao: '头条号' };
+        const PLID: Record<string, string> = { douyin: '抖音号', xhs: '小红书号', bilibili: 'B站号', kuaishou: '快手号', tiktok: 'TikTok号', x: '推特号', binance: '币安号', youtube: 'YouTube号', shipinhao: '视频号', toutiao: '头条号' };
         const PLATFORM_EMOJI: Record<string, string> = { douyin: '🎵', xhs: '📕', bilibili: '📺', kuaishou: '⚡', tiktok: '🎬', x: '🐦', binance: '🟡', youtube: '▶️', shipinhao: '🟢', toutiao: '🟠' };
         return (
           <>
