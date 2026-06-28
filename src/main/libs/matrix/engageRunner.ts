@@ -223,6 +223,12 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string): Pr
       comment_prompt: acc.persona || '',
       // reply_fan 剧本用:persona(回复口吻)+ 引流尾巴(文案/概率)。
       persona: acc.persona || '',
+      // 作者本人身份 —— 任务已指定账号,添加时就抓到并存了 nickname/displayId/boundUid(绿标即用 nickname)。
+      // reply_fan 剧本据此排除"作者自己的回复",不必再去爬页面 DOM(抖音本人昵称根本不在评论管理页、
+      // 小红书也不稳)。剧本优先用这些,爬页面只作兜底。
+      selfNickname: acc.nickname || '',
+      selfUid: acc.boundUid || acc.displayId || '',
+      selfDisplayId: acc.displayId || '',
       funnel_phrase: opts.funnel?.funnel_phrase || '',
       funnel_probability: typeof opts.funnel?.funnel_probability === 'number' ? opts.funnel.funnel_probability : 0,
       daily_like_min: q.daily_like_min, daily_like_max: q.daily_like_max,
