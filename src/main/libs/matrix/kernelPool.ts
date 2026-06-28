@@ -28,6 +28,7 @@ import { coworkLog } from '../coworkLogger';
 import { installedKernelPath, ensureTabGroupExtension } from './kernelInstaller';
 import { ensureProxyBridge, probeProxy } from './proxyBridge';
 import { getAccount, proxyBadgeInfo, getLocalEgressIp } from './accountManager';
+import { acquireSystemKeepAwake, releaseSystemKeepAwake } from './powerKeepAwake';
 import type { Fingerprint, Proxy } from './types';
 
 export interface KernelSession {
@@ -92,6 +93,47 @@ function releaseLease(accountId: string): void {
 }
 let nextDebugPort = 9300;        // 每号一个端口,递增分配
 let nextSlot = 0;                // 第几个窗口(错开层叠位置用)
+
+// ── 防最小化 + 防系统休眠(对齐旧客户端 chrome-extension 的 unminimizeManagedWindows + chrome.power)──
+// 矩阵内核是独立 fingerprint-chromium、纯 CDP 控,用不到扩展的 chrome.windows/chrome.power → 照搬【行为】换实现:
+//   · 防最小化:周期轮询每个内核窗口,windowState==='minimized' → setWindowBounds normal(不抢焦点,对齐扩展 drawAttention:false)。
+//   · 防休眠:有内核存活就 OS 级保活(见 powerKeepAwake),全部关闭后释放。
+// 单一所有者 = windowGuardTimer:launch 时 ensureWindowGuards 起;tick 见 sessions 空则自停 + 释放保活(免在每个
+//   sessions.delete 点挂钩)。扩展用 onFocusChanged 毫秒级 + 30s alarm 兜底;CDP 无廉价焦点事件,2.5s 轮询足够快
+//   (扩展注释:最小化节流要几分钟才坏)。
+const WINDOW_GUARD_INTERVAL_MS = 2500;
+let windowGuardTimer: ReturnType<typeof setInterval> | null = null;
+
+function ensureWindowGuards(): void {
+  if (windowGuardTimer) return;
+  acquireSystemKeepAwake();
+  windowGuardTimer = setInterval(() => { void windowGuardTick(); }, WINDOW_GUARD_INTERVAL_MS);
+}
+
+function stopWindowGuards(): void {
+  if (windowGuardTimer) { clearInterval(windowGuardTimer); windowGuardTimer = null; }
+  releaseSystemKeepAwake();
+}
+
+async function windowGuardTick(): Promise<void> {
+  // 没有内核了 → 自停轮询 + 释放保活。
+  if (sessions.size === 0) { stopWindowGuards(); return; }
+  for (const s of Array.from(sessions.values())) {
+    // 只在有活页面连接时被动检查(最小化不会断 CDP);headless 保活窗无窗口,getWindowForTarget 报错即跳过。
+    if (!s.pageWs || s.pageWs.readyState !== WebSocket.OPEN || !s.pageTargetId) continue;
+    try {
+      const win = await send(s, 'Browser.getWindowForTarget', { targetId: s.pageTargetId });
+      if (win?.windowId == null || win?.bounds?.windowState !== 'minimized') continue;
+      // CDP 版 unminimize:set normal(不带 left/top → 不挪位、不抢焦点);二次确认兜底(部分平台 ack 但没动作,对齐扩展双 update)。
+      await send(s, 'Browser.setWindowBounds', { windowId: win.windowId, bounds: { windowState: 'normal' } });
+      const after = await send(s, 'Browser.getWindowForTarget', { targetId: s.pageTargetId });
+      if (after?.bounds?.windowState === 'minimized') {
+        await send(s, 'Browser.setWindowBounds', { windowId: win.windowId, bounds: { windowState: 'normal' } });
+      }
+      coworkLog('INFO', 'kernelPool', `防最小化:已复原内核窗口 ${s.accountId}`);
+    } catch { /* 非关键:窗口/连接瞬态,下一拍再来 */ }
+  }
+}
 
 /**
  * 注入「账号角标」脚本:窗口左上角常驻绿色标签显示账号名,多窗叠在一起也能分清。
@@ -339,6 +381,7 @@ async function doLaunch(opts: LaunchKernelOptions): Promise<KernelSession> {
     if (sessions.get(opts.accountId) === session) { sessions.delete(opts.accountId); refCount.delete(opts.accountId); }
   });
   sessions.set(opts.accountId, session);
+  ensureWindowGuards(); // 有内核存活 → 起防最小化轮询 + 系统防休眠(全部关闭后自停)。
   coworkLog('INFO', 'kernelPool', `kernel ${opts.accountId} ready on ${debugPort}`);
   return session;
 }
@@ -1138,6 +1181,7 @@ export function closeAllKernels(): void {
  * 必须在这里同步 SIGKILL,否则内核成孤儿窗口(mac 无 Win32 Job Object 兜底,不随 sidecar 死)。
  */
 export function killAllKernelsSync(): void {
+  stopWindowGuards(); // 同步停轮询 + 释放系统保活(process.exit 不会等定时器自停)。
   for (const id of Array.from(sessions.keys())) {
     try { sessions.get(id)?.process?.kill('SIGKILL'); } catch { /* ignore */ }
     sessions.delete(id);
