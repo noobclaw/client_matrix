@@ -86,6 +86,17 @@ const MATRIX_REPLY_META: Record<string, { name_zh: string; icon: string }> = {
   toutiao: { name_zh: '头条号 自动回复粉丝', icon: '💌' }, shipinhao: { name_zh: '视频号 自动回复粉丝', icon: '💌' },
 };
 
+// 「视频无水印下载」剧本(backend/matrix/scenarios/<platform>_video_download)。单账号工具任务:
+// 选 1 个号 + 粘贴多个链接,逐个下载。目前仅抖音。同样需补快照,否则任务 scenario_id lookup 不到 platform。
+const MATRIX_DOWNLOAD_SCENARIO_ID: Record<string, string> = {
+  douyin: 'douyin_video_download',
+};
+const MATRIX_DOWNLOAD_ID_TO_PLATFORM: Record<string, string> =
+  Object.fromEntries(Object.entries(MATRIX_DOWNLOAD_SCENARIO_ID).map(([p, id]) => [id, p]));
+const MATRIX_DOWNLOAD_META: Record<string, { name_zh: string; icon: string }> = {
+  douyin: { name_zh: '抖音 视频无水印下载', icon: '⬇️' },
+};
+
 /** 矩阵任务 → 旧 ScenarioTaskIPC(赛道/关键词在账号上,task 这两个字段留空;
  *  配额映射到 daily_*_min/max 这套 douyin_auto_engage 字段)。 */
 function mxTaskToScenario(t: any): ScenarioTaskIPC {
@@ -94,15 +105,19 @@ function mxTaskToScenario(t: any): ScenarioTaskIPC {
   //   track='reply_fan_comment',并带上引流语/概率 —— TaskDetailPage 靠这两个判定 isReplyFan
   //   并展示引流配置(funnel_phrase/funnel_probability);否则会被当互动任务、引流配置丢失。
   const isReply = t?.type === 'reply_fan';
+  const isDownload = t?.type === 'video_download';
   const fn = t?.funnel || {};
+  const dlUrls: string[] = Array.isArray(t?.urls) ? t.urls : [];
   return {
     id: t.id,
     // 按任务真实 platform + 类型映射剧本 id(原来写死 douyin/engage → 非抖音 tab 看不到任务、回复粉丝错显成互动)。
-    scenario_id: isReply ? `${t.platform}_reply_fans_comment` : engageScenarioIdForPlatform(t.platform),
-    track: isReply ? 'reply_fan_comment' : 'matrix',
+    scenario_id: isReply ? `${t.platform}_reply_fans_comment` : isDownload ? `${t.platform}_video_download` : engageScenarioIdForPlatform(t.platform),
+    track: isReply ? 'reply_fan_comment' : isDownload ? 'video_download' : 'matrix',
     keywords: [],
     persona: '',
-    daily_count: 1,
+    // video_download:粘贴的链接清单(详情页/编辑回填用),daily_count = 链接数。
+    urls: isDownload ? dlUrls : undefined,
+    daily_count: isDownload ? (dlUrls.length || 1) : 1,
     variants_per_post: 1,
     daily_time: '',
     run_interval: t.frequency,
@@ -141,6 +156,24 @@ function scenarioInputToMxSave(input: any, id?: string): any {
       },
       concurrency: accountIds.length,
       frequency: input.run_interval || 'daily_random',
+      enabled: input.enabled !== false,
+    };
+  }
+  // 视频下载任务(scenario_id 以 _video_download 结尾):保持 type='video_download' + 透传 urls,
+  // 否则经 updateTask 兜底会被改成 engage、链接清单丢失。
+  if (typeof input.scenario_id === 'string' && input.scenario_id.endsWith('_video_download')) {
+    const dPlatform = MATRIX_DOWNLOAD_ID_TO_PLATFORM[input.scenario_id] || 'douyin';
+    const urls: string[] = Array.isArray(input.urls) ? input.urls : [];
+    return {
+      id,
+      platform: dPlatform,
+      type: 'video_download',
+      name: input.name || (urls.length ? `${dPlatform}视频下载 · ${urls.length} 条` : `${dPlatform}视频下载`),
+      accountIds,                 // 单账号(数组长度 1)
+      quota: {},
+      urls,
+      concurrency: 1,             // 单账号顺序下载,不多开
+      frequency: input.run_interval || 'once',
       enabled: input.enabled !== false,
     };
   }
@@ -282,7 +315,15 @@ class ScenarioService {
           name_zh: MATRIX_REPLY_META[platform]?.name_zh || sid, name_en: '',
           icon: MATRIX_REPLY_META[platform]?.icon || '💌',
         }));
-      return [...DEFAULT_SCENARIOS, ...synth, ...synthReply] as unknown as Scenario[];
+      // 同理补「视频无水印下载」剧本快照,让 video_download 任务能按 platform 归到对应 tab。
+      const synthDownload = Object.entries(MATRIX_DOWNLOAD_SCENARIO_ID)
+        .filter(([, sid]) => !have.has(sid))
+        .map(([platform, sid]) => ({
+          id: sid, version: '1.0.0', platform, workflow_type: 'video_download', category: 'tool',
+          name_zh: MATRIX_DOWNLOAD_META[platform]?.name_zh || sid, name_en: '',
+          icon: MATRIX_DOWNLOAD_META[platform]?.icon || '⬇️',
+        }));
+      return [...DEFAULT_SCENARIOS, ...synth, ...synthReply, ...synthDownload] as unknown as Scenario[];
     }
     try {
       const res = await window.electron.scenario.listScenarios();

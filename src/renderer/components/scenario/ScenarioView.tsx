@@ -40,6 +40,7 @@ import LuckyBag from '../cowork/LuckyBag';
 import { ErrorBoundary } from '../ErrorBoundary';
 import MatrixTaskWizard, { type WizardAccount } from '../matrix/MatrixTaskWizard';
 import MatrixReplyFansWizard from '../matrix/MatrixReplyFansWizard';
+import MatrixVideoDownloadWizard from '../matrix/MatrixVideoDownloadWizard';
 
 type PlatformId = 'xhs' | 'x' | 'binance' | 'douyin' | 'shipinhao' | 'toutiao' | 'kuaishou' | 'bilibili' | 'tiktok' | 'youtube' | 'video';
 
@@ -59,6 +60,9 @@ const MATRIX_ENGAGE_PLATFORMS = new Set<PlatformId>(['douyin', 'xhs', 'kuaishou'
 // 抖音(creator.douyin.com 创作者中心「评论管理」集中回复,登录 cookie 挂父域 .douyin.com,主站登录态即覆盖
 // 创作者中心,取主站号即可,无 loginScope;后端剧本 douyin_reply_fans_comment 已就位)。
 const MATRIX_REPLY_FAN_PLATFORMS = new Set<PlatformId>(['douyin', 'xhs', 'kuaishou', 'bilibili', 'toutiao', 'shipinhao']);
+// 后端 backend/matrix/scenarios 有 <platform>_video_download「视频无水印下载」剧本的平台(单账号工具任务)。
+// 目前仅抖音(借抖音页面 fetch wrapper 实时签名拿无水印源;主站登录态即可,取主站号)。
+const MATRIX_VIDEO_DOWNLOAD_PLATFORMS = new Set<PlatformId>(['douyin']);
 
 // Top-level navigation:
 //   create  — scenario cards (current XhsWorkflowsPage / XWorkflowsPage,
@@ -196,6 +200,11 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   const [matrixReplyAccounts, setMatrixReplyAccounts] = useState<WizardAccount[]>([]);
   const [matrixReplyAccountsLoading, setMatrixReplyAccountsLoading] = useState(false);
   const [matrixReplyTask, setMatrixReplyTask] = useState<any | null>(null); // 编辑时回填(账号/引流/频率);新建 null
+  // 「视频无水印下载」向导(单账号工具任务:选 1 个号 + 粘贴链接)。
+  const [matrixDownloadPlatform, setMatrixDownloadPlatform] = useState<string | null>(null);
+  const [matrixDownloadAccounts, setMatrixDownloadAccounts] = useState<WizardAccount[]>([]);
+  const [matrixDownloadAccountsLoading, setMatrixDownloadAccountsLoading] = useState(false);
+  const [matrixDownloadTask, setMatrixDownloadTask] = useState<any | null>(null);
   // 指纹浏览器内核守卫:没装内核时弹「去下载」,后续流程不走(创建/运行矩阵任务都先过这关)。
   const [matrixKernelMissing, setMatrixKernelMissing] = useState(false);
   const [matrixKernelBusy, setMatrixKernelBusy] = useState(false);
@@ -326,6 +335,53 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     const plat = matrixReplyPlatform;
     setMatrixReplyPlatform(null);
     setMatrixReplyTask(null);
+    await refreshAll();
+    if (!wasEdit) onSwitchToManage?.(plat as any);
+  };
+  // 「视频无水印下载」向导(单账号):账号取主站 scope(同 replyAccountFilter,douyin 走主站登录态)。
+  const openMatrixDownloadWizard = async (platform: string) => {
+    if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; }
+    if (!(await ensureMatrixKernel())) return;
+    setMatrixDownloadAccountsLoading(true);
+    try {
+      const r = await (window as any).electron?.matrix?.listAccounts?.();
+      const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
+      setMatrixDownloadAccounts(accs.filter((a) => replyAccountFilter(a, platform)).map(mapWizardAccount));
+    } catch { setMatrixDownloadAccounts([]); }
+    finally { setMatrixDownloadAccountsLoading(false); }
+    setMatrixDownloadTask(null);
+    setMatrixDownloadPlatform(platform);
+  };
+  const openMatrixDownloadWizardEdit = async (task: any) => {
+    if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; }
+    const plat = (task?.platform as string) || currentPlatform || 'douyin';
+    setMatrixDownloadAccounts([]);
+    setMatrixDownloadAccountsLoading(true);
+    setMatrixDownloadTask({
+      id: task.id,
+      name: task.name,
+      accountIds: task.account_ids || [],
+      urls: Array.isArray((task as any).urls) ? (task as any).urls : [],
+      frequency: task.run_interval,
+    });
+    setMatrixDownloadPlatform(plat);
+    try {
+      const r = await (window as any).electron?.matrix?.listAccounts?.();
+      const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
+      setMatrixDownloadAccounts(accs.filter((a) => replyAccountFilter(a, plat)).map(mapWizardAccount));
+    } catch { setMatrixDownloadAccounts([]); }
+    finally { setMatrixDownloadAccountsLoading(false); }
+  };
+  const saveMatrixDownloadTask = async (input: { name: string; accountIds: string[]; concurrency: number; frequency: string; urls: string[] }) => {
+    if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); throw new Error('请先登录 NoobClaw 账号'); }
+    const m = (window as any).electron?.matrix;
+    // type='video_download' + urls(单账号、无配额)。与同平台互动/回复是不同 type,可并存。
+    const r = await m?.saveTask?.({ id: matrixDownloadTask?.id, platform: matrixDownloadPlatform, type: 'video_download', name: input.name, accountIds: input.accountIds, urls: input.urls, quota: {}, concurrency: 1, frequency: input.frequency, enabled: true });
+    if (!r?.ok) throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限', duplicate_type: '该平台已有同类型(视频下载)任务,直接编辑它即可' } as any)[r?.error] || r?.error || '保存失败');
+    const wasEdit = !!matrixDownloadTask?.id;
+    const plat = matrixDownloadPlatform;
+    setMatrixDownloadPlatform(null);
+    setMatrixDownloadTask(null);
     await refreshAll();
     if (!wasEdit) onSwitchToManage?.(plat as any);
   };
@@ -697,7 +753,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
           scenario={scenario || null}
           onBack={goBack}
           /* 矩阵号:编辑打开账号多选向导(回填该任务的账号/配额/频率),不开原版 ConfigWizard */
-          onEdit={() => { if (matrixMode) { if (/_reply_fans_comment$/.test(String(task.scenario_id || ''))) { void openMatrixReplyWizardEdit(task); } else { void openMatrixWizardEdit(task); } return; } if (scenario) openWizardEdit(task, scenario); }}
+          onEdit={() => { if (matrixMode) { if (/_video_download$/.test(String(task.scenario_id || ''))) { void openMatrixDownloadWizardEdit(task); } else if (/_reply_fans_comment$/.test(String(task.scenario_id || ''))) { void openMatrixReplyWizardEdit(task); } else { void openMatrixWizardEdit(task); } return; } if (scenario) openWizardEdit(task, scenario); }}
           onChanged={refreshAll}
           onOpenHistory={() => openHistoryForTask(task.id)}
         />
@@ -846,6 +902,35 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-fuchsia-500 text-white text-sm font-bold hover:bg-fuchsia-600 shadow-sm shadow-fuchsia-500/25 transition-all active:scale-95"
               >
                 💌 开始回复 →
+              </button>
+              <button
+                type="button"
+                onClick={() => onSwitchToManage?.(currentPlatform as any)}
+                className="ml-3 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+              >
+                已有任务 »
+              </button>
+              </div>
+            </div>
+          )}
+          {/* 视频无水印下载(单账号工具)—— 仅抖音:选 1 个号 + 粘贴链接逐个下载。 */}
+          {MATRIX_VIDEO_DOWNLOAD_PLATFORMS.has(currentPlatform) && (
+            <div className="rounded-2xl border border-sky-500/30 bg-sky-500/5 dark:bg-sky-500/10 p-6 flex flex-col">
+              <div className="flex items-center gap-2 text-xs font-semibold text-sky-600 dark:text-sky-400 mb-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-sky-500" /> 实用工具 · 单账号下载
+              </div>
+              <div className="text-xl font-bold dark:text-white mb-1">⬇️ {platLabel} · 视频无水印下载</div>
+              <div className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed mb-4">
+                选 <strong>1 个</strong>已登录的{platLabel}账号,粘贴 1-20 个视频链接,用该号的指纹浏览器逐个打开、借页面自身签名拿<strong>无水印</strong>源下到本地。
+                单账号顺序下载、不多开;图文/合集自动跳过,每条成功下载按次扣费。
+              </div>
+              <div className="mt-auto flex items-center flex-wrap pt-1">
+              <button
+                type="button"
+                onClick={() => openMatrixDownloadWizard(currentPlatform)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-sky-500 text-white text-sm font-bold hover:bg-sky-600 shadow-sm shadow-sky-500/25 transition-all active:scale-95"
+              >
+                ⬇️ 开始下载 →
               </button>
               <button
                 type="button"
@@ -1360,6 +1445,23 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
               initialTask={matrixReplyTask}
               onCancel={() => { setMatrixReplyPlatform(null); setMatrixReplyTask(null); }}
               onSave={saveMatrixReplyFanTask}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* 矩阵号视频无水印下载向导(单账号 + 粘贴链接 + 频率) */}
+      {matrixDownloadPlatform && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-auto" onClick={() => { setMatrixDownloadPlatform(null); setMatrixDownloadTask(null); }}>
+          <div className="w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
+            <MatrixVideoDownloadWizard
+              platformLabel={matrixDownloadPlatform === 'douyin' ? '抖音' : String(matrixDownloadPlatform)}
+              platform={matrixDownloadPlatform}
+              accounts={matrixDownloadAccounts}
+              accountsLoading={matrixDownloadAccountsLoading}
+              initialTask={matrixDownloadTask}
+              onCancel={() => { setMatrixDownloadPlatform(null); setMatrixDownloadTask(null); }}
+              onSave={saveMatrixDownloadTask}
             />
           </div>
         </div>

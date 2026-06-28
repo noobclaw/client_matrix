@@ -225,7 +225,7 @@ async function runMatrixTaskById(taskId: string, kernelPath?: string): Promise<{
   if (!task) return { ok: false, error: 'task_not_found' };
   // engage(互动涨粉)+ reply_fan(自动回复粉丝评论)都由 engageRunner 跑(共用内核/登录/进度链路,
   // 仅剧本与 task 字段不同)。其它类型未支持。
-  if (task.type !== 'engage' && task.type !== 'reply_fan') return { ok: false, error: 'unsupported_task_type' };
+  if (task.type !== 'engage' && task.type !== 'reply_fan' && task.type !== 'video_download') return { ok: false, error: 'unsupported_task_type' };
   const platform = task.platform;
   if (runningPlatforms.has(platform)) return { ok: false, error: 'another_task_running' };       // 同平台已在跑
   if (runningPlatforms.size >= MATRIX_MAX_CONCURRENT) return { ok: false, error: 'concurrency_full' }; // 并发已满
@@ -276,13 +276,16 @@ async function runMatrixTaskById(taskId: string, kernelPath?: string): Promise<{
       live.targets = sum;
     };
     broadcastSSE('matrix:progress', { type: 'taskStart', taskId: task.id });
-    // reply_fan 走专属剧本(douyin_reply_fans_comment),不要关键词、带引流尾巴;engage 走平台互动剧本。
+    // reply_fan 走专属剧本(*_reply_fans_comment),不要关键词、带引流尾巴;video_download 走 *_video_download
+    // 剧本(单账号、粘贴链接逐个下载);engage 走平台互动剧本。
     const isReplyFan = task.type === 'reply_fan';
+    const isVideoDownload = task.type === 'video_download';
     runEngageTask({
       platform: task.platform, taskId: task.id, accountIds: accIds, quota: task.quota, concurrency: task.concurrency, kernelPath, signal: abort.signal,
       taskType: task.type as any,
-      scenarioId: isReplyFan ? `${task.platform}_reply_fans_comment` : undefined,
+      scenarioId: isReplyFan ? `${task.platform}_reply_fans_comment` : isVideoDownload ? `${task.platform}_video_download` : undefined,
       funnel: isReplyFan ? task.funnel : undefined,
+      urls: isVideoDownload ? task.urls : undefined,
       onLog: (accountId, msg) => { pushLog(accountId, msg); broadcastSSE('matrix:progress', { type: 'log', accountId, msg, taskId: task.id }); },
       onTargets: (accountId, t) => {
         const tg = { like: t.like || 0, follow: t.follow || 0, comment: t.comment || 0 };

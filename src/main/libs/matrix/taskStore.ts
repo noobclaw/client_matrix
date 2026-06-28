@@ -57,8 +57,9 @@ export interface SaveTaskInput {
   name?: string;
   enabled?: boolean;
   accountIds: string[];
-  quota?: EngageQuota;             // engage 必填;reply_fan 可省(存空对象)
+  quota?: EngageQuota;             // engage 必填;reply_fan / video_download 可省(存空对象)
   funnel?: ReplyFanConfig;         // reply_fan 用:引流尾巴配置
+  urls?: string[];                 // video_download 用:待下载视频链接清单
   concurrency?: number;
   frequency: MatrixTaskFrequency;
 }
@@ -82,6 +83,7 @@ export function saveTask(input: SaveTaskInput): SaveTaskResult {
       accountIds: input.accountIds || [],
       quota: input.quota || {},
       funnel: input.funnel ?? tasks[i].funnel,
+      urls: input.urls ?? tasks[i].urls,
       concurrency: input.concurrency,
       frequency: input.frequency,
     };
@@ -103,6 +105,7 @@ export function saveTask(input: SaveTaskInput): SaveTaskResult {
     accountIds: input.accountIds || [],
     quota: input.quota || {},
     funnel: input.funnel,
+    urls: input.urls,
     concurrency: input.concurrency,
     frequency: input.frequency || 'once',
     createdAt: Date.now(),

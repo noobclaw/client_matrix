@@ -49,10 +49,12 @@ export interface EngageTaskOptions {
   accountIds: string[];
   quota?: EngageQuota;              // 每号配额区间(缺省用 scenario 默认)
   // 任务类型:'engage'=互动涨粉(点赞/评论/关注,按关键词搜);'reply_fan'=自动回复粉丝评论
-  // (抖音创作者中心评论管理,不需关键词、无配额、有引流尾巴)。缺省 'engage' 兼容旧调用。
-  taskType?: 'engage' | 'reply_fan';
-  scenarioId?: string;             // 显式指定后端剧本 id(reply_fan 传 'douyin_reply_fans_comment');缺省按平台推
+  // (抖音创作者中心评论管理,不需关键词、无配额、有引流尾巴);'video_download'=视频无水印下载
+  // (单账号,粘贴多个链接逐个下载,不需关键词、无配额)。缺省 'engage' 兼容旧调用。
+  taskType?: 'engage' | 'reply_fan' | 'video_download';
+  scenarioId?: string;             // 显式指定后端剧本 id(reply_fan→*_reply_fans_comment / video_download→*_video_download);缺省按平台推
   funnel?: { funnel_phrase?: string; funnel_probability?: number }; // 仅 reply_fan:引流尾巴配置
+  urls?: string[];                 // 仅 video_download:待下载视频链接清单(注入 ctx.task.urls)
   concurrency?: number;
   jitterMinMs?: number; jitterMaxMs?: number;
   kernelPath?: string;
@@ -165,7 +167,7 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string): Pr
   // 币安广场是 feed 互动(刷广场帖、按内置 CRYPTO 规则筛,不按关键词搜),不需要用户配关键词;
   //   reply_fan(回复粉丝评论)对象是自己作品下的粉丝评论,也不按关键词搜 → 同样豁免。
   //   其它平台(抖音/小红书等按关键词搜的互动)才要。漏掉豁免 → 账号没关键词被静默拦掉、无日志。
-  const needsKeywords = opts.taskType !== 'reply_fan' && opts.platform !== 'binance';
+  const needsKeywords = opts.taskType !== 'reply_fan' && opts.taskType !== 'video_download' && opts.platform !== 'binance';
   if (needsKeywords && (!acc.keywords || acc.keywords.length === 0)) { log('❌ 跳过:未配置关键词(到「我的矩阵账号」编辑里添加)'); return { accountId, state: 'skipped', reason: 'no_keywords' }; }
   if (acc.status === 'banned' || acc.status === 'limited') { log('❌ 跳过:账号状态为 ' + acc.status); return { accountId, state: 'skipped', reason: 'account_' + acc.status }; }
 
@@ -231,6 +233,8 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string): Pr
       selfDisplayId: acc.displayId || '',
       funnel_phrase: opts.funnel?.funnel_phrase || '',
       funnel_probability: typeof opts.funnel?.funnel_probability === 'number' ? opts.funnel.funnel_probability : 0,
+      // video_download 剧本读 task.urls(用户粘贴的待下载链接清单)。
+      urls: Array.isArray(opts.urls) ? opts.urls : [],
       daily_like_min: q.daily_like_min, daily_like_max: q.daily_like_max,
       daily_follow_min: q.daily_follow_min, daily_follow_max: q.daily_follow_max,
       daily_comment_min: q.daily_comment_min, daily_comment_max: q.daily_comment_max,
@@ -317,6 +321,35 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string): Pr
         } catch (err: any) {
           coworkLog('WARN', 'engage', `[${accountId}] writeReport failed: ${String(err?.message || err)}`);
           return { ok: false, reason: String(err?.message || err) };
+        }
+      },
+      // 视频下载落盘(video_download 剧本用):把无水印 mp4 直链下到
+      // <matrixDir>/downloads/<平台>/<accountId>/<fileName>,返回绝对路径 + 字节数。
+      // 浏览器 UA + 5 分钟超时;点停止(signal abort)立即中断本次下载。
+      downloadVideoToDisk: async (videoUrl: string, o?: { fileName?: string; outputDir?: string }) => {
+        try {
+          if (!videoUrl || !/^https?:\/\//i.test(videoUrl)) return { ok: false, reason: 'invalid_url' };
+          const base = process.env.NOOBCLAW_MATRIX_DIR || path.join(os.homedir(), 'NoobClaw', 'matrix');
+          const dir = o?.outputDir || path.join(base, 'downloads', opts.platform || acc.platform || 'unknown', accountId);
+          fs.mkdirSync(dir, { recursive: true });
+          const safeName = String(o?.fileName || `video_${Date.now()}.mp4`).replace(/[\\/:*?"<>|]/g, '_').slice(0, 200);
+          const filePath = path.join(dir, safeName);
+          const ctrl = new AbortController();
+          const to = setTimeout(() => ctrl.abort(), 5 * 60 * 1000);
+          try { opts.signal?.addEventListener('abort', () => ctrl.abort(), { once: true }); } catch { /* ignore */ }
+          let buf: Buffer;
+          try {
+            const resp = await fetch(videoUrl, { headers: { 'User-Agent': 'Mozilla/5.0 NoobClaw/1.0', Referer: 'https://www.douyin.com/' }, signal: ctrl.signal });
+            if (!resp.ok) return { ok: false, reason: `http_${resp.status}` };
+            buf = Buffer.from(await resp.arrayBuffer());
+          } finally { clearTimeout(to); }
+          if (!buf.length) return { ok: false, reason: 'empty_body' };
+          fs.writeFileSync(filePath, buf);
+          coworkLog('INFO', 'engage', `[${accountId}] downloadVideoToDisk ok → ${filePath} (${buf.length}B)`);
+          return { ok: true, filePath, size: buf.length, dir };
+        } catch (err: any) {
+          coworkLog('WARN', 'engage', `[${accountId}] downloadVideoToDisk failed: ${String(err?.message || err)}`);
+          return { ok: false, reason: String(err?.message || err).slice(0, 120) };
         }
       },
       // 工具。sleep 可被停止打断:点停止后 abort 立即唤醒,不再傻等动作间延时跑完(否则停了要等当前 sleep 结束才退)。

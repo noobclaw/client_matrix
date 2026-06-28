@@ -83,8 +83,9 @@ export interface ReplyFanConfig {
   funnel_probability?: number;   // 引流尾巴出现概率 1-100(引流语为空时失效)
 }
 
-// 互动(点赞/评论/关注)= engage;自动回复粉丝评论 = reply_fan(抖音创作者中心评论管理)。
-export type MatrixTaskType = 'engage' | 'reply_fan';
+// 互动(点赞/评论/关注)= engage;自动回复粉丝评论 = reply_fan(抖音创作者中心评论管理);
+// 视频无水印下载 = video_download(单账号:选 1 个号 + 粘贴多个链接,逐个下载,不多开)。
+export type MatrixTaskType = 'engage' | 'reply_fan' | 'video_download';
 // 频率枚举对齐老客户端 DouyinConfigWizard(便于复用频率算法/文案)。
 export type MatrixTaskFrequency = 'once' | '30min' | '1h' | '3h' | '6h' | 'daily_random';
 
@@ -99,9 +100,10 @@ export interface MatrixTask {
   name: string;
   enabled: boolean;                // 定时调度是否启用(手动运行不受此限)
   accountIds: string[];            // 勾选的(已登录)账号
-  quota: EngageQuota;              // 仅 engage 用;reply_fan 任务为空对象
+  quota: EngageQuota;              // 仅 engage 用;reply_fan / video_download 任务为空对象
   funnel?: ReplyFanConfig;         // 仅 reply_fan 用:引流尾巴配置
-  concurrency?: number;            // 同时开窗数
+  urls?: string[];                 // 仅 video_download 用:用户粘贴的待下载视频链接清单
+  concurrency?: number;            // 同时开窗数(video_download 固定 1,单账号顺序下载)
   frequency: MatrixTaskFrequency;  // 运行频率
   nextPlannedRunAt?: number;       // 下次计划运行(epoch ms;调度器预排,UI 展示)
   lastRunAt?: number;              // 上次运行(调度判断 + 展示)
