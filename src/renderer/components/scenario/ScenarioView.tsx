@@ -50,10 +50,15 @@ const MATRIX_TAB_ORDER: PlatformId[] = ['video', 'douyin', 'xhs', 'kuaishou', 'b
 const MATRIX_ENGAGE_PLATFORMS = new Set<PlatformId>(['douyin', 'xhs', 'kuaishou', 'bilibili', 'x', 'binance', 'youtube', 'tiktok']);
 // 后端 backend/matrix/scenarios 有 <platform>_reply_fans_comment「自动回复粉丝」剧本的平台。
 // 小红书(逐篇笔记进详情页回复,主站登录态即覆盖创作者中心)+ 快手(创作者中心评论管理,需
-// loginScope='creator' 账号)+ 抖音(creator.douyin.com 创作者中心「评论管理」集中回复,登录 cookie
-// 挂父域 .douyin.com,主站登录态即覆盖创作者中心,取主站号即可,无 loginScope;后端剧本
-// douyin_reply_fans_comment 已就位);其余平台后续逐步开放。账号 scope 过滤见 replyAccountFilter。
-const MATRIX_REPLY_FAN_PLATFORMS = new Set<PlatformId>(['xhs', 'kuaishou', 'douyin']);
+// loginScope='creator' 账号)+ 哔哩哔哩(member.bilibili.com 创作中心评论管理,登录 cookie 挂
+// 父域 .bilibili.com,主站登录态即覆盖创作中心,取主站号即可);其余平台后续逐步开放。
+// 账号 scope 过滤见 replyAccountFilter。
+// 头条号(mp.toutiao.com 后台「评论管理」集中回复,主站登录态即覆盖创作端,无 loginScope → 取主站号即可)。
+// 视频号(channels.weixin.qq.com/platform 视频号助手「互动管理 · 评论」集中回复,助手即创作端、无独立主站,
+// 无 loginScope → 取主站号即可;页面为 wujie 微前端 open shadowRoot,剧本已处理)。
+// 抖音(creator.douyin.com 创作者中心「评论管理」集中回复,登录 cookie 挂父域 .douyin.com,主站登录态即覆盖
+// 创作者中心,取主站号即可,无 loginScope;后端剧本 douyin_reply_fans_comment 已就位)。
+const MATRIX_REPLY_FAN_PLATFORMS = new Set<PlatformId>(['douyin', 'xhs', 'kuaishou', 'bilibili', 'toutiao', 'shipinhao']);
 
 // Top-level navigation:
 //   create  — scenario cards (current XhsWorkflowsPage / XWorkflowsPage,
@@ -773,8 +778,10 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       // 视频号/头条暂无 engage 剧本 → tab 在(与账号页一致),但「开始创作」改为「即将上线」不放行。
       const engageReady = MATRIX_ENGAGE_PLATFORMS.has(currentPlatform);
       return (
-        <div className="p-6 max-w-3xl mx-auto">
-          <div className="rounded-2xl border border-violet-500/30 bg-violet-500/5 dark:bg-violet-500/10 p-6">
+        <div className="p-6 max-w-5xl mx-auto">
+          {/* 新建任务卡片:每行 2 个(互动涨粉 + 自动回复粉丝),与其它新建 tab 的卡片网格一致 */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
+          <div className="rounded-2xl border border-violet-500/30 bg-violet-500/5 dark:bg-violet-500/10 p-6 flex flex-col">
             <div className="flex items-center gap-2 text-xs font-semibold text-violet-600 dark:text-violet-400 mb-2">
               <span className="w-1.5 h-1.5 rounded-full bg-violet-500" /> 矩阵互动 · 多账号涨粉
             </div>
@@ -783,6 +790,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
               勾选多个已登录账号,每个账号在各自指纹浏览器里按<strong>自己的赛道关键词</strong>搜索,自动点赞 / 关注 / 评论。
               赛道 / 关键词 / 人设在「我的矩阵账号」里给每个号设;选几个号就同时开几个窗。
             </div>
+            <div className="mt-auto flex items-center flex-wrap pt-1">
             {engageReady ? (
               <button
                 type="button"
@@ -810,15 +818,16 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
                 已有任务 »
               </button>
             )}
+            </div>
             {!engageReady && (
               <div className="text-xs text-gray-500 dark:text-gray-400 mt-3 leading-relaxed">
                 {platLabel} 账号可在「我的矩阵账号」里登录管理,并用于<strong>多平台视频创作</strong>发布;互动涨粉(点赞/关注/评论)剧本还在开发中。
               </div>
             )}
           </div>
-          {/* 自动回复粉丝(矩阵多账号)—— 目前仅快手:在创作者中心评论管理里逐条回复自己作品下的粉丝评论。 */}
+          {/* 自动回复粉丝(矩阵多账号)—— 小红书/快手/哔哩哔哩:在创作者中心评论管理里逐条回复自己作品下的粉丝评论。 */}
           {MATRIX_REPLY_FAN_PLATFORMS.has(currentPlatform) && (
-            <div className="rounded-2xl border border-fuchsia-500/30 bg-fuchsia-500/5 dark:bg-fuchsia-500/10 p-6 mt-4">
+            <div className="rounded-2xl border border-fuchsia-500/30 bg-fuchsia-500/5 dark:bg-fuchsia-500/10 p-6 flex flex-col">
               <div className="flex items-center gap-2 text-xs font-semibold text-fuchsia-600 dark:text-fuchsia-400 mb-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-fuchsia-500" /> 粉丝维护 · 多账号回复
               </div>
@@ -830,6 +839,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
                   : <>勾选多个已登录<strong>创作者中心</strong>的账号,每个号在各自指纹浏览器的「评论管理」里逐条回复自己作品下的粉丝评论。
                       AI 按评论内容 + 该号人设写回应,可选按概率自然带上引流尾巴;已回复过的、自己留的自动跳过,只回粉丝、绝不评论作品本身。</>}
               </div>
+              <div className="mt-auto flex items-center flex-wrap pt-1">
               <button
                 type="button"
                 onClick={() => openMatrixReplyWizard(currentPlatform)}
@@ -844,8 +854,10 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
               >
                 已有任务 »
               </button>
+              </div>
             </div>
           )}
+          </div>
         </div>
       );
     }

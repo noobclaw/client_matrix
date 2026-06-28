@@ -496,10 +496,11 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
   //   - xhs_reply_fans_comment: AI-replies fan comments on user's own notes
   // Excludes creator scenarios (xhs_viral / douyin_image_text) which DO have
   // a draft / local-save mode.
+  // 所有 *_reply_fans_comment 剧本(小红书/抖音/快手/哔哩哔哩/头条号…)都是「直接回复到平台、
+  // 无本地草稿」的任务,统一用回复粉丝的步骤叙事 + 不显示上传/草稿徽章。
   const isAutoReplyTask =
     (scenario?.workflow_type as any) === 'auto_reply' ||
-    scenario?.id === 'xhs_reply_fans_comment' ||
-    scenario?.id === 'douyin_reply_fans_comment';
+    /_reply_fans_comment$/.test(scenario?.id || '');
   // 打开本任务输出目录(报告 / 草稿 / 图片)。头部链接 + 醒目按钮 + 运行明细大按钮共用。
   const openTaskDir = async () => {
     try {
@@ -1411,7 +1412,7 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
                         if (sid === 'xhs_reply_fans_comment') {
                           return isZh ? `${intervalLabel} · 最近 30 篇笔记/次` : `${intervalLabel} · latest 30 notes/run`;
                         }
-                        if (sid === 'douyin_reply_fans_comment' || sid === 'kuaishou_reply_fans_comment' || sid === 'bilibili_reply_fans_comment') {
+                        if (sid === 'douyin_reply_fans_comment' || sid === 'kuaishou_reply_fans_comment' || sid === 'bilibili_reply_fans_comment' || sid === 'shipinhao_reply_fans_comment') {
                           return isZh ? `${intervalLabel} · 最近 30 个作品/次` : `${intervalLabel} · latest 30 videos/run`;
                         }
                         if (typeof cMin === 'number' && typeof cMax === 'number') {
@@ -1562,7 +1563,7 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
                     // v6.x: 回复粉丝评论(xhs/douyin)= 「已回复评论数」+「文章进度 当前/总」,
                     //   不是「N/target 评论」。评论纯累计(无 target),文章扫描后才知道总数
                     //   (扫描前 target=0 → 显示 "-")。精确 id 门控,不碰其他场景。
-                    if (scenario?.id === 'xhs_reply_fans_comment' || scenario?.id === 'douyin_reply_fans_comment' || scenario?.id === 'kuaishou_reply_fans_comment' || scenario?.id === 'bilibili_reply_fans_comment') {
+                    if (scenario?.id === 'xhs_reply_fans_comment' || scenario?.id === 'douyin_reply_fans_comment' || scenario?.id === 'kuaishou_reply_fans_comment' || scenario?.id === 'bilibili_reply_fans_comment' || scenario?.id === 'shipinhao_reply_fans_comment') {
                       const commentDone = (ap as any).comment?.done ?? 0;
                       const noteDone = (ap as any).note?.done ?? 0;
                       const noteTarget = (ap as any).note?.target ?? 0;
@@ -2007,6 +2008,7 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
               || task.scenario_id === 'douyin_reply_fans_comment'
               || task.scenario_id === 'kuaishou_reply_fans_comment'
               || task.scenario_id === 'bilibili_reply_fans_comment'
+              || task.scenario_id === 'shipinhao_reply_fans_comment'
             }
             /* douyin_reply_fans_comment 全程在创作者中心评论管理页操作,不碰
                www.douyin.com 主站 → 只校验创作者中心,跳过主站 tab 检查。
@@ -2015,6 +2017,7 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
               task.scenario_id === 'douyin_reply_fans_comment'
               || task.scenario_id === 'kuaishou_reply_fans_comment'
               || task.scenario_id === 'bilibili_reply_fans_comment'
+              || task.scenario_id === 'shipinhao_reply_fans_comment'
             }
             onCancel={() => setLoginModalOpen(false)}
             onConfirmed={handleLoginConfirmed}

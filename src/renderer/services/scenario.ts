@@ -70,17 +70,20 @@ const MATRIX_ENGAGE_META: Record<string, { name_zh: string; icon: string }> = {
 const engageScenarioIdForPlatform = (platform?: string): string =>
   (platform && MATRIX_ENGAGE_SCENARIO_ID[platform]) || 'douyin_auto_engage';
 
-// 「自动回复粉丝」剧本(backend/matrix/scenarios/<platform>_reply_fans_comment)。目前 3 个平台有
-// 剧本(xhs 逐篇笔记进详情页;抖音/快手创作者中心评论管理集中回复)。同 engage 一样需要补快照,
+// 「自动回复粉丝」剧本(backend/matrix/scenarios/<platform>_reply_fans_comment)。目前 4 个平台有
+// 剧本(xhs 逐篇笔记进详情页;抖音/快手/哔哩哔哩创作中心评论管理集中回复)。同 engage 一样需要补快照,
 // 否则 reply_fan 任务的 scenario_id 在 listScenarios 里 lookup 不到 platform → 任务 tab 为空。
 const MATRIX_REPLY_SCENARIO_ID: Record<string, string> = {
   xhs: 'xhs_reply_fans_comment', douyin: 'douyin_reply_fans_comment', kuaishou: 'kuaishou_reply_fans_comment',
+  bilibili: 'bilibili_reply_fans_comment', toutiao: 'toutiao_reply_fans_comment',
+  shipinhao: 'shipinhao_reply_fans_comment',
 };
 const MATRIX_REPLY_ID_TO_PLATFORM: Record<string, string> =
   Object.fromEntries(Object.entries(MATRIX_REPLY_SCENARIO_ID).map(([p, id]) => [id, p]));
 const MATRIX_REPLY_META: Record<string, { name_zh: string; icon: string }> = {
   xhs: { name_zh: '小红书 自动回复粉丝', icon: '💌' }, douyin: { name_zh: '抖音 自动回复粉丝', icon: '💌' },
-  kuaishou: { name_zh: '快手 自动回复粉丝', icon: '💌' },
+  kuaishou: { name_zh: '快手 自动回复粉丝', icon: '💌' }, bilibili: { name_zh: '哔哩哔哩 自动回复粉丝', icon: '💌' },
+  toutiao: { name_zh: '头条号 自动回复粉丝', icon: '💌' }, shipinhao: { name_zh: '视频号 自动回复粉丝', icon: '💌' },
 };
 
 /** 矩阵任务 → 旧 ScenarioTaskIPC(赛道/关键词在账号上,task 这两个字段留空;
