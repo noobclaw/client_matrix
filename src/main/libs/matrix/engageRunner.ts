@@ -153,10 +153,13 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string): Pr
   const acc = getAccount(accountId);
   const log = (m: string) => { try { opts.onLog?.(accountId, m); } catch { /* ignore */ } };
   if (opts.signal?.aborted) return { accountId, state: 'skipped', reason: 'aborted' }; // 已停止:还没轮到的号直接跳过
-  if (!acc) return { accountId, state: 'skipped', reason: 'account_not_found' };
-  if (acc.platform !== opts.platform) return { accountId, state: 'skipped', reason: 'platform_mismatch' };
-  if (!acc.keywords || acc.keywords.length === 0) return { accountId, state: 'skipped', reason: 'no_keywords' };
-  if (acc.status === 'banned' || acc.status === 'limited') return { accountId, state: 'skipped', reason: 'account_' + acc.status };
+  // 早期守卫一律补日志:以前直接 return 不打日志 → 账号被跳过却「啥日志都没有」,无法排查。
+  if (!acc) { log('❌ 跳过:账号不存在'); return { accountId, state: 'skipped', reason: 'account_not_found' }; }
+  if (acc.platform !== opts.platform) { log('❌ 跳过:账号平台与任务不符'); return { accountId, state: 'skipped', reason: 'platform_mismatch' }; }
+  // 币安广场是 feed 互动(刷广场帖、按内置 CRYPTO 规则筛,不按关键词搜),不需要用户配关键词;
+  //   其它平台(抖音/小红书等按关键词搜)才要。漏掉这条豁免 → 币安账号没关键词被静默拦掉、无日志。
+  if (opts.platform !== 'binance' && (!acc.keywords || acc.keywords.length === 0)) { log('❌ 跳过:未配置关键词(到「我的矩阵账号」编辑里添加)'); return { accountId, state: 'skipped', reason: 'no_keywords' }; }
+  if (acc.status === 'banned' || acc.status === 'limited') { log('❌ 跳过:账号状态为 ' + acc.status); return { accountId, state: 'skipped', reason: 'account_' + acc.status }; }
 
   await sleep(randInt(opts.jitterMinMs ?? 3000, opts.jitterMaxMs ?? 15000)); // 错峰
 
