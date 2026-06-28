@@ -50,8 +50,10 @@ const MATRIX_TAB_ORDER: PlatformId[] = ['video', 'douyin', 'xhs', 'kuaishou', 'b
 const MATRIX_ENGAGE_PLATFORMS = new Set<PlatformId>(['douyin', 'xhs', 'kuaishou', 'bilibili', 'x', 'binance', 'youtube', 'tiktok']);
 // 后端 backend/matrix/scenarios 有 <platform>_reply_fans_comment「自动回复粉丝」剧本的平台。
 // 小红书(逐篇笔记进详情页回复,主站登录态即覆盖创作者中心)+ 快手(创作者中心评论管理,需
-// loginScope='creator' 账号);其余平台后续逐步开放。账号 scope 过滤见 replyAccountFilter。
-const MATRIX_REPLY_FAN_PLATFORMS = new Set<PlatformId>(['xhs', 'kuaishou']);
+// loginScope='creator' 账号)+ 抖音(creator.douyin.com 创作者中心「评论管理」集中回复,登录 cookie
+// 挂父域 .douyin.com,主站登录态即覆盖创作者中心,取主站号即可,无 loginScope;后端剧本
+// douyin_reply_fans_comment 已就位);其余平台后续逐步开放。账号 scope 过滤见 replyAccountFilter。
+const MATRIX_REPLY_FAN_PLATFORMS = new Set<PlatformId>(['xhs', 'kuaishou', 'douyin']);
 
 // Top-level navigation:
 //   create  — scenario cards (current XhsWorkflowsPage / XWorkflowsPage,
