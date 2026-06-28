@@ -99,6 +99,17 @@ const MATRIX_DOWNLOAD_META: Record<string, { name_zh: string; icon: string }> = 
   bilibili: { name_zh: '哔哩哔哩 视频无水印下载', icon: '⬇️' }, tiktok: { name_zh: 'TikTok 视频无水印下载', icon: '⬇️' },
 };
 
+// 「图文创作」剧本(backend/matrix/scenarios/<platform>_image_text)。N 个号各自按身份生成图文+配图+发布。
+// 目前仅抖音(小红书第二步)。同样需补快照,否则任务 scenario_id lookup 不到 platform。
+const MATRIX_IMAGETEXT_SCENARIO_ID: Record<string, string> = {
+  douyin: 'douyin_image_text',
+};
+const MATRIX_IMAGETEXT_ID_TO_PLATFORM: Record<string, string> =
+  Object.fromEntries(Object.entries(MATRIX_IMAGETEXT_SCENARIO_ID).map(([p, id]) => [id, p]));
+const MATRIX_IMAGETEXT_META: Record<string, { name_zh: string; icon: string }> = {
+  douyin: { name_zh: '抖音 图文创作', icon: '📝' },
+};
+
 /** 矩阵任务 → 旧 ScenarioTaskIPC(赛道/关键词在账号上,task 这两个字段留空;
  *  配额映射到 daily_*_min/max 这套 douyin_auto_engage 字段)。 */
 function mxTaskToScenario(t: any): ScenarioTaskIPC {
@@ -108,13 +119,16 @@ function mxTaskToScenario(t: any): ScenarioTaskIPC {
   //   并展示引流配置(funnel_phrase/funnel_probability);否则会被当互动任务、引流配置丢失。
   const isReply = t?.type === 'reply_fan';
   const isDownload = t?.type === 'video_download';
+  const isImageText = t?.type === 'image_text';
   const fn = t?.funnel || {};
   const dlUrls: string[] = Array.isArray(t?.urls) ? t.urls : [];
   return {
     id: t.id,
     // 按任务真实 platform + 类型映射剧本 id(原来写死 douyin/engage → 非抖音 tab 看不到任务、回复粉丝错显成互动)。
-    scenario_id: isReply ? `${t.platform}_reply_fans_comment` : isDownload ? `${t.platform}_video_download` : engageScenarioIdForPlatform(t.platform),
-    track: isReply ? 'reply_fan_comment' : isDownload ? 'video_download' : 'matrix',
+    scenario_id: isReply ? `${t.platform}_reply_fans_comment` : isDownload ? `${t.platform}_video_download` : isImageText ? `${t.platform}_image_text` : engageScenarioIdForPlatform(t.platform),
+    track: isReply ? 'reply_fan_comment' : isDownload ? 'video_download' : isImageText ? 'image_text' : 'matrix',
+    // image_text 配置透传(详情页/编辑回填 + updateTask 兜底不丢配置)。
+    imageText: isImageText ? t.imageText : undefined,
     keywords: [],
     persona: '',
     // video_download:粘贴的链接清单(详情页/编辑回填用),daily_count = 链接数。
@@ -176,6 +190,23 @@ function scenarioInputToMxSave(input: any, id?: string): any {
       urls,
       concurrency: 1,             // 单账号顺序下载,不多开
       frequency: input.run_interval || 'once',
+      enabled: input.enabled !== false,
+    };
+  }
+  // 图文创作任务(scenario_id 以 _image_text 结尾):保持 type='image_text' + 透传 imageText 配置,
+  // 否则经 updateTask 兜底会被改成 engage、图文配置丢失。
+  if (typeof input.scenario_id === 'string' && input.scenario_id.endsWith('_image_text')) {
+    const iPlatform = MATRIX_IMAGETEXT_ID_TO_PLATFORM[input.scenario_id] || 'douyin';
+    return {
+      id,
+      platform: iPlatform,
+      type: 'image_text',
+      name: input.name || (accountIds.length ? `${iPlatform}图文创作 · ${accountIds.length} 个号` : `${iPlatform}图文创作`),
+      accountIds,
+      quota: {},
+      imageText: input.imageText,
+      concurrency: accountIds.length,
+      frequency: input.run_interval || 'daily_random',
       enabled: input.enabled !== false,
     };
   }
@@ -325,7 +356,15 @@ class ScenarioService {
           name_zh: MATRIX_DOWNLOAD_META[platform]?.name_zh || sid, name_en: '',
           icon: MATRIX_DOWNLOAD_META[platform]?.icon || '⬇️',
         }));
-      return [...DEFAULT_SCENARIOS, ...synth, ...synthReply, ...synthDownload] as unknown as Scenario[];
+      // 同理补「图文创作」剧本快照,让 image_text 任务能按 platform 归到对应 tab。
+      const synthImageText = Object.entries(MATRIX_IMAGETEXT_SCENARIO_ID)
+        .filter(([, sid]) => !have.has(sid))
+        .map(([platform, sid]) => ({
+          id: sid, version: '1.0.0', platform, workflow_type: 'image_text', category: 'knowledge',
+          name_zh: MATRIX_IMAGETEXT_META[platform]?.name_zh || sid, name_en: '',
+          icon: MATRIX_IMAGETEXT_META[platform]?.icon || '📝',
+        }));
+      return [...DEFAULT_SCENARIOS, ...synth, ...synthReply, ...synthDownload, ...synthImageText] as unknown as Scenario[];
     }
     try {
       const res = await window.electron.scenario.listScenarios();

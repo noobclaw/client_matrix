@@ -83,9 +83,24 @@ export interface ReplyFanConfig {
   funnel_probability?: number;   // 引流尾巴出现概率 1-100(引流语为空时失效)
 }
 
+/**
+ * 「图文创作」(image_text)任务配置。N 个号各自按身份(赛道/人设/关键词,沿用账号已有配置)
+ * + 可选参考文案 + 维度化创意引擎 → AI 生成各异内容,配图全局二选一(AI生图 / 网络图按本号关键词搜),
+ * 发到各自创作者中心。配图方式/张数/篇数全局统一,参考文案可按号填(选填)。
+ */
+export interface ImageTextConfig {
+  useRealPhotos: boolean;        // 配图方式【全局】:false=AI 生图,true=网络图(按账号关键词搜实景图)
+  imageCount: number;            // 每篇配图张数 2-6
+  dailyCount: number;            // 每号每轮生成几篇 1-50
+  aiImageStyle?: string;         // AI 生图风格(仅 useRealPhotos=false 用,缺省 'ai_auto')
+  autoPublish: boolean;          // true=直接群发,false=仅本地保存(用户逐条审核后手动发)
+  references?: Record<string, string>; // 可选:各账号参考文案 { accountId: text };不填则按身份合成种子
+}
+
 // 互动(点赞/评论/关注)= engage;自动回复粉丝评论 = reply_fan(抖音创作者中心评论管理);
-// 视频无水印下载 = video_download(单账号:选 1 个号 + 粘贴多个链接,逐个下载,不多开)。
-export type MatrixTaskType = 'engage' | 'reply_fan' | 'video_download';
+// 视频无水印下载 = video_download(单账号:选 1 个号 + 粘贴多个链接,逐个下载,不多开);
+// 图文创作 = image_text(N 个号各自按身份生成图文 + 配图 + 发到各自创作者中心)。
+export type MatrixTaskType = 'engage' | 'reply_fan' | 'video_download' | 'image_text';
 // 频率枚举对齐老客户端 DouyinConfigWizard(便于复用频率算法/文案)。
 export type MatrixTaskFrequency = 'once' | '30min' | '1h' | '3h' | '6h' | 'daily_random';
 
@@ -102,6 +117,7 @@ export interface MatrixTask {
   accountIds: string[];            // 勾选的(已登录)账号
   quota: EngageQuota;              // 仅 engage 用;reply_fan / video_download 任务为空对象
   funnel?: ReplyFanConfig;         // 仅 reply_fan 用:引流尾巴配置
+  imageText?: ImageTextConfig;     // 仅 image_text 用:图文创作配置
   urls?: string[];                 // 仅 video_download 用:用户粘贴的待下载视频链接清单
   concurrency?: number;            // 同时开窗数(video_download 固定 1,单账号顺序下载)
   frequency: MatrixTaskFrequency;  // 运行频率

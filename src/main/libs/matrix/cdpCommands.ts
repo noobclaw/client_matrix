@@ -11,7 +11,10 @@
  * 不打包 client;③ 22 个剧本一行不改。
  */
 
-import { kernelEval, kernelExec, kernelKeypress, kernelClick, kernelWheel, kernelNavigate, kernelInsertText } from './kernelPool';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { kernelEval, kernelExec, kernelKeypress, kernelClick, kernelWheel, kernelNavigate, kernelInsertText, kernelSetFileInput } from './kernelPool';
 
 export async function matrixCmd(
   accountId: string,
@@ -84,6 +87,56 @@ export async function matrixCmd(
     case 'get_url': {
       const url = await kernelEval(accountId, 'location.href');
       return { ok: true, url: String(url || ''), value: url };
+    }
+
+    // 下载图片为 base64(图文创作网络图模式用)。在【内核页面主世界】fetch:页面在 douyin.com 上时
+    // Referer 自动是 douyin.com → 满足 douyinpic CDN 防盗链(等同用户自己看图),优于 node 侧 undici(不带 referer)。
+    // 返回 { base64, mimeType } 或 { error }(orchestrator 读 rRes.result||rRes 再取 .base64/.mimeType/.error)。
+    case 'fetch_image': {
+      const url = String(params?.url || '');
+      if (!url) return { error: 'url required' };
+      const expr = `(async function(){try{`
+        + `var r=await fetch(${JSON.stringify(url)},{credentials:'include',referrer:${JSON.stringify(String(params?.referrer || 'https://www.douyin.com/'))}});`
+        + `if(!r.ok)return JSON.stringify({error:'http_'+r.status});`
+        + `var ct=r.headers.get('content-type')||'';`
+        + `var ab=await r.arrayBuffer();var by=new Uint8Array(ab),bin='';for(var i=0;i<by.length;i++)bin+=String.fromCharCode(by[i]);`
+        + `return JSON.stringify({base64:btoa(bin),mimeType:ct.split(';')[0]||''});`
+        + `}catch(e){return JSON.stringify({error:String(e&&e.message||e).slice(0,80)});}})()`;
+      try {
+        const raw = await kernelEval(accountId, expr);
+        const parsed: any = JSON.parse(String(raw || '{}'));
+        return parsed; // { base64, mimeType } | { error }
+      } catch (e: any) {
+        return { error: 'fetch_image_failed:' + String(e?.message || e).slice(0, 80) };
+      }
+    }
+
+    // 多图上传(图文创作发布用)。扩展版收 base64 数组,矩阵走 CDP DOM.setFileInputFiles(只认磁盘路径),
+    // 故把每张 base64 先落临时文件,再一次性 setFileInputFiles 多文件。返回 { message } / { error }。
+    // ⚠️ 临时文件不能立刻删:setFileInputFiles 后浏览器是【异步】读盘上传的,删早了会传空 → 延迟清理。
+    case 'upload_file': {
+      const files = Array.isArray(params?.files) ? params.files : [];
+      if (!files.length) return { error: 'no_files' };
+      const tmpPaths: string[] = [];
+      try {
+        for (let i = 0; i < files.length; i++) {
+          const b64 = String(files[i]?.fileData || '');
+          if (!b64) continue;
+          const mime = String(files[i]?.mimeType || 'image/jpeg');
+          const ext = mime.indexOf('png') >= 0 ? 'png' : (mime.indexOf('webp') >= 0 ? 'webp' : 'jpg');
+          const p = path.join(os.tmpdir(), `nbmx_img_${Date.now()}_${i}_${Math.floor(Math.random() * 1e6)}.${ext}`);
+          fs.writeFileSync(p, Buffer.from(b64, 'base64'));
+          tmpPaths.push(p);
+        }
+        if (!tmpPaths.length) return { error: 'empty_files' };
+        const r: any = await kernelSetFileInput(accountId, String(params?.selector || ''), tmpPaths, { deep: true });
+        // 5 分钟后清理临时文件(此时上传早已完成),避免 tmp 堆积。
+        setTimeout(() => { for (const p of tmpPaths) { try { fs.unlinkSync(p); } catch { /* ignore */ } } }, 5 * 60 * 1000);
+        return r && r.ok ? { ok: true, message: `set ${tmpPaths.length} files` } : { error: (r && r.reason) || 'set_file_input_failed' };
+      } catch (e: any) {
+        for (const p of tmpPaths) { try { fs.unlinkSync(p); } catch { /* ignore */ } }
+        return { error: 'upload_file_failed:' + String(e?.message || e).slice(0, 80) };
+      }
     }
 
     // ── 页面类命令:走服务端下发的执行器(复用扩展实现)──

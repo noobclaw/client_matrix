@@ -41,6 +41,7 @@ import { ErrorBoundary } from '../ErrorBoundary';
 import MatrixTaskWizard, { type WizardAccount } from '../matrix/MatrixTaskWizard';
 import MatrixReplyFansWizard from '../matrix/MatrixReplyFansWizard';
 import MatrixVideoDownloadWizard from '../matrix/MatrixVideoDownloadWizard';
+import MatrixImageTextWizard, { type ImageTextWizardSave } from '../matrix/MatrixImageTextWizard';
 
 type PlatformId = 'xhs' | 'x' | 'binance' | 'douyin' | 'shipinhao' | 'toutiao' | 'kuaishou' | 'bilibili' | 'tiktok' | 'youtube' | 'video';
 
@@ -64,6 +65,9 @@ const MATRIX_REPLY_FAN_PLATFORMS = new Set<PlatformId>(['douyin', 'xhs', 'kuaish
 // 抖音(页面 fetch wrapper 签名拿 detail)/快手(读 <video> src)/哔哩哔哩(playurl html5 单文件 mp4)/
 // TikTok(SSR __UNIVERSAL_DATA__ + 多级 fallback,须 VPN 真机)。都走【主站】登录态,取主站号。
 const MATRIX_VIDEO_DOWNLOAD_PLATFORMS = new Set<PlatformId>(['douyin', 'kuaishou', 'bilibili', 'tiktok']);
+// 后端 backend/matrix/scenarios 有 <platform>_image_text「图文创作」剧本的平台(N 号各自生成图文+发布)。
+// 目前仅抖音(小红书第二步)。
+const MATRIX_IMAGE_TEXT_PLATFORMS = new Set<PlatformId>(['douyin']);
 
 // Top-level navigation:
 //   create  — scenario cards (current XhsWorkflowsPage / XWorkflowsPage,
@@ -206,6 +210,11 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   const [matrixDownloadAccounts, setMatrixDownloadAccounts] = useState<WizardAccount[]>([]);
   const [matrixDownloadAccountsLoading, setMatrixDownloadAccountsLoading] = useState(false);
   const [matrixDownloadTask, setMatrixDownloadTask] = useState<any | null>(null);
+  // 「图文创作」向导(多账号:勾选 N 个号 + 全局配图/篇数 + 可选参考文案)。
+  const [matrixImageTextPlatform, setMatrixImageTextPlatform] = useState<string | null>(null);
+  const [matrixImageTextAccounts, setMatrixImageTextAccounts] = useState<WizardAccount[]>([]);
+  const [matrixImageTextAccountsLoading, setMatrixImageTextAccountsLoading] = useState(false);
+  const [matrixImageTextTask, setMatrixImageTextTask] = useState<any | null>(null);
   // 指纹浏览器内核守卫:没装内核时弹「去下载」,后续流程不走(创建/运行矩阵任务都先过这关)。
   const [matrixKernelMissing, setMatrixKernelMissing] = useState(false);
   const [matrixKernelBusy, setMatrixKernelBusy] = useState(false);
@@ -387,6 +396,64 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     const plat = matrixDownloadPlatform;
     setMatrixDownloadPlatform(null);
     setMatrixDownloadTask(null);
+    await refreshAll();
+    if (!wasEdit) onSwitchToManage?.(plat as any);
+  };
+  // 「图文创作」向导(多账号):账号取主站 scope(同 replyAccountFilter,douyin 主站登录态即覆盖创作者中心)。
+  const openMatrixImageTextWizard = async (platform: string) => {
+    if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; }
+    if (!(await ensureMatrixKernel())) return;
+    setMatrixImageTextAccountsLoading(true);
+    try {
+      const r = await (window as any).electron?.matrix?.listAccounts?.();
+      const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
+      setMatrixImageTextAccounts(accs.filter((a) => replyAccountFilter(a, platform)).map(mapWizardAccount));
+    } catch { setMatrixImageTextAccounts([]); }
+    finally { setMatrixImageTextAccountsLoading(false); }
+    setMatrixImageTextTask(null);
+    setMatrixImageTextPlatform(platform);
+  };
+  const openMatrixImageTextWizardEdit = async (task: any) => {
+    if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; }
+    const plat = (task?.platform as string) || currentPlatform || 'douyin';
+    setMatrixImageTextAccounts([]);
+    setMatrixImageTextAccountsLoading(true);
+    setMatrixImageTextTask({
+      id: task.id,
+      name: task.name,
+      accountIds: task.account_ids || [],
+      imageText: (task as any).imageText,
+      frequency: task.run_interval,
+    });
+    setMatrixImageTextPlatform(plat);
+    try {
+      const r = await (window as any).electron?.matrix?.listAccounts?.();
+      const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
+      setMatrixImageTextAccounts(accs.filter((a) => replyAccountFilter(a, plat)).map(mapWizardAccount));
+    } catch { setMatrixImageTextAccounts([]); }
+    finally { setMatrixImageTextAccountsLoading(false); }
+  };
+  const saveMatrixImageTextTask = async (input: ImageTextWizardSave) => {
+    if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); throw new Error('请先登录 NoobClaw 账号'); }
+    const m = (window as any).electron?.matrix;
+    // 参考文案(填了)应用到所有选中号 → references map;留空则不传(runner 按身份合成种子)。
+    const references = input.reference
+      ? Object.fromEntries(input.accountIds.map((id) => [id, input.reference]))
+      : undefined;
+    const imageText = {
+      useRealPhotos: input.useRealPhotos,
+      imageCount: input.imageCount,
+      dailyCount: input.dailyCount,
+      aiImageStyle: input.aiImageStyle,
+      autoPublish: input.autoPublish,
+      references,
+    };
+    const r = await m?.saveTask?.({ id: matrixImageTextTask?.id, platform: matrixImageTextPlatform, type: 'image_text', name: input.name, accountIds: input.accountIds, imageText, quota: {}, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
+    if (!r?.ok) throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限', duplicate_type: '该平台已有同类型(图文创作)任务,直接编辑它即可' } as any)[r?.error] || r?.error || '保存失败');
+    const wasEdit = !!matrixImageTextTask?.id;
+    const plat = matrixImageTextPlatform;
+    setMatrixImageTextPlatform(null);
+    setMatrixImageTextTask(null);
     await refreshAll();
     if (!wasEdit) onSwitchToManage?.(plat as any);
   };
@@ -758,7 +825,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
           scenario={scenario || null}
           onBack={goBack}
           /* 矩阵号:编辑打开账号多选向导(回填该任务的账号/配额/频率),不开原版 ConfigWizard */
-          onEdit={() => { if (matrixMode) { if (/_video_download$/.test(String(task.scenario_id || ''))) { void openMatrixDownloadWizardEdit(task); } else if (/_reply_fans_comment$/.test(String(task.scenario_id || ''))) { void openMatrixReplyWizardEdit(task); } else { void openMatrixWizardEdit(task); } return; } if (scenario) openWizardEdit(task, scenario); }}
+          onEdit={() => { if (matrixMode) { if (/_video_download$/.test(String(task.scenario_id || ''))) { void openMatrixDownloadWizardEdit(task); } else if (/_image_text$/.test(String(task.scenario_id || ''))) { void openMatrixImageTextWizardEdit(task); } else if (/_reply_fans_comment$/.test(String(task.scenario_id || ''))) { void openMatrixReplyWizardEdit(task); } else { void openMatrixWizardEdit(task); } return; } if (scenario) openWizardEdit(task, scenario); }}
           onChanged={refreshAll}
           onOpenHistory={() => openHistoryForTask(task.id)}
         />
@@ -936,6 +1003,35 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-sky-500 text-white text-sm font-bold hover:bg-sky-600 shadow-sm shadow-sky-500/25 transition-all active:scale-95"
               >
                 ⬇️ 开始下载 →
+              </button>
+              <button
+                type="button"
+                onClick={() => onSwitchToManage?.(currentPlatform as any)}
+                className="ml-3 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+              >
+                已有任务 »
+              </button>
+              </div>
+            </div>
+          )}
+          {/* 图文创作(矩阵多账号)—— 抖音:N 个号各自按身份+随机文风生成图文,配图+发到各自创作者中心。 */}
+          {MATRIX_IMAGE_TEXT_PLATFORMS.has(currentPlatform) && (
+            <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 dark:bg-emerald-500/10 p-6 flex flex-col">
+              <div className="flex items-center gap-2 text-xs font-semibold text-emerald-600 dark:text-emerald-400 mb-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> 内容创作 · 多账号图文
+              </div>
+              <div className="text-xl font-bold dark:text-white mb-1">📝 {platLabel} · 图文创作</div>
+              <div className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed mb-4">
+                勾选多个已登录账号,每个号在各自指纹浏览器里按<strong>自己的赛道/人设/关键词</strong> + 随机文风,AI 生成<strong>各不相同</strong>的图文笔记;配图二选一(AI 生图 / 按本号关键词搜实景图),发到各自创作者中心。
+                身份在「我的矩阵账号」里给每个号设;参考文案选填。
+              </div>
+              <div className="mt-auto flex items-center flex-wrap pt-1">
+              <button
+                type="button"
+                onClick={() => openMatrixImageTextWizard(currentPlatform)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-500 text-white text-sm font-bold hover:bg-emerald-600 shadow-sm shadow-emerald-500/25 transition-all active:scale-95"
+              >
+                📝 开始创作 →
               </button>
               <button
                 type="button"
@@ -1467,6 +1563,22 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
               initialTask={matrixDownloadTask}
               onCancel={() => { setMatrixDownloadPlatform(null); setMatrixDownloadTask(null); }}
               onSave={saveMatrixDownloadTask}
+            />
+          </div>
+        </div>
+      )}
+
+      {matrixImageTextPlatform && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-auto" onClick={() => { setMatrixImageTextPlatform(null); setMatrixImageTextTask(null); }}>
+          <div className="w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
+            <MatrixImageTextWizard
+              platformLabel={(() => { const p = matrixImageTextPlatform; return p === 'douyin' ? '抖音' : p === 'xhs' ? '小红书' : String(p); })()}
+              platform={matrixImageTextPlatform}
+              accounts={matrixImageTextAccounts}
+              accountsLoading={matrixImageTextAccountsLoading}
+              initialTask={matrixImageTextTask}
+              onCancel={() => { setMatrixImageTextPlatform(null); setMatrixImageTextTask(null); }}
+              onSave={saveMatrixImageTextTask}
             />
           </div>
         </div>
