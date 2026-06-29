@@ -266,7 +266,12 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   };
   const openMatrixWizard = async (platform: string) => {
     if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; } // 未登录 → 弹登录窗
-    if (!(await ensureMatrixKernel())) return; // 没内核 → 弹下载,不开向导
+    // 先秒开弹窗:内核检查 + 账号加载都后台异步(sidecar 忙时 IPC 排队,await 在开弹窗前会卡几秒)。
+    setMatrixAccounts([]);
+    setMatrixAccountsLoading(true);
+    setMatrixWizardTask(null);          // 新建:清掉编辑态(否则会被上次编辑的任务回填)
+    setMatrixWizardPlatform(platform);
+    void ensureMatrixKernel();          // 缺内核 → 后台弹下载提示(z-60 覆盖在向导上),不阻塞弹窗
     try {
       const r = await (window as any).electron?.matrix?.listAccounts?.();
       const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
@@ -274,8 +279,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       // 是发布端登录态,不能拿来互动 → 过滤掉。非快手账号无 loginScope(默认主站)不受影响。
       setMatrixAccounts(accs.filter((a) => a.platform === platform && (a.loginScope || 'main') === 'main').map((a) => ({ id: a.id, displayName: a.displayName, status: a.status, keywords: a.keywords, group: a.group, platform: a.platform, nickname: a.nickname, displayId: a.displayId, avatar: a.avatar })));
     } catch { setMatrixAccounts([]); }
-    setMatrixWizardTask(null);          // 新建:清掉编辑态(否则会被上次编辑的任务回填)
-    setMatrixWizardPlatform(platform);
+    finally { setMatrixAccountsLoading(false); }
   };
   // 编辑现有矩阵互动任务:加载该平台账号 + 把任务映成 wizard 的 initialTask(回填账号/配额/频率)。
   const openMatrixWizardEdit = async (task: any) => {
@@ -333,16 +337,18 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   const mapWizardAccount = (a: any): WizardAccount => ({ id: a.id, displayName: a.displayName, status: a.status, keywords: a.keywords, group: a.group, platform: a.platform, nickname: a.nickname, displayId: a.displayId, avatar: a.avatar });
   const openMatrixReplyWizard = async (platform: string) => {
     if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; }
-    if (!(await ensureMatrixKernel())) return;
+    // 先秒开弹窗,内核检查 + 账号加载后台异步(对齐编辑流程,避免 sidecar 忙时卡几秒)。
+    setMatrixReplyAccounts([]);
     setMatrixReplyAccountsLoading(true);
+    setMatrixReplyTask(null);
+    setMatrixReplyPlatform(platform);
+    void ensureMatrixKernel();
     try {
       const r = await (window as any).electron?.matrix?.listAccounts?.();
       const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
       setMatrixReplyAccounts(accs.filter((a) => replyAccountFilter(a, platform)).map(mapWizardAccount));
     } catch { setMatrixReplyAccounts([]); }
     finally { setMatrixReplyAccountsLoading(false); }
-    setMatrixReplyTask(null);
-    setMatrixReplyPlatform(platform);
   };
   // 编辑现有回复粉丝任务:回填账号/引流/频率 + 加载创作者中心账号(异步,弹窗先开)。
   const openMatrixReplyWizardEdit = async (task: any) => {
@@ -381,16 +387,18 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   // 「视频无水印下载」向导(单账号):账号取主站 scope(同 replyAccountFilter,douyin 走主站登录态)。
   const openMatrixDownloadWizard = async (platform: string) => {
     if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; }
-    if (!(await ensureMatrixKernel())) return;
+    // 先秒开弹窗,内核检查 + 账号加载后台异步(对齐编辑流程,避免 sidecar 忙时卡几秒)。
+    setMatrixDownloadAccounts([]);
     setMatrixDownloadAccountsLoading(true);
+    setMatrixDownloadTask(null);
+    setMatrixDownloadPlatform(platform);
+    void ensureMatrixKernel();
     try {
       const r = await (window as any).electron?.matrix?.listAccounts?.();
       const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
       setMatrixDownloadAccounts(accs.filter((a) => downloadAccountFilter(a, platform)).map(mapWizardAccount));
     } catch { setMatrixDownloadAccounts([]); }
     finally { setMatrixDownloadAccountsLoading(false); }
-    setMatrixDownloadTask(null);
-    setMatrixDownloadPlatform(platform);
   };
   const openMatrixDownloadWizardEdit = async (task: any) => {
     if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; }
@@ -428,8 +436,12 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   // 「图文创作」向导(多账号):账号取主站 scope(同 replyAccountFilter,douyin 主站登录态即覆盖创作者中心)。
   const openMatrixImageTextWizard = async (platform: string) => {
     if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; }
-    if (!(await ensureMatrixKernel())) return;
+    // 先秒开弹窗,内核检查 + 账号加载后台异步(对齐编辑流程,避免 sidecar 忙时卡几秒)。
+    setMatrixImageTextAccounts([]);
     setMatrixImageTextAccountsLoading(true);
+    setMatrixImageTextTask(null);
+    setMatrixImageTextPlatform(platform);
+    void ensureMatrixKernel();
     try {
       const r = await (window as any).electron?.matrix?.listAccounts?.();
       const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
@@ -438,8 +450,6 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       setMatrixImageTextDownloadAccounts(accs.filter((a) => a.platform === 'douyin' && (a.loginScope || 'main') === 'main').map(mapWizardAccount));
     } catch { setMatrixImageTextAccounts([]); setMatrixImageTextDownloadAccounts([]); }
     finally { setMatrixImageTextAccountsLoading(false); }
-    setMatrixImageTextTask(null);
-    setMatrixImageTextPlatform(platform);
   };
   const openMatrixImageTextWizardEdit = async (task: any) => {
     if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; }
@@ -488,16 +498,18 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   // 「自动发推」向导(多账号):账号取主站 scope(推特主站登录态,发推在 x.com 主站)。
   const openMatrixTweetWizard = async (platform: string) => {
     if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; }
-    if (!(await ensureMatrixKernel())) return;
+    // 先秒开弹窗,内核检查 + 账号加载后台异步(对齐编辑流程,避免 sidecar 忙时卡几秒)。
+    setMatrixTweetAccounts([]);
     setMatrixTweetAccountsLoading(true);
+    setMatrixTweetTask(null);
+    setMatrixTweetPlatform(platform);
+    void ensureMatrixKernel();
     try {
       const r = await (window as any).electron?.matrix?.listAccounts?.();
       const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
       setMatrixTweetAccounts(accs.filter((a) => replyAccountFilter(a, platform)).map(mapWizardAccount));
     } catch { setMatrixTweetAccounts([]); }
     finally { setMatrixTweetAccountsLoading(false); }
-    setMatrixTweetTask(null);
-    setMatrixTweetPlatform(platform);
   };
   const openMatrixTweetWizardEdit = async (task: any) => {
     if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; }
@@ -542,16 +554,18 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   // 「币安广场自动发帖」向导(多账号):账号取主站 scope(币安主站登录态即覆盖币安广场)。
   const openMatrixBinanceWizard = async (platform: string) => {
     if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; }
-    if (!(await ensureMatrixKernel())) return;
+    // 先秒开弹窗,内核检查 + 账号加载后台异步(对齐编辑流程,避免 sidecar 忙时卡几秒)。
+    setMatrixBinanceAccounts([]);
     setMatrixBinanceAccountsLoading(true);
+    setMatrixBinanceTask(null);
+    setMatrixBinancePlatform(platform);
+    void ensureMatrixKernel();
     try {
       const r = await (window as any).electron?.matrix?.listAccounts?.();
       const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
       setMatrixBinanceAccounts(accs.filter((a) => replyAccountFilter(a, platform)).map(mapWizardAccount));
     } catch { setMatrixBinanceAccounts([]); }
     finally { setMatrixBinanceAccountsLoading(false); }
-    setMatrixBinanceTask(null);
-    setMatrixBinancePlatform(platform);
   };
   const openMatrixBinanceWizardEdit = async (task: any) => {
     if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; }
@@ -593,16 +607,18 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   // 「爆款批量仿写」向导(多账号):账号取主站 scope(同 replyAccountFilter,小红书主站登录态)。
   const openMatrixViralWizard = async (platform: string) => {
     if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; }
-    if (!(await ensureMatrixKernel())) return;
+    // 先秒开弹窗,内核检查 + 账号加载后台异步(对齐编辑流程,避免 sidecar 忙时卡几秒)。
+    setMatrixViralAccounts([]);
     setMatrixViralAccountsLoading(true);
+    setMatrixViralTask(null);
+    setMatrixViralPlatform(platform);
+    void ensureMatrixKernel();
     try {
       const r = await (window as any).electron?.matrix?.listAccounts?.();
       const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
       setMatrixViralAccounts(accs.filter((a) => replyAccountFilter(a, platform)).map(mapWizardAccount));
     } catch { setMatrixViralAccounts([]); }
     finally { setMatrixViralAccountsLoading(false); }
-    setMatrixViralTask(null);
-    setMatrixViralPlatform(platform);
   };
   const openMatrixViralWizardEdit = async (task: any) => {
     if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; }
