@@ -1042,14 +1042,13 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
             {(() => {
               const isLinkMode = task.track === 'link_mode' || (Array.isArray((task as any).urls) && (task as any).urls.length > 0);
               const taskUrls: string[] = (task as any).urls || [];
-              // 图文创作场景(抖音 + 小红书):不展示 赛道 / 人设 / 关键词,
+              // 图文创作场景(抖音 / 小红书 / 视频号 / 头条):不展示 赛道 / 人设 / 关键词,
               // 只展示 3 段参考文案 + 配图配置(模式 / 风格 / 张数 / 关键词)。
-              // 两个场景的 wizard schema 完全一致(source_segments / use_real_photos
+              // 各平台 wizard schema 完全一致(source_segments / use_real_photos
               // / real_photo_count / real_photo_keywords / ai_image_style),
-              // 详情页用同一段渲染逻辑覆盖。
-              const isDouyinImageText = task.scenario_id === 'douyin_image_text';
-              const isXhsImageText = task.scenario_id === 'xhs_image_text';
-              const isImageTextTask = isDouyinImageText || isXhsImageText;
+              // 详情页用同一段渲染逻辑覆盖。用 /_image_text$/ 匹配,避免漏掉新平台
+              // (头条/视频号曾因写死 douyin+xhs 不展示配图配置)。
+              const isImageTextTask = /_image_text$/.test(String(task.scenario_id || ''));
               // 自动回复粉丝(各平台 *_reply_fans_comment,track=reply_fan_comment):
               //   配置只有 引流语 + 引流概率,没有 赛道/人设/关键词 —— 详情页对齐 wizard,
               //   隐藏 赛道行 + 空关键词,改展示 引流语 / 概率。
