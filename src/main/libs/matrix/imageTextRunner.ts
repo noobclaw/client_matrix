@@ -122,6 +122,13 @@ async function chargeAction(authToken: string | undefined, actionType: string, p
   } catch { return { ok: false, reason: 'network_error' }; }
 }
 
+// 多平台通用验证码检测(同 engageRunner)。撞码不停,提示用户在该账号窗口手动过、轮询到消失就继续。
+const CAPTCHA_DETECT_EXPR = "(function(){try{"
+  + "if(document.querySelector('#captcha_container,#captcha-verify-image,[id*=\"captcha\" i][class*=\"verify\" i],[class*=\"captcha_verify\" i],[class*=\"vc_captcha\" i],[class*=\"captcha-container\" i],[class*=\"captcha-slider\" i],[class*=\"secsdk-captcha\" i],[class*=\"geetest\" i],[class*=\"red-captcha\" i],[class*=\"sc-captcha\" i]'))return true;"
+  + "var b=document.body?(document.body.innerText||'').slice(0,3000):'';"
+  + "if(/向右滑动|拖动滑块|拖动下方滑块|完成拼图|按住滑块|滑动完成验证|Verify you are human|请完成安全验证/i.test(b))return true;"
+  + "return false;}catch(e){return false;}})()";
+
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
 // 把账号的参考文案切成 source_segments(按空行/换行分段,过滤空)。
@@ -291,6 +298,22 @@ async function runOne(opts: ImageTextTaskOptions, pack: any, accountId: string):
         const t = setTimeout(resolve, ms);
         try { opts.signal?.addEventListener('abort', () => { clearTimeout(t); resolve(); }, { once: true }); } catch { /* ignore */ }
       }),
+      // 撞验证码不直接停:提示用户在该账号窗口手动过,轮询到消失就继续;超时/停止才放弃。
+      waitForCaptchaCleared: async (o?: { maxMs?: number }) => {
+        const maxMs = (o && o.maxMs) || 180000;
+        const startedWait = Date.now();
+        let notified = false;
+        while (Date.now() - startedWait < maxMs) {
+          if (opts.signal?.aborted) return { ok: false, reason: 'aborted' };
+          let showing = false;
+          try { const r: any = await matrixCmd(accountId, 'cdp_eval', { expression: CAPTCHA_DETECT_EXPR }); showing = !!(r && (r.value === true || r.value === 'true')); } catch { showing = false; }
+          if (!showing) { if (notified) log('✅ 验证码已通过,继续任务'); return { ok: true }; }
+          if (!notified) { notified = true; log('🧩 检测到验证码,请在该账号浏览器窗口【手动完成验证】(最多等 ' + Math.round(maxMs / 60000) + ' 分钟,过了自动继续)…'); }
+          await sleep(4000);
+        }
+        log('⏱ 验证码等待超时(' + Math.round(maxMs / 60000) + ' 分钟未完成),放弃本号');
+        return { ok: false, reason: 'captcha_timeout' };
+      },
       randInt,
       log: (m: string) => coworkLog('INFO', 'imageText-orch', m),
     };

@@ -35,6 +35,15 @@ import { getAccount, setAccountStatus, setAccountKeywords, accountBadgeLabel, ma
 import { promptReloginForExpiredAccount, loginUrlFor } from './reloginPrompt';
 import { getNoobClawAuthToken } from '../claudeSettings';
 
+// 多平台通用验证码检测(页面 JS,返回 boolean)。撞验证码不直接停,改成提示用户在【该账号窗口】
+//   手动过、轮询到消失就继续(见 ctx.waitForCaptchaCleared)。以【验证码元素】为强信号,辅以少量
+//   全屏滑块文案,尽量不误判(误判会白等)。覆盖抖音(verifycenter/secsdk)/TikTok/小红书/快手/B站/极验。
+const CAPTCHA_DETECT_EXPR = "(function(){try{"
+  + "if(document.querySelector('#captcha_container,#captcha-verify-image,[id*=\"captcha\" i][class*=\"verify\" i],[class*=\"captcha_verify\" i],[class*=\"vc_captcha\" i],[class*=\"captcha-container\" i],[class*=\"captcha-slider\" i],[class*=\"secsdk-captcha\" i],[class*=\"geetest\" i],[class*=\"red-captcha\" i],[class*=\"sc-captcha\" i]'))return true;"
+  + "var b=document.body?(document.body.innerText||'').slice(0,3000):'';"
+  + "if(/向右滑动|拖动滑块|拖动下方滑块|完成拼图|按住滑块|滑动完成验证|Verify you are human|请完成安全验证/i.test(b))return true;"
+  + "return false;}catch(e){return false;}})()";
+
 const DEFAULT_BASE_URL = 'https://api.noobclaw.com';
 function baseUrl(): string { return process.env.NOOBCLAW_API_BASE_URL || DEFAULT_BASE_URL; }
 function sleep(ms: number): Promise<void> { return new Promise((r) => setTimeout(r, ms)); }
@@ -389,6 +398,23 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string): Pr
         const t = setTimeout(resolve, ms);
         try { opts.signal?.addEventListener('abort', () => { clearTimeout(t); resolve(); }, { once: true }); } catch { /* ignore */ }
       }),
+      // 撞验证码不直接停:提示用户在【该账号窗口】手动过,轮询到消失就继续;超时/停止才放弃。
+      //   返回 { ok:true } 过了 / { ok:false, reason } 超时或中止。窗口对用户可见(带角标),手动滑最自然。
+      waitForCaptchaCleared: async (o?: { maxMs?: number }) => {
+        const maxMs = (o && o.maxMs) || 180000; // 默认最多等 3 分钟
+        const startedWait = Date.now();
+        let notified = false;
+        while (Date.now() - startedWait < maxMs) {
+          if (opts.signal?.aborted) return { ok: false, reason: 'aborted' };
+          let showing = false;
+          try { const r: any = await matrixCmd(accountId, 'cdp_eval', { expression: CAPTCHA_DETECT_EXPR }); showing = !!(r && (r.value === true || r.value === 'true')); } catch { showing = false; }
+          if (!showing) { if (notified) log('✅ 验证码已通过,继续任务'); return { ok: true }; }
+          if (!notified) { notified = true; log('🧩 检测到验证码,请在该账号浏览器窗口【手动完成验证】(最多等 ' + Math.round(maxMs / 60000) + ' 分钟,过了自动继续)…'); }
+          await sleep(4000);
+        }
+        log('⏱ 验证码等待超时(' + Math.round(maxMs / 60000) + ' 分钟未完成),放弃本号');
+        return { ok: false, reason: 'captcha_timeout' };
+      },
       randInt,
       log: (m: string) => coworkLog('INFO', 'engage-orch', m),
     };
