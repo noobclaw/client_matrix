@@ -2064,6 +2064,17 @@ function formatActionBreakdown(
       : 0;
     return `💬 ${replies} ${isZh ? '回复' : 'replies'}`;
   }
+  // 图文创作(*_image_text):只产生「发帖数」,累计/上次完成显示 📤 N 发帖,绝不显示赞/关注/评论
+  //   —— action_counts 恒含 {like:0,follow:0,comment:0},不早返回会落到下面的互动 breakdown 误显。
+  if (/_image_text$/.test(sid)) {
+    const posts = counts && typeof counts.post === 'number' ? counts.post : 0;
+    return `📤 ${posts} ${isZh ? '发帖' : 'posts'}`;
+  }
+  // 视频无水印下载(*_video_download):只产生「下载条数」,显示 ⬇️ N 下载,不显示互动。
+  if (/_video_download$/.test(sid)) {
+    const dls = counts && typeof counts.download === 'number' ? counts.download : 0;
+    return `⬇️ ${dls} ${isZh ? '下载' : 'downloads'}`;
+  }
   if (!counts || Object.keys(counts).length === 0) {
     const isPostScenario = (
       sid === 'binance_square_post_creator' ||

@@ -147,8 +147,8 @@ async function runOne(opts: ImageTextTaskOptions, pack: any, accountId: string):
 
   await sleep(randInt(opts.jitterMinMs ?? 3000, opts.jitterMaxMs ?? 15000)); // 错峰
 
-  const counts = { like: 0, follow: 0, comment: 0 }; // 本场景无这三类,留空对齐 EngageItemResult
-  let postCount = 0;
+  // 本场景不产生 like/follow/comment(留 0 对齐 EngageItemResult);完成维度是 post(发帖数)。
+  const counts = { like: 0, follow: 0, comment: 0, post: 0 };
   let chargedCredits = 0, chargedUsd = 0;
   const authToken = opts.authToken || getNoobClawAuthToken() || undefined;
   let finished: { status: string; error?: string } | null = null;
@@ -273,7 +273,7 @@ async function runOne(opts: ImageTextTaskOptions, pack: any, accountId: string):
         if (typeof t?.post === 'number') log(`🎯 本号目标:发 ${t.post} 篇图文`);
       },
       addActionCount: (type: string, n: number) => {
-        if (type === 'post') { postCount += Number(n) || 0; log(`✅ 已完成 ${postCount} 篇`); }
+        if (type === 'post') { counts.post += Number(n) || 0; log(`✅ 已完成 ${counts.post} 篇`); }
         try { opts.onItem?.({ accountId, state: 'success', counts: { ...counts }, chargedCredits, chargedUsd }); } catch { /* ignore */ }
       },
       finish: (status: string, error?: string) => { finished = { status, error }; },
@@ -306,7 +306,7 @@ async function runOne(opts: ImageTextTaskOptions, pack: any, accountId: string):
       coworkLog('ERROR', 'imageText', `[${accountId}] finished error: ${fin.error}`);
       return { accountId, state: 'failed', counts, chargedCredits, chargedUsd, reason: fin.error };
     }
-    coworkLog('INFO', 'imageText', `[${accountId}] done 发 ${postCount} 篇 · 扣费 ${chargedCredits}积分`);
+    coworkLog('INFO', 'imageText', `[${accountId}] done 发 ${counts.post} 篇 · 扣费 ${chargedCredits}积分`);
     return { accountId, state: 'success', counts, chargedCredits, chargedUsd };
   } catch (e: any) {
     setAccountStatus(accountId, 'idle');

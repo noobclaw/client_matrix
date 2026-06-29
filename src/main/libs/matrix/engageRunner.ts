@@ -76,7 +76,9 @@ export interface EngageTaskOptions {
 export interface EngageItemResult {
   accountId: string;
   state: 'success' | 'failed' | 'skipped';
-  counts?: { like: number; follow: number; comment: number };
+  // like/follow/comment 是互动涨粉的维度;post(图文创作发帖数)/download(视频下载条数)是
+  // 别的任务类型各自的完成维度,可选。各任务只填自己有的那个。
+  counts?: { like: number; follow: number; comment: number; post?: number; download?: number };
   // 该号本次累计实际扣费(积分 + 美元)。每条互动动作扣费后累加,用于「本次/累计消耗」。
   chargedCredits?: number;
   chargedUsd?: number;

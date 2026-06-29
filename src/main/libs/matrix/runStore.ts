@@ -24,7 +24,9 @@ export interface MatrixRunRecord {
   success: number;
   failed: number;
   skipped: number;
-  totals: { like: number; follow: number; comment: number };
+  // like/follow/comment=互动维度;post(图文发帖数)/download(视频下载条数)按任务类型可选,
+  // 各任务只填自己有的那个(engage 三类、image_text 填 post、video_download 填 download)。
+  totals: { like: number; follow: number; comment: number; post?: number; download?: number };
   // 本次运行总扣费(各号实际扣费之和):credits=积分,usd=美元。缺省视为 0(老记录无此字段)。
   cost?: { credits: number; usd: number };
   items: MatrixRunItem[];

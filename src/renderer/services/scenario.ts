@@ -246,7 +246,12 @@ function mxRunToTaskRun(r: any): ScenarioTaskRun {
     started_at: r.startedAt,
     ended_at: r.finishedAt,
     status: mxRunStatusOf(r),
-    action_counts: { like: t.like || 0, follow: t.follow || 0, comment: t.comment || 0 },
+    // post(图文发帖)/download(视频下载)仅当运行记录里有该键才带上 → engage 不受影响、不会多出 📤0/⬇️0。
+    action_counts: {
+      like: t.like || 0, follow: t.follow || 0, comment: t.comment || 0,
+      ...(typeof t.post === 'number' ? { post: t.post } : {}),
+      ...(typeof t.download === 'number' ? { download: t.download } : {}),
+    },
     // 累计/上次消耗:从运行记录的 cost 取(老记录无 cost → 0)。
     tokens_used: Number(r.cost?.credits) || 0,
     cost_usd: Number(r.cost?.usd) || 0,
@@ -275,10 +280,15 @@ function mxRunToRecord(r: any): any {
     finished_at: r.finishedAt,
     status,
     result: {
-      action_counts: { like: t.like || 0, follow: t.follow || 0, comment: t.comment || 0 },
+      action_counts: {
+        like: t.like || 0, follow: t.follow || 0, comment: t.comment || 0,
+        ...(typeof t.post === 'number' ? { post: t.post } : {}),
+        ...(typeof t.download === 'number' ? { download: t.download } : {}),
+      },
       action_targets: {},
       tokens_used: Number(r.cost?.credits) || 0, cost_usd: Number(r.cost?.usd) || 0, collected_count: 0, draft_count: 0,
     },
+
     summary: `成功 ${r.success || 0} · 失败 ${r.failed || 0} · 跳过 ${r.skipped || 0}（共 ${items.length} 个号）`,
     step_logs,
   };
