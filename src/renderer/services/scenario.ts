@@ -105,12 +105,13 @@ const MATRIX_DOWNLOAD_META: Record<string, { name_zh: string; icon: string }> = 
 // 目前仅抖音(小红书第二步)。同样需补快照,否则任务 scenario_id lookup 不到 platform。
 const MATRIX_IMAGETEXT_SCENARIO_ID: Record<string, string> = {
   douyin: 'douyin_image_text', xhs: 'xhs_image_text', shipinhao: 'shipinhao_image_text',
+  toutiao: 'toutiao_image_text',
 };
 const MATRIX_IMAGETEXT_ID_TO_PLATFORM: Record<string, string> =
   Object.fromEntries(Object.entries(MATRIX_IMAGETEXT_SCENARIO_ID).map(([p, id]) => [id, p]));
 const MATRIX_IMAGETEXT_META: Record<string, { name_zh: string; icon: string }> = {
   douyin: { name_zh: '抖音 图文创作', icon: '📝' }, xhs: { name_zh: '小红书 图文创作', icon: '📝' },
-  shipinhao: { name_zh: '视频号 图文创作', icon: '📝' },
+  shipinhao: { name_zh: '视频号 图文创作', icon: '📝' }, toutiao: { name_zh: '头条号 图文创作', icon: '📝' },
 };
 
 // 「爆款批量仿写」剧本(backend/matrix/scenarios/<platform>_viral_production_career)。目前仅小红书。
