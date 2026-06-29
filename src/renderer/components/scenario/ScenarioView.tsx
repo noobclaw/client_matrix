@@ -66,8 +66,9 @@ const MATRIX_REPLY_FAN_PLATFORMS = new Set<PlatformId>(['douyin', 'xhs', 'kuaish
 // TikTok(SSR __UNIVERSAL_DATA__ + 多级 fallback,须 VPN 真机)。都走【主站】登录态,取主站号。
 const MATRIX_VIDEO_DOWNLOAD_PLATFORMS = new Set<PlatformId>(['douyin', 'kuaishou', 'bilibili', 'tiktok', 'xhs']);
 // 后端 backend/matrix/scenarios 有 <platform>_image_text「图文创作」剧本的平台(N 号各自生成图文+发布)。
-// 抖音(creator.douyin.com)/小红书(creator.xiaohongshu.com)。
-const MATRIX_IMAGE_TEXT_PLATFORMS = new Set<PlatformId>(['douyin', 'xhs']);
+// 抖音(creator.douyin.com)/小红书(creator.xiaohongshu.com)/视频号(channels.weixin.qq.com 助手「发表新动态」,
+// wujie 微前端 shadowRoot 发布;网络图借抖音下图号取——见 imageDownloadAccountId)。
+const MATRIX_IMAGE_TEXT_PLATFORMS = new Set<PlatformId>(['douyin', 'xhs', 'shipinhao']);
 
 // Top-level navigation:
 //   create  — scenario cards (current XhsWorkflowsPage / XWorkflowsPage,
@@ -1556,7 +1557,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-auto" onClick={() => { setMatrixImageTextPlatform(null); setMatrixImageTextTask(null); }}>
           <div className="w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
             <MatrixImageTextWizard
-              platformLabel={(() => { const p = matrixImageTextPlatform; return p === 'douyin' ? '抖音' : p === 'xhs' ? '小红书' : String(p); })()}
+              platformLabel={(() => { const p = matrixImageTextPlatform; return p === 'douyin' ? '抖音' : p === 'xhs' ? '小红书' : p === 'shipinhao' ? '视频号' : String(p); })()}
               platform={matrixImageTextPlatform}
               accounts={matrixImageTextAccounts}
               accountsLoading={matrixImageTextAccountsLoading}
