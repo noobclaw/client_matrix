@@ -42,6 +42,7 @@ import MatrixTaskWizard, { type WizardAccount } from '../matrix/MatrixTaskWizard
 import MatrixReplyFansWizard from '../matrix/MatrixReplyFansWizard';
 import MatrixVideoDownloadWizard from '../matrix/MatrixVideoDownloadWizard';
 import MatrixImageTextWizard, { type ImageTextWizardSave } from '../matrix/MatrixImageTextWizard';
+import MatrixViralRewriteWizard, { type ViralRewriteWizardSave } from '../matrix/MatrixViralRewriteWizard';
 
 type PlatformId = 'xhs' | 'x' | 'binance' | 'douyin' | 'shipinhao' | 'toutiao' | 'kuaishou' | 'bilibili' | 'tiktok' | 'youtube' | 'video';
 
@@ -69,6 +70,8 @@ const MATRIX_VIDEO_DOWNLOAD_PLATFORMS = new Set<PlatformId>(['douyin', 'kuaishou
 // 抖音(creator.douyin.com)/小红书(creator.xiaohongshu.com)/视频号(channels.weixin.qq.com 助手「发表新动态」,
 // wujie 微前端 shadowRoot 发布;网络图借抖音下图号取——见 imageDownloadAccountId)。
 const MATRIX_IMAGE_TEXT_PLATFORMS = new Set<PlatformId>(['douyin', 'xhs', 'shipinhao']);
+// 「爆款批量仿写」目前仅小红书。
+const MATRIX_VIRAL_PLATFORMS = new Set<PlatformId>(['xhs']);
 
 // Top-level navigation:
 //   create  — scenario cards (current XhsWorkflowsPage / XWorkflowsPage,
@@ -216,6 +219,11 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   const [matrixImageTextAccounts, setMatrixImageTextAccounts] = useState<WizardAccount[]>([]);
   const [matrixImageTextAccountsLoading, setMatrixImageTextAccountsLoading] = useState(false);
   const [matrixImageTextTask, setMatrixImageTextTask] = useState<any | null>(null);
+  // 「爆款批量仿写」向导(多账号:勾选 N 个号 + 篇数/AI风格/发布)。
+  const [matrixViralPlatform, setMatrixViralPlatform] = useState<string | null>(null);
+  const [matrixViralAccounts, setMatrixViralAccounts] = useState<WizardAccount[]>([]);
+  const [matrixViralAccountsLoading, setMatrixViralAccountsLoading] = useState(false);
+  const [matrixViralTask, setMatrixViralTask] = useState<any | null>(null);
   // 指纹浏览器内核守卫:没装内核时弹「去下载」,后续流程不走(创建/运行矩阵任务都先过这关)。
   const [matrixKernelMissing, setMatrixKernelMissing] = useState(false);
   const [matrixKernelBusy, setMatrixKernelBusy] = useState(false);
@@ -452,6 +460,47 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     const plat = matrixImageTextPlatform;
     setMatrixImageTextPlatform(null);
     setMatrixImageTextTask(null);
+    await refreshAll();
+    if (!wasEdit) onSwitchToManage?.(plat as any);
+  };
+  // 「爆款批量仿写」向导(多账号):账号取主站 scope(同 replyAccountFilter,小红书主站登录态)。
+  const openMatrixViralWizard = async (platform: string) => {
+    if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; }
+    if (!(await ensureMatrixKernel())) return;
+    setMatrixViralAccountsLoading(true);
+    try {
+      const r = await (window as any).electron?.matrix?.listAccounts?.();
+      const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
+      setMatrixViralAccounts(accs.filter((a) => replyAccountFilter(a, platform)).map(mapWizardAccount));
+    } catch { setMatrixViralAccounts([]); }
+    finally { setMatrixViralAccountsLoading(false); }
+    setMatrixViralTask(null);
+    setMatrixViralPlatform(platform);
+  };
+  const openMatrixViralWizardEdit = async (task: any) => {
+    if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; }
+    const plat = (task?.platform as string) || currentPlatform || 'xhs';
+    setMatrixViralAccounts([]);
+    setMatrixViralAccountsLoading(true);
+    setMatrixViralTask({ id: task.id, name: task.name, accountIds: task.account_ids || [], viralRewrite: (task as any).viralRewrite, frequency: task.run_interval });
+    setMatrixViralPlatform(plat);
+    try {
+      const r = await (window as any).electron?.matrix?.listAccounts?.();
+      const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
+      setMatrixViralAccounts(accs.filter((a) => replyAccountFilter(a, plat)).map(mapWizardAccount));
+    } catch { setMatrixViralAccounts([]); }
+    finally { setMatrixViralAccountsLoading(false); }
+  };
+  const saveMatrixViralTask = async (input: ViralRewriteWizardSave) => {
+    if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); throw new Error('请先登录 NoobClaw 账号'); }
+    const m = (window as any).electron?.matrix;
+    const viralRewrite = { dailyCount: input.dailyCount, aiImageStyle: input.aiImageStyle, autoPublish: input.autoPublish };
+    const r = await m?.saveTask?.({ id: matrixViralTask?.id, platform: matrixViralPlatform, type: 'viral_rewrite', name: input.name, accountIds: input.accountIds, viralRewrite, quota: {}, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
+    if (!r?.ok) throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限', duplicate_type: '该平台已有同类型(爆款仿写)任务,直接编辑它即可' } as any)[r?.error] || r?.error || '保存失败');
+    const wasEdit = !!matrixViralTask?.id;
+    const plat = matrixViralPlatform;
+    setMatrixViralPlatform(null);
+    setMatrixViralTask(null);
     await refreshAll();
     if (!wasEdit) onSwitchToManage?.(plat as any);
   };
@@ -823,7 +872,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
           scenario={scenario || null}
           onBack={goBack}
           /* 矩阵号:编辑打开账号多选向导(回填该任务的账号/配额/频率),不开原版 ConfigWizard */
-          onEdit={() => { if (matrixMode) { if (/_video_download$/.test(String(task.scenario_id || ''))) { void openMatrixDownloadWizardEdit(task); } else if (/_image_text$/.test(String(task.scenario_id || ''))) { void openMatrixImageTextWizardEdit(task); } else if (/_reply_fans_comment$/.test(String(task.scenario_id || ''))) { void openMatrixReplyWizardEdit(task); } else { void openMatrixWizardEdit(task); } return; } if (scenario) openWizardEdit(task, scenario); }}
+          onEdit={() => { if (matrixMode) { if (/_video_download$/.test(String(task.scenario_id || ''))) { void openMatrixDownloadWizardEdit(task); } else if (/_image_text$/.test(String(task.scenario_id || ''))) { void openMatrixImageTextWizardEdit(task); } else if (/_viral_production_career$/.test(String(task.scenario_id || ''))) { void openMatrixViralWizardEdit(task); } else if (/_reply_fans_comment$/.test(String(task.scenario_id || ''))) { void openMatrixReplyWizardEdit(task); } else { void openMatrixWizardEdit(task); } return; } if (scenario) openWizardEdit(task, scenario); }}
           onChanged={refreshAll}
           onOpenHistory={() => openHistoryForTask(task.id)}
         />
@@ -1010,6 +1059,34 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-500 text-white text-sm font-bold hover:bg-emerald-600 shadow-sm shadow-emerald-500/25 transition-all active:scale-95"
               >
                 📝 开始创作 →
+              </button>
+              <button
+                type="button"
+                onClick={() => onSwitchToManage?.(currentPlatform as any)}
+                className="ml-3 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+              >
+                已有任务 »
+              </button>
+              </div>
+            </div>
+          )}
+          {/* 爆款批量仿写(矩阵多账号)—— 小红书:每号关键词搜本niche爆款→仿写→AI生图→发布。 */}
+          {MATRIX_VIRAL_PLATFORMS.has(currentPlatform) && (
+            <div className="rounded-2xl border border-rose-500/30 bg-rose-500/5 dark:bg-rose-500/10 p-6 flex flex-col">
+              <div className="flex items-center gap-2 text-xs font-semibold text-rose-600 dark:text-rose-400 mb-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-500" /> 爆款仿写 · 多账号
+              </div>
+              <div className="text-xl font-bold dark:text-white mb-1">🔥 {platLabel} · 爆款批量仿写</div>
+              <div className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed mb-4">
+                每个号用<strong>自己的赛道/关键词</strong>去小红书搜本领域<strong>爆款笔记</strong>,按自己的人设 + 随机文风仿写成原创(N 号各不相同),AI 配图后发布。关键词/人设在「我的矩阵账号」里给每个号设。
+              </div>
+              <div className="mt-auto flex items-center flex-wrap pt-1">
+              <button
+                type="button"
+                onClick={() => openMatrixViralWizard(currentPlatform)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-rose-500 text-white text-sm font-bold hover:bg-rose-600 shadow-sm shadow-rose-500/25 transition-all active:scale-95"
+              >
+                🔥 开始仿写 →
               </button>
               <button
                 type="button"
@@ -1564,6 +1641,22 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
               initialTask={matrixImageTextTask}
               onCancel={() => { setMatrixImageTextPlatform(null); setMatrixImageTextTask(null); }}
               onSave={saveMatrixImageTextTask}
+            />
+          </div>
+        </div>
+      )}
+
+      {matrixViralPlatform && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-auto" onClick={() => { setMatrixViralPlatform(null); setMatrixViralTask(null); }}>
+          <div className="w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
+            <MatrixViralRewriteWizard
+              platformLabel={(() => { const p = matrixViralPlatform; return p === 'xhs' ? '小红书' : String(p); })()}
+              platform={matrixViralPlatform}
+              accounts={matrixViralAccounts}
+              accountsLoading={matrixViralAccountsLoading}
+              initialTask={matrixViralTask}
+              onCancel={() => { setMatrixViralPlatform(null); setMatrixViralTask(null); }}
+              onSave={saveMatrixViralTask}
             />
           </div>
         </div>

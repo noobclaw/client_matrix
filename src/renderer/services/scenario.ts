@@ -113,6 +113,16 @@ const MATRIX_IMAGETEXT_META: Record<string, { name_zh: string; icon: string }> =
   shipinhao: { name_zh: '视频号 图文创作', icon: '📝' },
 };
 
+// 「爆款批量仿写」剧本(backend/matrix/scenarios/<platform>_viral_production_career)。目前仅小红书。
+const MATRIX_VIRAL_SCENARIO_ID: Record<string, string> = {
+  xhs: 'xhs_viral_production_career',
+};
+const MATRIX_VIRAL_ID_TO_PLATFORM: Record<string, string> =
+  Object.fromEntries(Object.entries(MATRIX_VIRAL_SCENARIO_ID).map(([p, id]) => [id, p]));
+const MATRIX_VIRAL_META: Record<string, { name_zh: string; icon: string }> = {
+  xhs: { name_zh: '小红书 爆款批量仿写', icon: '🔥' },
+};
+
 /** 矩阵任务 → 旧 ScenarioTaskIPC(赛道/关键词在账号上,task 这两个字段留空;
  *  配额映射到 daily_*_min/max 这套 douyin_auto_engage 字段)。 */
 function mxTaskToScenario(t: any): ScenarioTaskIPC {
@@ -123,15 +133,19 @@ function mxTaskToScenario(t: any): ScenarioTaskIPC {
   const isReply = t?.type === 'reply_fan';
   const isDownload = t?.type === 'video_download';
   const isImageText = t?.type === 'image_text';
+  const isViral = t?.type === 'viral_rewrite';
   const fn = t?.funnel || {};
   const dlUrls: string[] = Array.isArray(t?.urls) ? t.urls : [];
   return {
     id: t.id,
     // 按任务真实 platform + 类型映射剧本 id(原来写死 douyin/engage → 非抖音 tab 看不到任务、回复粉丝错显成互动)。
-    scenario_id: isReply ? `${t.platform}_reply_fans_comment` : isDownload ? `${t.platform}_video_download` : isImageText ? `${t.platform}_image_text` : engageScenarioIdForPlatform(t.platform),
-    track: isReply ? 'reply_fan_comment' : isDownload ? 'video_download' : isImageText ? 'image_text' : 'matrix',
-    // image_text 配置透传(详情页/编辑回填 + updateTask 兜底不丢配置)。
+    scenario_id: isReply ? `${t.platform}_reply_fans_comment` : isDownload ? `${t.platform}_video_download` : isImageText ? `${t.platform}_image_text` : isViral ? `${t.platform}_viral_production_career` : engageScenarioIdForPlatform(t.platform),
+    track: isReply ? 'reply_fan_comment' : isDownload ? 'video_download' : isImageText ? 'image_text' : isViral ? 'viral_production' : 'matrix',
+    // image_text / viral_rewrite 配置透传(详情页/编辑回填 + updateTask 兜底不丢配置)。
     imageText: isImageText ? t.imageText : undefined,
+    viralRewrite: isViral ? t.viralRewrite : undefined,
+    // viral_rewrite 也摊平 AI 风格/发布给详情页(它也走 AI 生图 + 发布)。
+    ...(isViral && t.viralRewrite ? { ai_image_style: t.viralRewrite.aiImageStyle || '', auto_publish: !!t.viralRewrite.autoPublish, auto_upload: !!t.viralRewrite.autoPublish } : {}),
     // 摊平给详情页 ConfigCard 读(它读 use_real_photos / real_photo_count / ai_image_style 这套老字段)。
     //   之前只传 imageText 对象 → 详情页读 task.use_real_photos=undefined → 选了网络图也恒显「AI 生图」。
     use_real_photos: isImageText ? !!(t.imageText && t.imageText.useRealPhotos) : undefined,
@@ -215,6 +229,22 @@ function scenarioInputToMxSave(input: any, id?: string): any {
       accountIds,
       quota: {},
       imageText: input.imageText,
+      concurrency: accountIds.length,
+      frequency: input.run_interval || 'daily_random',
+      enabled: input.enabled !== false,
+    };
+  }
+  // 爆款仿写任务(scenario_id 以 _viral_production_career 结尾):保持 type='viral_rewrite' + 透传 viralRewrite。
+  if (typeof input.scenario_id === 'string' && input.scenario_id.endsWith('_viral_production_career')) {
+    const vPlatform = MATRIX_VIRAL_ID_TO_PLATFORM[input.scenario_id] || 'xhs';
+    return {
+      id,
+      platform: vPlatform,
+      type: 'viral_rewrite',
+      name: input.name || (accountIds.length ? `${vPlatform}爆款仿写 · ${accountIds.length} 个号` : `${vPlatform}爆款仿写`),
+      accountIds,
+      quota: {},
+      viralRewrite: input.viralRewrite,
       concurrency: accountIds.length,
       frequency: input.run_interval || 'daily_random',
       enabled: input.enabled !== false,
@@ -384,7 +414,14 @@ class ScenarioService {
           name_zh: MATRIX_IMAGETEXT_META[platform]?.name_zh || sid, name_en: '',
           icon: MATRIX_IMAGETEXT_META[platform]?.icon || '📝',
         }));
-      return [...DEFAULT_SCENARIOS, ...synth, ...synthReply, ...synthDownload, ...synthImageText] as unknown as Scenario[];
+      const synthViral = Object.entries(MATRIX_VIRAL_SCENARIO_ID)
+        .filter(([, sid]) => !have.has(sid))
+        .map(([platform, sid]) => ({
+          id: sid, version: '1.0.0', platform, workflow_type: 'viral_production', category: 'knowledge',
+          name_zh: MATRIX_VIRAL_META[platform]?.name_zh || sid, name_en: '',
+          icon: MATRIX_VIRAL_META[platform]?.icon || '🔥',
+        }));
+      return [...DEFAULT_SCENARIOS, ...synth, ...synthReply, ...synthDownload, ...synthImageText, ...synthViral] as unknown as Scenario[];
     }
     try {
       const res = await window.electron.scenario.listScenarios();
