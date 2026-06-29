@@ -120,11 +120,15 @@ export async function matrixCmd(
       } finally { clearTimeout(to); }
     }
 
-    // 多图上传(图文创作发布用)。扩展版收 base64 数组,矩阵走 CDP DOM.setFileInputFiles(只认磁盘路径),
-    // 故把每张 base64 先落临时文件,再一次性 setFileInputFiles 多文件。返回 { message } / { error }。
+    // 图片上传(图文创作发布用)。扩展版收 base64,矩阵走 CDP DOM.setFileInputFiles(只认磁盘路径),
+    // 故把每张 base64 先落临时文件,再 setFileInputFiles。返回 { message } / { error }。
+    // 兼容两种签名:多文件 { files:[{fileData,fileName,mimeType}] }(抖音一次塞多张)和
+    //   单文件 { fileData, fileName, mimeType }(小红书逐张上传)。
     // ⚠️ 临时文件不能立刻删:setFileInputFiles 后浏览器是【异步】读盘上传的,删早了会传空 → 延迟清理。
     case 'upload_file': {
-      const files = Array.isArray(params?.files) ? params.files : [];
+      const files = (Array.isArray(params?.files) && params.files.length)
+        ? params.files
+        : (params?.fileData ? [{ fileData: params.fileData, fileName: params.fileName, mimeType: params.mimeType }] : []);
       if (!files.length) return { error: 'no_files' };
       const tmpPaths: string[] = [];
       try {
