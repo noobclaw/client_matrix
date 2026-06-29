@@ -14,6 +14,8 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import http from 'http';
+import https from 'https';
 import { kernelEval, kernelExec, kernelKeypress, kernelClick, kernelWheel, kernelNavigate, kernelInsertText, kernelSetFileInput } from './kernelPool';
 
 export async function matrixCmd(
@@ -114,7 +116,9 @@ export async function matrixCmd(
         new Promise((resolve) => {
           (async () => {
             try {
-              const mod: any = target.toLowerCase().startsWith('https') ? await import('https') : await import('http');
+              // 用【静态导入】的 https/http —— 打包后的 sidecar 不支持动态 import()
+              //   (抛 "A dynamic import callback was not specified"),原来 await import() 致兜底必失败。
+              const mod: any = target.toLowerCase().startsWith('https') ? https : http;
               const req = mod.get(target, { headers, timeout: 30000 }, (res: any) => {
                 const sc = res.statusCode || 0;
                 if (sc >= 300 && sc < 400 && res.headers.location && redirectsLeft > 0) {
