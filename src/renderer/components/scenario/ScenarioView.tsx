@@ -1426,13 +1426,14 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
                   key={tab.id}
                   type="button"
                   onClick={() => setPlatform(tab.id)}
-                  className={`px-3.5 py-1.5 rounded-full text-sm border transition-colors whitespace-nowrap ${
+                  className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-sm border transition-colors whitespace-nowrap ${
                     active
                       ? 'border-violet-500 bg-violet-500/10 text-violet-500 font-medium'
                       : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-violet-500/50'
                   }`}
                 >
-                  {i18nService.t(tab.labelKey)}
+                  <span className="text-base leading-none">{tab.icon}</span>
+                  <span>{i18nService.t(tab.labelKey)}</span>
                 </button>
               );
             }
