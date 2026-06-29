@@ -266,13 +266,32 @@ const MatrixImageTextWizard: React.FC<Props> = ({ platformLabel, platform, accou
                       <button type="button" onClick={() => { window.dispatchEvent(new CustomEvent('noobclaw:show-matrix-accounts', { detail: { platform: 'douyin' } })); onCancel(); }} className="text-[11px] text-emerald-500 underline decoration-dotted hover:text-emerald-400">去添加抖音号 →</button>
                     </div>
                   ) : (
-                    <select value={downloadAccountId} onChange={(e) => setDownloadAccountId(e.target.value)} disabled={saving} className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
-                      <option value="">— 选一个抖音号 —</option>
+                    <div className="space-y-1.5 max-h-48 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 p-2">
                       {dlAccts.map((a) => {
                         const ready = a.status !== 'banned' && a.status !== 'login_required';
-                        return <option key={a.id} value={a.id} disabled={!ready}>{(a.nickname || a.displayName)}{a.displayId ? ` · 抖音号 ${a.displayId}` : ''}{ready ? '' : '(未连接)'}</option>;
+                        const reason = a.status === 'banned' ? '已封' : a.status === 'login_required' ? '未连接' : '';
+                        const title = a.nickname || a.displayName;
+                        return (
+                          <label key={a.id} className={`flex items-center gap-2.5 text-sm px-2 py-1.5 rounded ${ready ? 'dark:text-gray-200 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800' : 'opacity-45 cursor-not-allowed'}`}>
+                            <input type="radio" name="mx-it-dlacct" checked={downloadAccountId === a.id} onChange={() => ready && setDownloadAccountId(a.id)} disabled={saving || !ready} className="h-4 w-4 accent-emerald-500 shrink-0" />
+                            {a.avatar
+                              ? <img src={a.avatar.replace(/^http:/, 'https:')} referrerPolicy="no-referrer" alt="" className="w-7 h-7 rounded-full object-cover bg-gray-200 dark:bg-gray-700 shrink-0" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+                              : <span className="w-7 h-7 rounded-full bg-emerald-500/20 text-emerald-500 flex items-center justify-center text-xs font-bold shrink-0">{(title || '?').slice(0, 1)}</span>}
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-500">抖音</span>
+                                <span className="font-medium truncate dark:text-white">{title}</span>
+                                {a.displayId && <span className="text-[11px] text-gray-500 dark:text-gray-400 shrink-0">抖音号:{a.displayId}</span>}
+                                {a.status === 'login_required'
+                                  ? <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); window.dispatchEvent(new CustomEvent('noobclaw:show-matrix-accounts', { detail: { platform: 'douyin' } })); onCancel(); }} title="去「我的矩阵账号」扫码登录这个抖音号" className="text-[11px] text-amber-500 underline decoration-dotted hover:text-amber-400 shrink-0">未连接 · 去登录 →</button>
+                                  : reason ? <span className="text-[11px] text-amber-500 shrink-0">{reason}</span> : null}
+                              </div>
+                              <div className="text-[11px] text-gray-400 truncate">备注:{a.displayName}{a.group ? ` · ${a.group}` : ''}</div>
+                            </div>
+                          </label>
+                        );
                       })}
-                    </select>
+                    </div>
                   )}
                 </div>
               )}
