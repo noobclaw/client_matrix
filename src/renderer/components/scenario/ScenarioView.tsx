@@ -42,6 +42,7 @@ import MatrixTaskWizard, { type WizardAccount } from '../matrix/MatrixTaskWizard
 import MatrixReplyFansWizard from '../matrix/MatrixReplyFansWizard';
 import MatrixVideoDownloadWizard from '../matrix/MatrixVideoDownloadWizard';
 import MatrixImageTextWizard, { type ImageTextWizardSave } from '../matrix/MatrixImageTextWizard';
+import MatrixTweetPostWizard, { type TweetPostWizardSave } from '../matrix/MatrixTweetPostWizard';
 import MatrixViralRewriteWizard, { type ViralRewriteWizardSave } from '../matrix/MatrixViralRewriteWizard';
 
 type PlatformId = 'xhs' | 'x' | 'binance' | 'douyin' | 'shipinhao' | 'toutiao' | 'kuaishou' | 'bilibili' | 'tiktok' | 'youtube' | 'video';
@@ -73,6 +74,8 @@ const MATRIX_VIDEO_DOWNLOAD_PLATFORMS = new Set<PlatformId>(['douyin', 'kuaishou
 const MATRIX_IMAGE_TEXT_PLATFORMS = new Set<PlatformId>(['douyin', 'xhs', 'shipinhao', 'toutiao']);
 // 「爆款批量仿写」目前仅小红书。
 const MATRIX_VIRAL_PLATFORMS = new Set<PlatformId>(['xhs']);
+// 后端 backend/matrix/scenarios 有 x_post「自动发推」剧本的平台(N 号各自 AI 原创一条推+可选配图→发时间线)。目前仅推特。
+const MATRIX_TWEET_POST_PLATFORMS = new Set<PlatformId>(['x']);
 
 // Top-level navigation:
 //   create  — scenario cards (current XhsWorkflowsPage / XWorkflowsPage,
@@ -222,6 +225,10 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   // 视频号/头条网络图用的「抖音下图号」候选(已登录抖音的主站号),传给 MatrixImageTextWizard。
   const [matrixImageTextDownloadAccounts, setMatrixImageTextDownloadAccounts] = useState<WizardAccount[]>([]);
   const [matrixImageTextTask, setMatrixImageTextTask] = useState<any | null>(null);
+  const [matrixTweetPlatform, setMatrixTweetPlatform] = useState<string | null>(null);
+  const [matrixTweetAccounts, setMatrixTweetAccounts] = useState<WizardAccount[]>([]);
+  const [matrixTweetAccountsLoading, setMatrixTweetAccountsLoading] = useState(false);
+  const [matrixTweetTask, setMatrixTweetTask] = useState<any | null>(null);
   // 「爆款批量仿写」向导(多账号:勾选 N 个号 + 篇数/AI风格/发布)。
   const [matrixViralPlatform, setMatrixViralPlatform] = useState<string | null>(null);
   const [matrixViralAccounts, setMatrixViralAccounts] = useState<WizardAccount[]>([]);
@@ -468,6 +475,60 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     const plat = matrixImageTextPlatform;
     setMatrixImageTextPlatform(null);
     setMatrixImageTextTask(null);
+    await refreshAll();
+    if (!wasEdit) onSwitchToManage?.(plat as any);
+  };
+  // 「自动发推」向导(多账号):账号取主站 scope(推特主站登录态,发推在 x.com 主站)。
+  const openMatrixTweetWizard = async (platform: string) => {
+    if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; }
+    if (!(await ensureMatrixKernel())) return;
+    setMatrixTweetAccountsLoading(true);
+    try {
+      const r = await (window as any).electron?.matrix?.listAccounts?.();
+      const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
+      setMatrixTweetAccounts(accs.filter((a) => replyAccountFilter(a, platform)).map(mapWizardAccount));
+    } catch { setMatrixTweetAccounts([]); }
+    finally { setMatrixTweetAccountsLoading(false); }
+    setMatrixTweetTask(null);
+    setMatrixTweetPlatform(platform);
+  };
+  const openMatrixTweetWizardEdit = async (task: any) => {
+    if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; }
+    const plat = (task?.platform as string) || currentPlatform || 'x';
+    setMatrixTweetAccounts([]);
+    setMatrixTweetAccountsLoading(true);
+    setMatrixTweetTask({
+      id: task.id,
+      name: task.name,
+      accountIds: task.account_ids || [],
+      tweetPost: (task as any).tweetPost,
+      frequency: task.run_interval,
+    });
+    setMatrixTweetPlatform(plat);
+    try {
+      const r = await (window as any).electron?.matrix?.listAccounts?.();
+      const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
+      setMatrixTweetAccounts(accs.filter((a) => replyAccountFilter(a, plat)).map(mapWizardAccount));
+    } catch { setMatrixTweetAccounts([]); }
+    finally { setMatrixTweetAccountsLoading(false); }
+  };
+  const saveMatrixTweetTask = async (input: TweetPostWizardSave) => {
+    if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); throw new Error('请先登录 NoobClaw 账号'); }
+    const m = (window as any).electron?.matrix;
+    const tweetPost = {
+      mode: input.mode,
+      withImage: input.withImage,
+      language: input.language,
+      isBlueV: input.isBlueV,
+      autoPublish: input.autoPublish,
+      references: input.references,
+    };
+    const r = await m?.saveTask?.({ id: matrixTweetTask?.id, platform: matrixTweetPlatform, type: 'x_post', name: input.name, accountIds: input.accountIds, tweetPost, quota: {}, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
+    if (!r?.ok) throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限', duplicate_type: '该平台已有同类型(自动发推)任务,直接编辑它即可' } as any)[r?.error] || r?.error || '保存失败');
+    const wasEdit = !!matrixTweetTask?.id;
+    const plat = matrixTweetPlatform;
+    setMatrixTweetPlatform(null);
+    setMatrixTweetTask(null);
     await refreshAll();
     if (!wasEdit) onSwitchToManage?.(plat as any);
   };
@@ -880,7 +941,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
           scenario={scenario || null}
           onBack={goBack}
           /* 矩阵号:编辑打开账号多选向导(回填该任务的账号/配额/频率),不开原版 ConfigWizard */
-          onEdit={() => { if (matrixMode) { if (/_video_download$/.test(String(task.scenario_id || ''))) { void openMatrixDownloadWizardEdit(task); } else if (/_image_text$/.test(String(task.scenario_id || ''))) { void openMatrixImageTextWizardEdit(task); } else if (/_viral_production_career$/.test(String(task.scenario_id || ''))) { void openMatrixViralWizardEdit(task); } else if (/_reply_fans_comment$/.test(String(task.scenario_id || ''))) { void openMatrixReplyWizardEdit(task); } else { void openMatrixWizardEdit(task); } return; } if (scenario) openWizardEdit(task, scenario); }}
+          onEdit={() => { if (matrixMode) { if (/_video_download$/.test(String(task.scenario_id || ''))) { void openMatrixDownloadWizardEdit(task); } else if (/_image_text$/.test(String(task.scenario_id || ''))) { void openMatrixImageTextWizardEdit(task); } else if (/_viral_production_career$/.test(String(task.scenario_id || ''))) { void openMatrixViralWizardEdit(task); } else if (String(task.scenario_id || '') === 'x_post') { void openMatrixTweetWizardEdit(task); } else if (/_reply_fans_comment$/.test(String(task.scenario_id || ''))) { void openMatrixReplyWizardEdit(task); } else { void openMatrixWizardEdit(task); } return; } if (scenario) openWizardEdit(task, scenario); }}
           onChanged={refreshAll}
           onOpenHistory={() => openHistoryForTask(task.id)}
         />
@@ -1067,6 +1128,34 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-500 text-white text-sm font-bold hover:bg-emerald-600 shadow-sm shadow-emerald-500/25 transition-all active:scale-95"
               >
                 📝 开始创作 →
+              </button>
+              <button
+                type="button"
+                onClick={() => onSwitchToManage?.(currentPlatform as any)}
+                className="ml-3 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+              >
+                已有任务 »
+              </button>
+              </div>
+            </div>
+          )}
+          {/* 自动发推(矩阵多账号)—— 推特:N 个号各自按身份 AI 原创一条推 + 可选配图 → 发到各自时间线。 */}
+          {MATRIX_TWEET_POST_PLATFORMS.has(currentPlatform) && (
+            <div className="rounded-2xl border border-sky-500/30 bg-sky-500/5 dark:bg-sky-500/10 p-6 flex flex-col">
+              <div className="flex items-center gap-2 text-xs font-semibold text-sky-600 dark:text-sky-400 mb-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-sky-500" /> 内容创作 · 多账号发推
+              </div>
+              <div className="text-xl font-bold dark:text-white mb-1">🐦 {platLabel} · 自动发推</div>
+              <div className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed mb-4">
+                多个号各按自己人设 / 赛道,AI 出<strong>条条不重样</strong>的原创推文(web3 资讯深度创作 或 按身份自由创作),可选 AI 配图,自动发到各自时间线。批量养号日更省心。
+              </div>
+              <div className="mt-auto flex items-center flex-wrap pt-1">
+              <button
+                type="button"
+                onClick={() => openMatrixTweetWizard(currentPlatform)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-sky-500 text-white text-sm font-bold hover:bg-sky-600 shadow-sm shadow-sky-500/25 transition-all active:scale-95"
+              >
+                🐦 开始发推 →
               </button>
               <button
                 type="button"
@@ -1671,6 +1760,22 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
               initialTask={matrixImageTextTask}
               onCancel={() => { setMatrixImageTextPlatform(null); setMatrixImageTextTask(null); }}
               onSave={saveMatrixImageTextTask}
+            />
+          </div>
+        </div>
+      )}
+
+      {matrixTweetPlatform && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-auto" onClick={() => { setMatrixTweetPlatform(null); setMatrixTweetTask(null); }}>
+          <div className="w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
+            <MatrixTweetPostWizard
+              platformLabel={(() => { const p = matrixTweetPlatform; return p === 'x' ? '推特' : String(p); })()}
+              platform={matrixTweetPlatform}
+              accounts={matrixTweetAccounts}
+              accountsLoading={matrixTweetAccountsLoading}
+              initialTask={matrixTweetTask}
+              onCancel={() => { setMatrixTweetPlatform(null); setMatrixTweetTask(null); }}
+              onSave={saveMatrixTweetTask}
             />
           </div>
         </div>

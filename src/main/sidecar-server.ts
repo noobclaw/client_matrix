@@ -225,7 +225,7 @@ async function runMatrixTaskById(taskId: string, kernelPath?: string): Promise<{
   if (!task) return { ok: false, error: 'task_not_found' };
   // engage(互动涨粉)+ reply_fan(自动回复粉丝评论)都由 engageRunner 跑(共用内核/登录/进度链路,
   // 仅剧本与 task 字段不同)。其它类型未支持。
-  if (task.type !== 'engage' && task.type !== 'reply_fan' && task.type !== 'video_download' && task.type !== 'image_text' && task.type !== 'viral_rewrite') return { ok: false, error: 'unsupported_task_type' };
+  if (task.type !== 'engage' && task.type !== 'reply_fan' && task.type !== 'video_download' && task.type !== 'image_text' && task.type !== 'viral_rewrite' && task.type !== 'x_post') return { ok: false, error: 'unsupported_task_type' };
   const platform = task.platform;
   if (runningPlatforms.has(platform)) return { ok: false, error: 'another_task_running' };       // 同平台已在跑
   if (runningPlatforms.size >= MATRIX_MAX_CONCURRENT) return { ok: false, error: 'concurrency_full' }; // 并发已满
@@ -238,6 +238,7 @@ async function runMatrixTaskById(taskId: string, kernelPath?: string): Promise<{
     const { runEngageTask } = await import('./libs/matrix/engageRunner');
     const { runImageTextTask } = await import('./libs/matrix/imageTextRunner');
     const { runViralRewriteTask } = await import('./libs/matrix/viralRewriteRunner');
+    const { runTweetPostTask } = await import('./libs/matrix/tweetPostRunner');
     const { addRun } = await import('./libs/matrix/runStore');
     const { getAccount } = await import('./libs/matrix/accountManager');
     const startedAt = Date.now();
@@ -285,6 +286,7 @@ async function runMatrixTaskById(taskId: string, kernelPath?: string): Promise<{
     const isVideoDownload = task.type === 'video_download';
     const isImageText = task.type === 'image_text';
     const isViralRewrite = task.type === 'viral_rewrite';
+    const isTweetPost = task.type === 'x_post';
     // 三个进度回调:image_text 与 engage 共用同款签名(EngageItemResult / EngageReport),闭包零改动复用。
     const cbOnLog = (accountId: string, msg: string) => { pushLog(accountId, msg); broadcastSSE('matrix:progress', { type: 'log', accountId, msg, taskId: task.id }); };
     const cbOnTargets = (accountId: string, t: { like?: number; follow?: number; comment?: number }) => {
@@ -312,7 +314,13 @@ async function runMatrixTaskById(taskId: string, kernelPath?: string): Promise<{
         broadcastSSE('matrix:progress', { type: 'item', accountId: item.accountId, state: item.state, reason: item.reason, counts: item.counts, chargedCredits: item.chargedCredits, chargedUsd: item.chargedUsd, taskId: task.id });
     };
 
-    const runP: Promise<any> = isViralRewrite
+    const runP: Promise<any> = isTweetPost
+      ? runTweetPostTask({
+          platform: task.platform, taskId: task.id, accountIds: accIds, config: task.tweetPost as any,
+          concurrency: task.concurrency, kernelPath, signal: abort.signal,
+          onLog: cbOnLog, onTargets: cbOnTargets, onItem: cbOnItem,
+        })
+      : isViralRewrite
       ? runViralRewriteTask({
           platform: task.platform, taskId: task.id, accountIds: accIds, config: task.viralRewrite as any,
           concurrency: task.concurrency, kernelPath, signal: abort.signal,
@@ -342,7 +350,7 @@ async function runMatrixTaskById(taskId: string, kernelPath?: string): Promise<{
         const totals: any = items.reduce((acc, it: any) => ({ like: acc.like + (it.counts?.like || 0), follow: acc.follow + (it.counts?.follow || 0), comment: acc.comment + (it.counts?.comment || 0) }), { like: 0, follow: 0, comment: 0 });
         // 非互动任务的完成维度:图文创作累计「发帖数」、视频下载累计「下载条数」。只给对应 type 加键,
         // 不污染 engage(否则累计/上次完成会多出 📤0/⬇️0)。
-        if (isImageText) totals.post = items.reduce((s, it: any) => s + (it.counts?.post || 0), 0);
+        if (isImageText || isTweetPost) totals.post = items.reduce((s, it: any) => s + (it.counts?.post || 0), 0);
         if (isVideoDownload) totals.download = items.reduce((s, it: any) => s + (it.counts?.download || 0), 0);
         const cost = items.reduce((acc, it: any) => ({ credits: acc.credits + (it.chargedCredits || 0), usd: acc.usd + (it.chargedUsd || 0) }), { credits: 0, usd: 0 });
         addRun({ taskId: task.id, taskName: task.name, platform: task.platform, startedAt, finishedAt: Date.now(), success: report?.success ?? 0, failed: report?.failed ?? 0, skipped: report?.skipped ?? 0, totals, cost, items });

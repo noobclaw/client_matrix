@@ -110,11 +110,28 @@ export interface ViralRewriteConfig {
   autoPublish: boolean;          // true=直接发布(坐标),false=仅本地保存
 }
 
+/**
+ * 「自动发推」(x_post)任务配置(目前仅推特 X)。N 个号各自按【自己的人设/赛道/关键词】(沿用账号已配身份)
+ * AI 原创一条推文,发到各自时间线。每号每轮固定 1 条,内容互不相同。
+ *   mode='web3':抓近 3 周 web3 热门资讯 → Pro 紧贴资讯原创(web3 KOL 流,复刻旧 x_post_creator);
+ *   mode='free':按本号身份 + 可选参考文案 → Pro 自由原创(适合非 web3 赛道)。
+ * 配图可选(withImage→AI 生图附到推文);语言 zh/en/mixed(mixed 跟随客户端语言)。
+ */
+export interface TweetPostConfig {
+  mode: 'web3' | 'free';         // 内容来源:web3 资讯流 / 按账号身份自由创作
+  withImage: boolean;            // true=AI 生图配图,false=纯文字推
+  language: 'zh' | 'en' | 'mixed';
+  isBlueV: boolean;              // 蓝V(X Premium)→ 字数自由(三档随机);普通号 ≤140 字
+  autoPublish: boolean;          // true=直接发布,false=仅本地生成(不发)
+  references?: Record<string, string>; // 可选:各账号参考文案 { accountId: text }(仅 free 模式参考);空则按身份生成
+}
+
 // 互动(点赞/评论/关注)= engage;自动回复粉丝评论 = reply_fan(抖音创作者中心评论管理);
 // 视频无水印下载 = video_download(单账号:选 1 个号 + 粘贴多个链接,逐个下载,不多开);
 // 图文创作 = image_text(N 个号各自按身份生成图文 + 配图 + 发到各自创作者中心);
-// 爆款批量仿写 = viral_rewrite(N 个号各自按关键词搜小红书爆款 → 仿写 → AI 生图 → 发布)。
-export type MatrixTaskType = 'engage' | 'reply_fan' | 'video_download' | 'image_text' | 'viral_rewrite';
+// 爆款批量仿写 = viral_rewrite(N 个号各自按关键词搜小红书爆款 → 仿写 → AI 生图 → 发布);
+// 自动发推 = x_post(N 个号各自按身份 AI 原创一条推文 + 可选配图 → 发到各自时间线,仅推特)。
+export type MatrixTaskType = 'engage' | 'reply_fan' | 'video_download' | 'image_text' | 'viral_rewrite' | 'x_post';
 // 频率枚举对齐老客户端 DouyinConfigWizard(便于复用频率算法/文案)。
 export type MatrixTaskFrequency = 'once' | '30min' | '1h' | '3h' | '6h' | 'daily_random';
 
@@ -133,6 +150,7 @@ export interface MatrixTask {
   funnel?: ReplyFanConfig;         // 仅 reply_fan 用:引流尾巴配置
   imageText?: ImageTextConfig;     // 仅 image_text 用:图文创作配置
   viralRewrite?: ViralRewriteConfig; // 仅 viral_rewrite 用:爆款仿写配置
+  tweetPost?: TweetPostConfig;     // 仅 x_post 用:自动发推配置
   urls?: string[];                 // 仅 video_download 用:用户粘贴的待下载视频链接清单
   concurrency?: number;            // 同时开窗数(video_download 固定 1,单账号顺序下载)
   frequency: MatrixTaskFrequency;  // 运行频率

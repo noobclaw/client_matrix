@@ -1839,6 +1839,7 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
                           if (/_reply_fans_comment$/.test(sid)) return <>💬 {ap.comment?.done ?? 0} {isZh ? '回复' : 'replies'}</>;
                           if (/_video_download$/.test(sid)) return <span className="text-gray-400 font-sans">⬇️ {isZh ? '视频下载' : 'Video download'}</span>;
                           if (/_image_text$/.test(sid)) return <span className="text-gray-400 font-sans">📝 {isZh ? '图文创作' : 'Image-text'}</span>;
+                          if (sid === 'x_post') return <span className="text-gray-400 font-sans">🐦 {isZh ? '发推' : 'Tweet'}</span>;
                           return <>👍 {ap.like?.done ?? 0}/{ap.like?.target ?? 0} · ➕ {ap.follow?.done ?? 0}/{ap.follow?.target ?? 0} · 💬 {ap.comment?.done ?? 0}/{ap.comment?.target ?? 0}</>;
                         })()}
                       </div>

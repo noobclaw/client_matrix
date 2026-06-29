@@ -124,6 +124,16 @@ const MATRIX_VIRAL_META: Record<string, { name_zh: string; icon: string }> = {
   xhs: { name_zh: '小红书 爆款批量仿写', icon: '🔥' },
 };
 
+// 「自动发推」剧本(backend/matrix/scenarios/x_post)。N 个号各自 AI 原创一条推 + 可选配图 → 发到各自时间线。目前仅推特。
+const MATRIX_TWEET_SCENARIO_ID: Record<string, string> = {
+  x: 'x_post',
+};
+const MATRIX_TWEET_ID_TO_PLATFORM: Record<string, string> =
+  Object.fromEntries(Object.entries(MATRIX_TWEET_SCENARIO_ID).map(([p, id]) => [id, p]));
+const MATRIX_TWEET_META: Record<string, { name_zh: string; icon: string }> = {
+  x: { name_zh: '推特 自动发推', icon: '🐦' },
+};
+
 /** 矩阵任务 → 旧 ScenarioTaskIPC(赛道/关键词在账号上,task 这两个字段留空;
  *  配额映射到 daily_*_min/max 这套 douyin_auto_engage 字段)。 */
 function mxTaskToScenario(t: any): ScenarioTaskIPC {
@@ -135,16 +145,18 @@ function mxTaskToScenario(t: any): ScenarioTaskIPC {
   const isDownload = t?.type === 'video_download';
   const isImageText = t?.type === 'image_text';
   const isViral = t?.type === 'viral_rewrite';
+  const isTweet = t?.type === 'x_post';
   const fn = t?.funnel || {};
   const dlUrls: string[] = Array.isArray(t?.urls) ? t.urls : [];
   return {
     id: t.id,
     // 按任务真实 platform + 类型映射剧本 id(原来写死 douyin/engage → 非抖音 tab 看不到任务、回复粉丝错显成互动)。
-    scenario_id: isReply ? `${t.platform}_reply_fans_comment` : isDownload ? `${t.platform}_video_download` : isImageText ? `${t.platform}_image_text` : isViral ? `${t.platform}_viral_production_career` : engageScenarioIdForPlatform(t.platform),
-    track: isReply ? 'reply_fan_comment' : isDownload ? 'video_download' : isImageText ? 'image_text' : isViral ? 'viral_production' : 'matrix',
-    // image_text / viral_rewrite 配置透传(详情页/编辑回填 + updateTask 兜底不丢配置)。
+    scenario_id: isReply ? `${t.platform}_reply_fans_comment` : isDownload ? `${t.platform}_video_download` : isImageText ? `${t.platform}_image_text` : isViral ? `${t.platform}_viral_production_career` : isTweet ? `${t.platform}_post` : engageScenarioIdForPlatform(t.platform),
+    track: isReply ? 'reply_fan_comment' : isDownload ? 'video_download' : isImageText ? 'image_text' : isViral ? 'viral_production' : isTweet ? 'x_post' : 'matrix',
+    // image_text / viral_rewrite / x_post 配置透传(详情页/编辑回填 + updateTask 兜底不丢配置)。
     imageText: isImageText ? t.imageText : undefined,
     viralRewrite: isViral ? t.viralRewrite : undefined,
+    tweetPost: isTweet ? t.tweetPost : undefined,
     // viral_rewrite 也摊平 AI 风格/发布给详情页(它也走 AI 生图 + 发布)。
     ...(isViral && t.viralRewrite ? { ai_image_style: t.viralRewrite.aiImageStyle || '', auto_publish: !!t.viralRewrite.autoPublish, auto_upload: !!t.viralRewrite.autoPublish } : {}),
     // 摊平给详情页 ConfigCard 读(它读 use_real_photos / real_photo_count / ai_image_style 这套老字段)。
@@ -246,6 +258,22 @@ function scenarioInputToMxSave(input: any, id?: string): any {
       accountIds,
       quota: {},
       viralRewrite: input.viralRewrite,
+      concurrency: accountIds.length,
+      frequency: input.run_interval || 'daily_random',
+      enabled: input.enabled !== false,
+    };
+  }
+  // 自动发推任务(scenario_id = x_post):保持 type='x_post' + 透传 tweetPost,否则经 updateTask 兜底会被改成 engage、配置丢失。
+  if (typeof input.scenario_id === 'string' && MATRIX_TWEET_ID_TO_PLATFORM[input.scenario_id]) {
+    const xPlatform = MATRIX_TWEET_ID_TO_PLATFORM[input.scenario_id];
+    return {
+      id,
+      platform: xPlatform,
+      type: 'x_post',
+      name: input.name || (accountIds.length ? `推特发推 · ${accountIds.length} 个号` : '推特发推'),
+      accountIds,
+      quota: {},
+      tweetPost: input.tweetPost,
       concurrency: accountIds.length,
       frequency: input.run_interval || 'daily_random',
       enabled: input.enabled !== false,
@@ -422,7 +450,15 @@ class ScenarioService {
           name_zh: MATRIX_VIRAL_META[platform]?.name_zh || sid, name_en: '',
           icon: MATRIX_VIRAL_META[platform]?.icon || '🔥',
         }));
-      return [...DEFAULT_SCENARIOS, ...synth, ...synthReply, ...synthDownload, ...synthImageText, ...synthViral] as unknown as Scenario[];
+      // 同理补「自动发推」剧本快照,让 x_post 任务能按 platform 归到推特 tab。
+      const synthTweet = Object.entries(MATRIX_TWEET_SCENARIO_ID)
+        .filter(([, sid]) => !have.has(sid))
+        .map(([platform, sid]) => ({
+          id: sid, version: '1.0.0', platform, workflow_type: 'x_post_creation', category: 'creation',
+          name_zh: MATRIX_TWEET_META[platform]?.name_zh || sid, name_en: '',
+          icon: MATRIX_TWEET_META[platform]?.icon || '🐦',
+        }));
+      return [...DEFAULT_SCENARIOS, ...synth, ...synthReply, ...synthDownload, ...synthImageText, ...synthViral, ...synthTweet] as unknown as Scenario[];
     }
     try {
       const res = await window.electron.scenario.listScenarios();
