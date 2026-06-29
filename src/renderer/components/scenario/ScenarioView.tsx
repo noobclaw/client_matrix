@@ -1098,6 +1098,27 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
               </div>
             </div>
           )}
+          {/* 敏感词检查(小红书工具,账号无关)—— 跟旧版一样,粘文案查违禁词/广告法/引流/限流风险,不选账号。 */}
+          {currentPlatform === 'xhs' && (
+            <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 dark:bg-amber-500/10 p-6 flex flex-col">
+              <div className="flex items-center gap-2 text-xs font-semibold text-amber-600 dark:text-amber-400 mb-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> 实用工具 · 发布前自查
+              </div>
+              <div className="text-xl font-bold dark:text-white mb-1">🛡️ 小红书 · 敏感词检查</div>
+              <div className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed mb-4">
+                粘贴笔记文案,检测<strong>违禁词 / 广告法 / 站外引流 / 限流触发词</strong>(2026 版词库),发布前自查避免限流。无需选账号,即开即用。
+              </div>
+              <div className="mt-auto flex items-center flex-wrap pt-1">
+              <button
+                type="button"
+                onClick={() => openSensitiveCheck()}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-500 text-white text-sm font-bold hover:bg-amber-600 shadow-sm shadow-amber-500/25 transition-all active:scale-95"
+              >
+                🛡️ 开始检查 →
+              </button>
+              </div>
+            </div>
+          )}
           </div>
           {/* 优势标签(对齐旧版各平台 WorkflowsPage 底部):矩阵涨粉通用卖点。 */}
           <div className="mt-6 flex flex-wrap gap-2 justify-center">
