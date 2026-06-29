@@ -126,12 +126,25 @@ export interface TweetPostConfig {
   references?: Record<string, string>; // 可选:各账号参考文案 { accountId: text }(仅 free 模式参考);空则按身份生成
 }
 
+/**
+ * 「币安广场自动发帖」(binance_post)任务配置(目前仅币安广场)。N 个号各自按【自己的人设/赛道/关键词】
+ * (沿用账号已配身份)抓近 3 周 web3 热门资讯 → Pro 紧贴资讯深度创作一条币安广场图文,发到币安广场。
+ * 每号每轮固定 1 条,内容互不相同。仅 web3 资讯模式(对齐旧 binance_square_post_creator)。
+ * 配图可选(withImage→源资讯原图优先,无则 AI 生图);语言 zh/en/mixed(mixed 跟随客户端语言)。
+ */
+export interface BinancePostConfig {
+  withImage: boolean;            // true=配图(源图优先→AI 生图),false=纯文字
+  language: 'zh' | 'en' | 'mixed';
+  autoPublish: boolean;          // true=直接发布,false=仅本地生成(不发)
+}
+
 // 互动(点赞/评论/关注)= engage;自动回复粉丝评论 = reply_fan(抖音创作者中心评论管理);
 // 视频无水印下载 = video_download(单账号:选 1 个号 + 粘贴多个链接,逐个下载,不多开);
 // 图文创作 = image_text(N 个号各自按身份生成图文 + 配图 + 发到各自创作者中心);
 // 爆款批量仿写 = viral_rewrite(N 个号各自按关键词搜小红书爆款 → 仿写 → AI 生图 → 发布);
-// 自动发推 = x_post(N 个号各自按身份 AI 原创一条推文 + 可选配图 → 发到各自时间线,仅推特)。
-export type MatrixTaskType = 'engage' | 'reply_fan' | 'video_download' | 'image_text' | 'viral_rewrite' | 'x_post';
+// 自动发推 = x_post(N 个号各自按身份 AI 原创一条推文 + 可选配图 → 发到各自时间线,仅推特);
+// 币安广场自动发帖 = binance_post(N 个号各自抓 web3 资讯 AI 原创一条币安广场图文 + 可选配图 → 发币安广场,仅币安)。
+export type MatrixTaskType = 'engage' | 'reply_fan' | 'video_download' | 'image_text' | 'viral_rewrite' | 'x_post' | 'binance_post';
 // 频率枚举对齐老客户端 DouyinConfigWizard(便于复用频率算法/文案)。
 export type MatrixTaskFrequency = 'once' | '30min' | '1h' | '3h' | '6h' | 'daily_random';
 
@@ -151,6 +164,7 @@ export interface MatrixTask {
   imageText?: ImageTextConfig;     // 仅 image_text 用:图文创作配置
   viralRewrite?: ViralRewriteConfig; // 仅 viral_rewrite 用:爆款仿写配置
   tweetPost?: TweetPostConfig;     // 仅 x_post 用:自动发推配置
+  binancePost?: BinancePostConfig; // 仅 binance_post 用:币安广场自动发帖配置
   urls?: string[];                 // 仅 video_download 用:用户粘贴的待下载视频链接清单
   concurrency?: number;            // 同时开窗数(video_download 固定 1,单账号顺序下载)
   frequency: MatrixTaskFrequency;  // 运行频率

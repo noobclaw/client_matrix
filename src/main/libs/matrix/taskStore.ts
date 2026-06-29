@@ -10,7 +10,7 @@ import os from 'os';
 import path from 'path';
 import { coworkLog } from '../coworkLogger';
 import { nextRunAt } from './matrixSchedule';
-import type { MatrixTask, EngageQuota, ReplyFanConfig, ImageTextConfig, ViralRewriteConfig, TweetPostConfig, MatrixTaskType, MatrixTaskFrequency } from './types';
+import type { MatrixTask, EngageQuota, ReplyFanConfig, ImageTextConfig, ViralRewriteConfig, TweetPostConfig, BinancePostConfig, MatrixTaskType, MatrixTaskFrequency } from './types';
 
 /** 任务启用且非 once 才排下次运行;否则清空(手动触发)。 */
 function planned(t: { enabled: boolean; frequency: MatrixTaskFrequency }, fromTs: number, isFirst: boolean): number | undefined {
@@ -62,6 +62,7 @@ export interface SaveTaskInput {
   imageText?: ImageTextConfig;     // image_text 用:图文创作配置
   viralRewrite?: ViralRewriteConfig; // viral_rewrite 用:爆款仿写配置
   tweetPost?: TweetPostConfig;     // x_post 用:自动发推配置
+  binancePost?: BinancePostConfig; // binance_post 用:币安广场自动发帖配置
   urls?: string[];                 // video_download 用:待下载视频链接清单
   concurrency?: number;
   frequency: MatrixTaskFrequency;
@@ -89,6 +90,7 @@ export function saveTask(input: SaveTaskInput): SaveTaskResult {
       imageText: input.imageText ?? tasks[i].imageText,
       viralRewrite: input.viralRewrite ?? tasks[i].viralRewrite,
       tweetPost: input.tweetPost ?? tasks[i].tweetPost,
+      binancePost: input.binancePost ?? tasks[i].binancePost,
       urls: input.urls ?? tasks[i].urls,
       concurrency: input.concurrency,
       frequency: input.frequency,
@@ -114,6 +116,7 @@ export function saveTask(input: SaveTaskInput): SaveTaskResult {
     imageText: input.imageText,
     viralRewrite: input.viralRewrite,
     tweetPost: input.tweetPost,
+    binancePost: input.binancePost,
     urls: input.urls,
     concurrency: input.concurrency,
     frequency: input.frequency || 'once',
