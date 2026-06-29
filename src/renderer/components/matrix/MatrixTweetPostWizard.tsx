@@ -60,7 +60,7 @@ const MatrixTweetPostWizard: React.FC<Props> = ({ platformLabel, platform, accou
   // ── 发推配置(全局) ──
   const tp = initialTask?.tweetPost || {};
   const [mode, setMode] = useState<'web3' | 'free'>(tp.mode === 'free' ? 'free' : 'web3');
-  const [withImage, setWithImage] = useState<boolean>(!!tp.withImage);
+  const [withImage, setWithImage] = useState<boolean>(tp.withImage !== false); // 默认配图开
   const [language, setLanguage] = useState<'zh' | 'en' | 'mixed'>(tp.language || 'mixed');
   const [isBlueV, setIsBlueV] = useState<boolean>(!!tp.isBlueV);
   const [autoPublish, setAutoPublish] = useState<boolean>(tp.autoPublish !== false); // 默认群发
@@ -246,7 +246,7 @@ const MatrixTweetPostWizard: React.FC<Props> = ({ platformLabel, platform, accou
                   📝 纯文字<div className="text-[11px] text-gray-400 font-normal mt-0.5">只发文字推,最快、零配图成本</div>
                 </button>
                 <button type="button" onClick={() => setWithImage(true)} className={`px-3 py-2.5 rounded-lg text-sm border text-left transition-colors ${withImage ? 'border-sky-500 bg-sky-500/10 text-sky-600 dark:text-sky-400 font-medium' : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-sky-500/50'}`}>
-                  🎨 AI 配图<div className="text-[11px] text-gray-400 font-normal mt-0.5">AI 按推文内容生一张图附上,更吸睛(走生图 token)</div>
+                  🎨 配图<div className="text-[11px] text-gray-400 font-normal mt-0.5">更吸睛。web3 资讯优先用原文自带图,无图才 AI 生图(走生图 token)</div>
                 </button>
               </div>
             </div>
