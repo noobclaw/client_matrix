@@ -912,8 +912,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
             </div>
             <div className="text-xl font-bold dark:text-white mb-1">🎯 {platLabel} · 互动涨粉</div>
             <div className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed mb-4">
-              勾选多个已登录账号,每个账号在各自指纹浏览器里按<strong>自己的赛道关键词</strong>搜索,自动点赞 / 关注 / 评论。
-              赛道 / 关键词 / 人设在「我的矩阵账号」里给每个号设;选几个号就同时开几个窗。
+              多个号同时开窗,各按自己赛道精准点赞 / 关注 / 评论。<strong>AI 模拟真人不封号</strong>,选几个号开几个窗 —— 涨粉快、成本低、全程托管。
             </div>
             <div className="mt-auto flex items-center flex-wrap pt-1">
             {engageReady ? (
@@ -958,11 +957,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
               </div>
               <div className="text-xl font-bold dark:text-white mb-1">💌 {platLabel} · 自动回复粉丝</div>
               <div className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed mb-4">
-                {currentPlatform === 'xhs'
-                  ? <>勾选多个已登录的小红书账号,每个号在各自指纹浏览器里打开<strong>创作者中心</strong>,逐篇笔记进详情页回复自己笔记下的粉丝评论。
-                      AI 按评论内容 + 该号人设写回应,可选按概率自然带上引流尾巴;已回复过的、自己留的自动跳过,只回粉丝、绝不评论笔记本身。</>
-                  : <>勾选多个已登录<strong>创作者中心</strong>的账号,每个号在各自指纹浏览器的「评论管理」里逐条回复自己作品下的粉丝评论。
-                      AI 按评论内容 + 该号人设写回应,可选按概率自然带上引流尾巴;已回复过的、自己留的自动跳过,只回粉丝、绝不评论作品本身。</>}
+                粉丝评论<strong>不漏回、秒回</strong>:多个号自动进创作者中心,AI 贴着每条评论 + 你的人设暖心回应,可带引流尾巴。已回的、自己留的自动跳过,只回粉丝。
               </div>
               <div className="mt-auto flex items-center flex-wrap pt-1">
               <button
@@ -990,8 +985,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
               </div>
               <div className="text-xl font-bold dark:text-white mb-1">⬇️ {platLabel} · 视频无水印下载</div>
               <div className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed mb-4">
-                选 <strong>1 个</strong>已登录的{platLabel}账号,粘贴 1-20 个视频链接,用该号的指纹浏览器逐个打开、借该号登录态拿<strong>无水印</strong>源下到本地。{currentPlatform === 'tiktok' ? '(TikTok 须 VPN/真机)' : ''}
-                单账号顺序下载、不多开;图文/合集自动跳过,每条成功下载按次扣费。
+                粘贴 1-20 个链接,一键批量下<strong>无水印</strong>原视频到本地 —— 攒素材、做二创随手就来。选 1 个号顺序下,图文/合集自动跳过。{currentPlatform === 'tiktok' ? '(TikTok 须 VPN)' : ''}
               </div>
               <div className="mt-auto flex items-center flex-wrap pt-1">
               <button
@@ -1019,8 +1013,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
               </div>
               <div className="text-xl font-bold dark:text-white mb-1">📝 {platLabel} · 图文创作</div>
               <div className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed mb-4">
-                勾选多个已登录账号,每个号在各自指纹浏览器里按<strong>自己的赛道/人设/关键词</strong> + 随机文风,AI 生成<strong>各不相同</strong>的图文笔记;配图二选一(AI 生图 / 按本号关键词搜实景图),发到各自创作者中心。
-                身份在「我的矩阵账号」里给每个号设;参考文案选填。
+                多个号各按自己人设 / 赛道 + 随机文风,AI 出<strong>条条不重样</strong>的原创图文,自动配图(AI 生图或实景图)直发创作者中心。批量日更不愁素材。
               </div>
               <div className="mt-auto flex items-center flex-wrap pt-1">
               <button
@@ -1040,6 +1033,12 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
               </div>
             </div>
           )}
+          </div>
+          {/* 优势标签(对齐旧版各平台 WorkflowsPage 底部):矩阵涨粉通用卖点。 */}
+          <div className="mt-6 flex flex-wrap gap-2 justify-center">
+            {[['🛡️', '完全模拟人类行为不封号'], ['🚀', '涨粉丝快(真实互动飞速涨粉)'], ['💰', '成本超低'], ['🤖', '全智能控制']].map(([icon, t]) => (
+              <span key={t} className="inline-flex items-center gap-1 text-[11px] px-3 py-1.5 rounded-full border border-violet-500/20 bg-violet-500/5 text-gray-700 dark:text-gray-300">{icon} {t}</span>
+            ))}
           </div>
         </div>
       );
