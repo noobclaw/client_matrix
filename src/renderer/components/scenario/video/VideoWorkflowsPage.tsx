@@ -2317,6 +2317,11 @@ const VideoConfigModal: React.FC<{
   const [keywords, setKeywords] = useState(
     editTask ? (editTask.input.keywords || []).join(' ') : (isZh ? defaultPreset.keywords.zh : defaultPreset.keywords.en),
   );
+  // 矩阵号第2步「选号」:选中账号后用该号的 group(赛道)/persona/keywords 生成,不再手填。
+  // identityPlatform/identityAccountId 仅用于第2步选号 UI;matrixTrack 存该号赛道(buildInput 的 track 用它)。
+  const [identityPlatform, setIdentityPlatform] = useState<string>('');
+  const [identityAccountId, setIdentityAccountId] = useState<string>('');
+  const [matrixTrack, setMatrixTrack] = useState<string>(editTask?.input.track || '');
   const [script, setScript] = useState(editTask?.input.script || '');
   // 文案模式:strict 严格逐字 / ai 参考再创作。编辑老任务时按 input 推断(无字段则有文案=strict)。
   const [scriptMode, setScriptMode] = useState<'strict' | 'ai'>(
@@ -2546,8 +2551,8 @@ const VideoConfigModal: React.FC<{
   const scriptValid = scriptMode === 'strict'
     ? (scriptLen >= SCRIPT_MIN_STRICT && scriptLen <= SCRIPT_MAX)
     : (scriptLen === 0 || scriptLen <= SCRIPT_MAX);
-  // 赛道步:只校验赛道必选(人设/关键词选完自动带出,可空)。
-  const trackStepValid = trackId !== '';
+  // 赛道步:非矩阵只校验赛道必选;矩阵号必须选好账号(编辑老任务可沿用已存身份不强制重选)。
+  const trackStepValid = matrixMode ? (!!identityAccountId || isEdit) : (trackId !== '');
   // 文案步:只校验文案本身。
   const scriptStepValid = scriptValid;
   // 画面:选了本地上传却没传素材时挡一下
@@ -2555,8 +2560,10 @@ const VideoConfigModal: React.FC<{
   // 「画面」步通过条件 — pure_ai 模式下 mode 就够了(参考图选填);stock 模式下需要选定来源。
   const visualStepValid = mode === 'pure_ai' || materialSource === 'stock' || localVideos.length > 0;
 
-  const trackLabel = TRACK_PRESETS.find((t) => t.id === trackId)?.[isZh ? 'zh' : 'en']
-    || editTask?.input.track || '';
+  // 矩阵号:赛道来自所选账号(matrixTrack);非矩阵:来自预设赛道。
+  const trackLabel = matrixMode
+    ? (matrixTrack || editTask?.input.track || '')
+    : (TRACK_PRESETS.find((t) => t.id === trackId)?.[isZh ? 'zh' : 'en'] || editTask?.input.track || '');
 
   const buildTitle = (): string => {
     const kw = keywords.split(/[,，\s]+/).map((k) => k.trim()).filter(Boolean);
@@ -2679,13 +2686,26 @@ const VideoConfigModal: React.FC<{
       try {
         const r = await (window as any).electron?.matrix?.listAccounts?.();
         const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
-        if (alive) setMatrixAccounts(accs.map((a) => ({ id: a.id, platform: a.platform, displayName: a.displayName, status: a.status, nickname: a.nickname, displayId: a.displayId, avatar: a.avatar, loginScope: a.loginScope })));
+        if (alive) setMatrixAccounts(accs.map((a) => ({ id: a.id, platform: a.platform, displayName: a.displayName, status: a.status, nickname: a.nickname, displayId: a.displayId, avatar: a.avatar, loginScope: a.loginScope, group: a.group, persona: a.persona, keywords: a.keywords })));
       } catch { if (alive) setMatrixAccounts([]); }
     })();
     return () => { alive = false; };
   }, [matrixMode]);
   // 发布上传:快手只列「创作者中心」账号(主站号没有 cp 发布登录态)。
-  const accountsFor = (platform: string) => matrixAccounts.filter((a) => a.platform === platform && (platform !== 'kuaishou' || (a as any).loginScope === 'creator'));
+  const accountsFor = (platform: string) => matrixAccounts.filter((a) => a.platform === platform && (platform !== 'kuaishou' || a.loginScope === 'creator'));
+  // 第2步「选号」:平台→账号。身份选号不限快手主站/创作端(只取该号的赛道/人设/关键词,与发布登录态无关)。
+  const identityPlatforms = Array.from(new Set(matrixAccounts.map((a) => a.platform)));
+  const identityAccounts = matrixAccounts.filter((a) => a.platform === identityPlatform);
+  // 选中账号 → 用该号的 group(赛道)/persona/keywords 覆盖生成参数(不再让用户手填)。
+  const onPickIdentityAccount = (id: string) => {
+    setIdentityAccountId(id);
+    const a = matrixAccounts.find((x) => x.id === id);
+    if (a) {
+      setMatrixTrack(a.group || '');
+      setPersona(a.persona || '');
+      setKeywords((a.keywords || []).join(' '));
+    }
+  };
   const matrixAccountsReady = !matrixMode || outputMode !== 'upload'
     || selectedPlatformIds.every((p) => !!accountByPlatform[p] && accountsFor(p).some((a) => a.id === accountByPlatform[p] && a.status !== 'login_required'));
 
@@ -2734,7 +2754,7 @@ const VideoConfigModal: React.FC<{
                   <div className={`h-px w-6 ${step > 1 ? 'bg-rose-500' : 'bg-gray-200 dark:bg-gray-700'}`} />
                 </>
               )}
-              <StepDot n={2} active={step === 2} done={step > 2} label={isZh ? '赛道' : 'Track'} />
+              <StepDot n={2} active={step === 2} done={step > 2} label={isZh ? (matrixMode ? '选号' : '赛道') : (matrixMode ? 'Account' : 'Track')} />
               <div className={`h-px w-6 ${step > 2 ? 'bg-rose-500' : 'bg-gray-200 dark:bg-gray-700'}`} />
               <StepDot n={3} active={step === 3} done={step > 3} label={isZh ? '文案' : 'Script'} />
               <div className={`h-px w-6 ${step > 3 ? 'bg-rose-500' : 'bg-gray-200 dark:bg-gray-700'}`} />
@@ -2799,8 +2819,74 @@ const VideoConfigModal: React.FC<{
             </>
           )}
 
-          {/* ── 步骤 2:赛道（选完自动带出人设 / 关键词） ── */}
-          {step === 2 && (
+          {/* ── 步骤 2(矩阵号):选号 —— 选中账号后用该号的赛道 / 人设 / 关键词生成,不再手填 ── */}
+          {step === 2 && matrixMode && (
+            <>
+              <Field label={isZh ? '选择账号（必选）' : 'Account (required)'} hint={isZh ? '用该账号的赛道 / 人设 / 关键词生成，无需手填' : "uses the account's track / persona / keywords"}>
+                {matrixAccounts.length === 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => { window.dispatchEvent(new CustomEvent('noobclaw:show-matrix-accounts', {})); onClose(); }}
+                    className="w-full text-left px-3 py-2 rounded-lg border border-dashed border-rose-400 text-rose-500 text-xs hover:bg-rose-500/5"
+                  >
+                    {isZh ? '⚠️ 暂无矩阵账号 · 点此去「我的矩阵账号」连接 →' : '⚠️ No matrix account · link one in "My Matrix Accounts" →'}
+                  </button>
+                ) : (
+                  <div className="space-y-2">
+                    {/* 先选平台 */}
+                    <div className="flex flex-wrap gap-1.5">
+                      {identityPlatforms.map((p) => (
+                        <button
+                          key={p}
+                          type="button"
+                          onClick={() => { setIdentityPlatform(p); setIdentityAccountId(''); }}
+                          className={`text-xs px-2.5 py-1 rounded-full border ${identityPlatform === p ? 'border-rose-500 bg-rose-500/10 text-rose-500' : 'border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-rose-300'}`}
+                        >
+                          {MATRIX_PLAT_ZH[p] || p}
+                        </button>
+                      ))}
+                    </div>
+                    {/* 再选账号(富信息下拉) */}
+                    {identityPlatform && (
+                      <div className="flex">
+                        <MatrixAccountSelect
+                          isZh={isZh}
+                          accounts={identityAccounts}
+                          value={identityAccountId}
+                          onChange={onPickIdentityAccount}
+                          onAddAccount={() => { window.dispatchEvent(new CustomEvent('noobclaw:show-matrix-accounts', { detail: { platform: identityPlatform } })); onClose(); }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </Field>
+
+              {/* 选中后只读展示该账号的赛道 / 人设 / 关键词(自动带入生成,不可在此改) */}
+              {(identityAccountId || (isEdit && (matrixTrack || persona || keywords))) && (
+                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-3 space-y-2.5">
+                  <div className="text-[11px] font-medium text-gray-400 uppercase tracking-wide">
+                    {isZh ? '该账号身份 · 自动用于生成' : 'Account identity · used for generation'}
+                  </div>
+                  {[
+                    { label: isZh ? '赛道' : 'Track', value: matrixTrack },
+                    { label: isZh ? '人设' : 'Persona', value: persona },
+                    { label: isZh ? '关键词' : 'Keywords', value: keywords },
+                  ].map((row) => (
+                    <div key={row.label}>
+                      <div className="text-[11px] text-gray-400 mb-0.5">{row.label}</div>
+                      <div className="text-sm dark:text-gray-200 whitespace-pre-wrap break-words">
+                        {row.value || (isZh ? '—（该账号未设置）' : '— (not set)')}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* ── 步骤 2(非矩阵):赛道（选完自动带出人设 / 关键词） ── */}
+          {step === 2 && !matrixMode && (
             <>
               <Field label={isZh ? '赛道（必选）' : 'Track (required)'} hint={isZh ? '选完自动带出人设和关键词，可再改' : 'auto-fills persona & keywords, editable'}>
                 <select
@@ -3565,7 +3651,7 @@ const VideoConfigModal: React.FC<{
             <button
               type="button"
               onClick={() => {
-                if (step === 2 && !trackId) { setSubmitError(isZh ? '请先选择赛道' : 'Please pick a track'); return; }
+                if (step === 2 && !trackStepValid) { setSubmitError(isZh ? (matrixMode ? '请先选择账号' : '请先选择赛道') : (matrixMode ? 'Please pick an account' : 'Please pick a track')); return; }
                 if (step === 3 && !scriptValid) {
                   if (scriptMode === 'strict' && scriptLen < SCRIPT_MIN_STRICT) {
                     setSubmitError(isZh ? `严格模式下视频文案不少于 ${SCRIPT_MIN_STRICT} 字（当前 ${scriptLen} 字）` : `Verbatim mode needs ≥ ${SCRIPT_MIN_STRICT} chars (now ${scriptLen})`);
@@ -3765,7 +3851,7 @@ const PublishPlatformPicker: React.FC<{
 };
 
 // 发布账号(矩阵)精简结构:富信息下拉用。
-type MatrixAcctLite = { id: string; platform: string; displayName: string; status: string; nickname?: string; displayId?: string; avatar?: string };
+type MatrixAcctLite = { id: string; platform: string; displayName: string; status: string; nickname?: string; displayId?: string; avatar?: string; loginScope?: string; group?: string; persona?: string; keywords?: string[] };
 const MATRIX_PLAT_ZH: Record<string, string> = { douyin: '抖音', xhs: '小红书', bilibili: 'B站', kuaishou: '快手', tiktok: 'TikTok', x: 'X', binance: '币安广场', youtube: 'YouTube', shipinhao: '视频号', toutiao: '头条' };
 // 单个账号行(头像 + 昵称 + 平台号 + 备注 + 登录状态);未登录连接(login_required)置灰。
 const MatrixAcctRow: React.FC<{ isZh: boolean; a: MatrixAcctLite }> = ({ isZh, a }) => {
