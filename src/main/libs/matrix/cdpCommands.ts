@@ -89,26 +89,35 @@ export async function matrixCmd(
       return { ok: true, url: String(url || ''), value: url };
     }
 
-    // 下载图片为 base64(图文创作网络图模式用)。在【内核页面主世界】fetch:页面在 douyin.com 上时
-    // Referer 自动是 douyin.com → 满足 douyinpic CDN 防盗链(等同用户自己看图),优于 node 侧 undici(不带 referer)。
+    // 下载图片为 base64(图文创作网络图模式用)。⚠️ 必须走【主进程 Node fetch】而非内核页面 fetch:
+    //   页面里跨域抓 douyinpic/xhscdn CDN 图会被 CORS 拦死(读不了跨域响应体,报 "Failed to fetch")—
+    //   旧单账号版靠扩展 background fetch 绕 CORS,矩阵这边用 Node fetch(无 CORS)+ Referer 防盗链等效。
     // 返回 { base64, mimeType } 或 { error }(orchestrator 读 rRes.result||rRes 再取 .base64/.mimeType/.error)。
     case 'fetch_image': {
       const url = String(params?.url || '');
-      if (!url) return { error: 'url required' };
-      const expr = `(async function(){try{`
-        + `var r=await fetch(${JSON.stringify(url)},{credentials:'include',referrer:${JSON.stringify(String(params?.referrer || 'https://www.douyin.com/'))}});`
-        + `if(!r.ok)return JSON.stringify({error:'http_'+r.status});`
-        + `var ct=r.headers.get('content-type')||'';`
-        + `var ab=await r.arrayBuffer();var by=new Uint8Array(ab),bin='';for(var i=0;i<by.length;i++)bin+=String.fromCharCode(by[i]);`
-        + `return JSON.stringify({base64:btoa(bin),mimeType:ct.split(';')[0]||''});`
-        + `}catch(e){return JSON.stringify({error:String(e&&e.message||e).slice(0,80)});}})()`;
+      if (!url || !/^https?:\/\//i.test(url)) return { error: 'invalid_url' };
+      const referrer = String(params?.referrer || 'https://www.douyin.com/');
+      const maxBytes = Number(params?.maxBytes) || 8 * 1024 * 1024;
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), 30000);
       try {
-        const raw = await kernelEval(accountId, expr);
-        const parsed: any = JSON.parse(String(raw || '{}'));
-        return parsed; // { base64, mimeType } | { error }
+        const resp = await fetch(url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            Referer: referrer,
+            Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+          },
+          signal: ctrl.signal,
+        });
+        if (!resp.ok) return { error: 'http_' + resp.status };
+        const ct = resp.headers.get('content-type') || '';
+        const buf = Buffer.from(await resp.arrayBuffer());
+        if (!buf.length) return { error: 'empty_body' };
+        if (buf.length > maxBytes) return { error: 'too_large' };
+        return { base64: buf.toString('base64'), mimeType: (ct.split(';')[0] || '').trim() };
       } catch (e: any) {
         return { error: 'fetch_image_failed:' + String(e?.message || e).slice(0, 80) };
-      }
+      } finally { clearTimeout(to); }
     }
 
     // 多图上传(图文创作发布用)。扩展版收 base64 数组,矩阵走 CDP DOM.setFileInputFiles(只认磁盘路径),
