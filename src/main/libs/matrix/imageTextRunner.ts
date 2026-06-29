@@ -137,7 +137,7 @@ function referenceToSegments(ref: string | undefined): string[] {
   return String(ref).split(/\n{2,}|\r\n\r\n/).map((s) => s.trim()).filter((s) => s.length > 0);
 }
 
-async function runOne(opts: ImageTextTaskOptions, pack: any, accountId: string): Promise<EngageItemResult> {
+async function runOne(opts: ImageTextTaskOptions, pack: any, accountId: string, downloadAccountId?: string): Promise<EngageItemResult> {
   const acc = getAccount(accountId);
   const cfg = opts.config;
   const log = (m: string) => { try { opts.onLog?.(accountId, m); } catch { /* ignore */ } };
@@ -212,6 +212,15 @@ async function runOne(opts: ImageTextTaskOptions, pack: any, accountId: string):
       navigate: async (url: string) => { await kernelNavigate(accountId, url); },
       scroll: (amount?: number) => matrixCmd(accountId, 'scroll', { amount: amount || randInt(2, 4) }),
     };
+    // 网络图下图 tab(仅视频号/头条网络图模式有):routed 到【抖音下图内核】(已登录抖音的号),
+    // orchestrator 的 _douyinTab 走它在抖音登录态搜图 + fetch_image,与发布号(taskTab)分开。
+    // 下图内核由 runImageTextTask 统一启停(整任务串行共用一个),这里只路由命令。
+    const downloadTab: any = downloadAccountId ? {
+      id: 'douyin_dl',
+      browser: (command: string, params?: any, timeout?: number) => matrixCmd(downloadAccountId, command, params, timeout),
+      navigate: async (url: string) => { await kernelNavigate(downloadAccountId, url); },
+      scroll: (amount?: number) => matrixCmd(downloadAccountId, 'scroll', { amount: amount || randInt(2, 4) }),
+    } : null;
 
     const doCharge = async (a: string, p: string, r?: string) => {
       const res: any = await chargeAction(authToken, a, p, r);
@@ -268,7 +277,15 @@ async function runOne(opts: ImageTextTaskOptions, pack: any, accountId: string):
       browser: browserFn,
       navigate: (url: string) => kernelNavigate(accountId, url),
       scroll: (amount?: number) => matrixCmd(accountId, 'scroll', { amount: amount || randInt(2, 4) }),
-      openTab: async (o: any) => { if (o?.url) { await kernelNavigate(accountId, o.url); await sleep(1500); } return taskTab; },
+      // platform:'douyin' 的 tab(网络图借抖音搜图)→ 路由到抖音下图内核;其它(发布 tab)→ 本发布号内核。
+      openTab: async (o: any) => {
+        if (o?.platform === 'douyin' && downloadTab && downloadAccountId) {
+          if (o?.url) { await kernelNavigate(downloadAccountId, o.url); await sleep(1500); }
+          return downloadTab;
+        }
+        if (o?.url) { await kernelNavigate(accountId, o.url); await sleep(1500); }
+        return taskTab;
+      },
       getTaskTab: async () => taskTab,
       report: (m: string) => { log(m); try { coworkLog('INFO', 'imageText', `[${accountId}] ${m}`); } catch { /* ignore */ } },
       stepStart: (s: number) => log('▶ 步骤 ' + s),
@@ -360,7 +377,6 @@ export async function runImageTextTask(opts: ImageTextTaskOptions): Promise<Enga
   if (!opts.kernelPath && !installedKernelPath()) {
     throw new Error(`${NO_KERNEL_ERROR}: 指纹浏览器内核未安装,请先到「我的矩阵账号」下载内核`);
   }
-  const k = Math.max(1, Math.min(opts.concurrency ?? 3, 10));
   const scenarioId = `${opts.platform}_image_text`;
   const pack = await fetchPack(scenarioId);
   if (!pack || !pack.orchestrator) {
@@ -369,8 +385,34 @@ export async function runImageTextTask(opts: ImageTextTaskOptions): Promise<Enga
       items: opts.accountIds.map((id) => ({ accountId: id, state: 'skipped' as const, reason: 'no_scenario(后端未部署?)' })),
     };
   }
-  coworkLog('INFO', 'imageTextRunner', `image_text ${opts.platform} x${opts.accountIds.length} (${scenarioId})`);
-  const items = await runPool(opts.accountIds, k, (id) => runOne(opts, pack, id), opts.onItem);
+  // 网络图 + 指定了抖音下图号(视频号/头条用):视频号/头条浏览器没登录抖音、游客搜图拿不到 → 统一启 1 个
+  // 【抖音下图内核】,各发布号 openTab({platform:'douyin'}) 路由到它在抖音登录态搜图;一个抖音号服务 N 个
+  // 发布号 → 整任务【串行】(k=1)。AI生图 / 抖音·小红书(自己浏览器搜本平台)不走这条,照常并行。
+  const dlAcct = (opts.config?.useRealPhotos && opts.config?.imageDownloadAccountId) ? opts.config.imageDownloadAccountId : undefined;
+  let k = Math.max(1, Math.min(opts.concurrency ?? 3, 10));
+  if (dlAcct) {
+    k = 1;
+    const dl = getAccount(dlAcct);
+    if (!dl) {
+      coworkLog('WARN', 'imageTextRunner', `download account ${dlAcct} not found — web images will fall back to AI`);
+    } else {
+      try {
+        await launchKernel({
+          accountId: dlAcct, kernelPath: opts.kernelPath, kernelVersion: dl.kernelVersion,
+          userDataDir: dl.userDataDir, fingerprint: dl.fingerprint, proxy: dl.proxy,
+          label: accountBadgeLabel(dl), groupTitle: matrixGroupTitle('douyin', opts.taskId),
+        });
+        await kernelNavigate(dlAcct, 'https://www.douyin.com/');
+        await sleep(2000);
+        let dlLoggedIn = true;
+        try { dlLoggedIn = await checkKernelLogin(dlAcct, 'douyin'); } catch { dlLoggedIn = true; }
+        if (!dlLoggedIn) coworkLog('WARN', 'imageTextRunner', `download account ${dlAcct} douyin not logged in — web image search may fail (orchestrator falls back to AI images)`);
+      } catch (e) { coworkLog('WARN', 'imageTextRunner', 'launch download kernel failed', { err: String(e) }); }
+    }
+  }
+  coworkLog('INFO', 'imageTextRunner', `image_text ${opts.platform} x${opts.accountIds.length} (${scenarioId})${dlAcct ? ' +dl:' + dlAcct + ' (serial)' : ''}`);
+  const items = await runPool(opts.accountIds, k, (id) => runOne(opts, pack, id, dlAcct), opts.onItem);
+  if (dlAcct) { try { closeKernel(dlAcct); } catch { /* ignore */ } }
   return {
     platform: opts.platform, total: items.length,
     success: items.filter((x) => x.state === 'success').length,

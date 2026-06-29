@@ -219,6 +219,8 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   const [matrixImageTextPlatform, setMatrixImageTextPlatform] = useState<string | null>(null);
   const [matrixImageTextAccounts, setMatrixImageTextAccounts] = useState<WizardAccount[]>([]);
   const [matrixImageTextAccountsLoading, setMatrixImageTextAccountsLoading] = useState(false);
+  // 视频号/头条网络图用的「抖音下图号」候选(已登录抖音的主站号),传给 MatrixImageTextWizard。
+  const [matrixImageTextDownloadAccounts, setMatrixImageTextDownloadAccounts] = useState<WizardAccount[]>([]);
   const [matrixImageTextTask, setMatrixImageTextTask] = useState<any | null>(null);
   // 「爆款批量仿写」向导(多账号:勾选 N 个号 + 篇数/AI风格/发布)。
   const [matrixViralPlatform, setMatrixViralPlatform] = useState<string | null>(null);
@@ -418,7 +420,9 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       const r = await (window as any).electron?.matrix?.listAccounts?.();
       const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
       setMatrixImageTextAccounts(accs.filter((a) => replyAccountFilter(a, platform)).map(mapWizardAccount));
-    } catch { setMatrixImageTextAccounts([]); }
+      // 抖音下图号候选(视频号/头条网络图用):已登录抖音的主站号。
+      setMatrixImageTextDownloadAccounts(accs.filter((a) => a.platform === 'douyin' && (a.loginScope || 'main') === 'main').map(mapWizardAccount));
+    } catch { setMatrixImageTextAccounts([]); setMatrixImageTextDownloadAccounts([]); }
     finally { setMatrixImageTextAccountsLoading(false); }
     setMatrixImageTextTask(null);
     setMatrixImageTextPlatform(platform);
@@ -440,7 +444,8 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       const r = await (window as any).electron?.matrix?.listAccounts?.();
       const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
       setMatrixImageTextAccounts(accs.filter((a) => replyAccountFilter(a, plat)).map(mapWizardAccount));
-    } catch { setMatrixImageTextAccounts([]); }
+      setMatrixImageTextDownloadAccounts(accs.filter((a) => a.platform === 'douyin' && (a.loginScope || 'main') === 'main').map(mapWizardAccount));
+    } catch { setMatrixImageTextAccounts([]); setMatrixImageTextDownloadAccounts([]); }
     finally { setMatrixImageTextAccountsLoading(false); }
   };
   const saveMatrixImageTextTask = async (input: ImageTextWizardSave) => {
@@ -454,6 +459,8 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       aiImageStyle: input.aiImageStyle,
       autoPublish: input.autoPublish,
       references: input.references,
+      // 视频号/头条网络图:抖音下图号(runner 据此启抖音内核串行搜图);其它平台/AI生图为 undefined。
+      imageDownloadAccountId: input.imageDownloadAccountId,
     };
     const r = await m?.saveTask?.({ id: matrixImageTextTask?.id, platform: matrixImageTextPlatform, type: 'image_text', name: input.name, accountIds: input.accountIds, imageText, quota: {}, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
     if (!r?.ok) throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限', duplicate_type: '该平台已有同类型(图文创作)任务,直接编辑它即可' } as any)[r?.error] || r?.error || '保存失败');
@@ -1660,6 +1667,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
               platform={matrixImageTextPlatform}
               accounts={matrixImageTextAccounts}
               accountsLoading={matrixImageTextAccountsLoading}
+              downloadAccounts={matrixImageTextDownloadAccounts}
               initialTask={matrixImageTextTask}
               onCancel={() => { setMatrixImageTextPlatform(null); setMatrixImageTextTask(null); }}
               onSave={saveMatrixImageTextTask}

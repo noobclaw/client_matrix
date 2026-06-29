@@ -40,6 +40,7 @@ export interface ImageTextWizardSave {
   autoPublish: boolean;
   references: Record<string, string>;   // 各号各自参考文案(键=accountId,值可留空);空则该号按身份生成
   // 每号每轮固定 1 篇,不再让用户调篇数。
+  imageDownloadAccountId?: string;       // 仅视频号/头条 + 网络图:抖音下图号(用其登录态搜抖音图)
 }
 
 interface Props {
@@ -47,15 +48,19 @@ interface Props {
   platform?: string;
   accounts: WizardAccount[];
   accountsLoading?: boolean;
+  downloadAccounts?: WizardAccount[];    // 仅视频号/头条 + 网络图:可选的抖音下图号(已登录抖音的号)
   initialTask?: any | null;
   onCancel: () => void;
   onSave: (input: ImageTextWizardSave) => Promise<void> | void;
 }
 
-const MatrixImageTextWizard: React.FC<Props> = ({ platformLabel, platform, accounts, accountsLoading, initialTask, onCancel, onSave }) => {
+const MatrixImageTextWizard: React.FC<Props> = ({ platformLabel, platform, accounts, accountsLoading, downloadAccounts, initialTask, onCancel, onSave }) => {
   const isZh = i18nService.currentLanguage === 'zh';
   const editing = !!initialTask;
   const [step, setStep] = useState<WizardStep>(1);
+  // 视频号/头条本身没图文搜索 → 网络图要借【已登录抖音的号】搜+下图(一个抖音号服务 N 个发布号·串行)。
+  const needsDownloadAccount = platform === 'shipinhao' || platform === 'toutiao';
+  const dlAccts = downloadAccounts || [];
 
   // ── 多选账号 ──(默认勾选所有「就绪」号)
   const [selectedIds, setSelectedIds] = useState<string[]>(() => {
@@ -70,6 +75,12 @@ const MatrixImageTextWizard: React.FC<Props> = ({ platformLabel, platform, accou
   const [imageCount, setImageCount] = useState<number>(Math.max(2, Math.min(6, Number(it.imageCount) || (it.useRealPhotos ? 6 : 4))));
   const [aiImageStyle, setAiImageStyle] = useState<string>(it.aiImageStyle || 'ai_auto');
   const [autoPublish, setAutoPublish] = useState<boolean>(it.autoPublish !== false); // 默认群发
+  // 抖音下图号(仅视频号/头条网络图用):默认回填上次选的,否则首个就绪抖音号。
+  const [downloadAccountId, setDownloadAccountId] = useState<string>(() => {
+    if (it.imageDownloadAccountId) return String(it.imageDownloadAccountId);
+    const first = (downloadAccounts || []).find((a) => a.status !== 'banned' && a.status !== 'login_required');
+    return first ? first.id : '';
+  });
   // 各号各自的参考文案(键=accountId,可留空)。
   const [references, setReferences] = useState<Record<string, string>>(() => {
     const refs = (it.references || {}) as Record<string, unknown>;
@@ -98,7 +109,9 @@ const MatrixImageTextWizard: React.FC<Props> = ({ platformLabel, platform, accou
     2: { ok: true }, // 参考文案全选填,随时可下一步
     3: useRealPhotos && selectedNoKeyword.length > 0
       ? { ok: false, reason: `网络图模式需要每个号都配关键词,有 ${selectedNoKeyword.length} 个号未配(到「我的矩阵账号」编辑里加)` }
-      : { ok: true },
+      : (useRealPhotos && needsDownloadAccount && !downloadAccountId)
+        ? { ok: false, reason: `${platformLabel}本身搜不到网络图 → 请选 1 个【已登录抖音】的号当下图号(没有就先去「我的矩阵账号」加个抖音号)` }
+        : { ok: true },
     4: { ok: allTermsAccepted, reason: isZh ? '请勾选使用条款' : 'Please accept the terms' },
   };
 
@@ -122,6 +135,8 @@ const MatrixImageTextWizard: React.FC<Props> = ({ platformLabel, platform, accou
         aiImageStyle,
         autoPublish,
         references: refsOut,
+        // 仅视频号/头条网络图带上下图号(其它平台/AI生图不需要)。
+        imageDownloadAccountId: (useRealPhotos && needsDownloadAccount && downloadAccountId) ? downloadAccountId : undefined,
       });
     } catch (err) {
       setSaveError(String(err instanceof Error ? err.message : err) || (isZh ? '保存失败' : 'Save failed'));
@@ -239,6 +254,27 @@ const MatrixImageTextWizard: React.FC<Props> = ({ platformLabel, platform, accou
               </div>
               {useRealPhotos && selectedNoKeyword.length > 0 && (
                 <div className="text-[11px] text-amber-500 mt-1.5">⚠ 有 {selectedNoKeyword.length} 个选中号没配关键词,网络图模式下它们会被跳过</div>
+              )}
+              {useRealPhotos && needsDownloadAccount && (
+                <div className="mt-3">
+                  <label className="text-sm font-medium dark:text-gray-200 mb-1.5 block">
+                    🔻 抖音下图号<span className="text-xs text-gray-400 font-normal ml-1">· {platformLabel}本身搜不到网络图,用 1 个【已登录抖音】的号搜+下图喂给各号(一号服务多号 · 整任务串行)</span>
+                  </label>
+                  {dlAccts.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-700 p-2.5 text-center">
+                      <div className="text-xs text-gray-400 mb-1.5">没有可用的抖音号。先去「我的矩阵账号」加一个并扫码登录抖音。</div>
+                      <button type="button" onClick={() => { window.dispatchEvent(new CustomEvent('noobclaw:show-matrix-accounts', { detail: { platform: 'douyin' } })); onCancel(); }} className="text-[11px] text-emerald-500 underline decoration-dotted hover:text-emerald-400">去添加抖音号 →</button>
+                    </div>
+                  ) : (
+                    <select value={downloadAccountId} onChange={(e) => setDownloadAccountId(e.target.value)} disabled={saving} className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
+                      <option value="">— 选一个抖音号 —</option>
+                      {dlAccts.map((a) => {
+                        const ready = a.status !== 'banned' && a.status !== 'login_required';
+                        return <option key={a.id} value={a.id} disabled={!ready}>{(a.nickname || a.displayName)}{a.displayId ? ` · 抖音号 ${a.displayId}` : ''}{ready ? '' : '(未连接)'}</option>;
+                      })}
+                    </select>
+                  )}
+                </div>
               )}
             </div>
 
