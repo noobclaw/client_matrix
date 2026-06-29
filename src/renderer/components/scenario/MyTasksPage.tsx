@@ -791,6 +791,10 @@ export const MyTasksPage: React.FC<Props> = ({ tasks, scenarios, loading, platfo
                       );
                     }
                     const keys = Object.keys(effectiveInfo.data).filter(k => {
+                      // post 系(图文创作/爆款仿写/发帖)不做互动 → 丢掉恒 0 的赞/关/评/订阅,只留 post;
+                      // 下载系只留 download。否则 action_counts 恒含 {like:0,follow:0,comment:0} 会误显「赞/关/评」。
+                      if (isPostScenario && k !== 'post') return false;
+                      if (isDownloadScenario && k !== 'download') return false;
                       if (effectiveInfo.mode === 'running') {
                         const v = (effectiveInfo.data as any)[k];
                         return (v?.target || 0) > 0 || (v?.done || 0) > 0;

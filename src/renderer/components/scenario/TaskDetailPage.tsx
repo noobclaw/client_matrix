@@ -1839,6 +1839,7 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
                           if (/_reply_fans_comment$/.test(sid)) return <>💬 {ap.comment?.done ?? 0} {isZh ? '回复' : 'replies'}</>;
                           if (/_video_download$/.test(sid)) return <span className="text-gray-400 font-sans">⬇️ {isZh ? '视频下载' : 'Video download'}</span>;
                           if (/_image_text$/.test(sid)) return <span className="text-gray-400 font-sans">📝 {isZh ? '图文创作' : 'Image-text'}</span>;
+                          if (/_viral_production_career$/.test(sid)) return <span className="text-gray-400 font-sans">🔥 {isZh ? '爆款仿写' : 'Viral rewrite'}</span>;
                           if (sid === 'x_post') return <span className="text-gray-400 font-sans">🐦 {isZh ? '发推' : 'Tweet'}</span>;
                           return <>👍 {ap.like?.done ?? 0}/{ap.like?.target ?? 0} · ➕ {ap.follow?.done ?? 0}/{ap.follow?.target ?? 0} · 💬 {ap.comment?.done ?? 0}/{ap.comment?.target ?? 0}</>;
                         })()}
@@ -2068,6 +2069,12 @@ function formatActionBreakdown(
   // 图文创作(*_image_text):只产生「发帖数」,累计/上次完成显示 📤 N 发帖,绝不显示赞/关注/评论
   //   —— action_counts 恒含 {like:0,follow:0,comment:0},不早返回会落到下面的互动 breakdown 误显。
   if (/_image_text$/.test(sid)) {
+    const posts = counts && typeof counts.post === 'number' ? counts.post : 0;
+    return `📤 ${posts} ${isZh ? '发帖' : 'posts'}`;
+  }
+  // 爆款批量仿写(*_viral_production_career):内容创作任务,产出=发布篇数,显示 📤 N 发帖,
+  //   绝不显示赞/关注/评论(它不是互动涨粉)。同 image_text,action_counts 恒含 {like:0,...} 不早返回会误显。
+  if (/_viral_production_career$/.test(sid)) {
     const posts = counts && typeof counts.post === 'number' ? counts.post : 0;
     return `📤 ${posts} ${isZh ? '发帖' : 'posts'}`;
   }
