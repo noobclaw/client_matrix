@@ -97,10 +97,21 @@ export interface ImageTextConfig {
   references?: Record<string, string>; // 可选:各账号参考文案 { accountId: text };不填则按身份合成种子
 }
 
+/**
+ * 「爆款批量仿写」(viral_rewrite)任务配置(目前仅小红书)。N 个号各自用【自己的赛道/关键词/人设】
+ * 去小红书搜本 niche 爆款 → 维度化创意引擎仿写 → AI 生图 → 发布。来源=每号关键词搜(沿用账号已配)。
+ */
+export interface ViralRewriteConfig {
+  dailyCount: number;            // 每号每轮仿写几篇 1-50
+  aiImageStyle?: string;         // AI 生图风格(缺省 'ai_auto')
+  autoPublish: boolean;          // true=直接发布(坐标),false=仅本地保存
+}
+
 // 互动(点赞/评论/关注)= engage;自动回复粉丝评论 = reply_fan(抖音创作者中心评论管理);
 // 视频无水印下载 = video_download(单账号:选 1 个号 + 粘贴多个链接,逐个下载,不多开);
-// 图文创作 = image_text(N 个号各自按身份生成图文 + 配图 + 发到各自创作者中心)。
-export type MatrixTaskType = 'engage' | 'reply_fan' | 'video_download' | 'image_text';
+// 图文创作 = image_text(N 个号各自按身份生成图文 + 配图 + 发到各自创作者中心);
+// 爆款批量仿写 = viral_rewrite(N 个号各自按关键词搜小红书爆款 → 仿写 → AI 生图 → 发布)。
+export type MatrixTaskType = 'engage' | 'reply_fan' | 'video_download' | 'image_text' | 'viral_rewrite';
 // 频率枚举对齐老客户端 DouyinConfigWizard(便于复用频率算法/文案)。
 export type MatrixTaskFrequency = 'once' | '30min' | '1h' | '3h' | '6h' | 'daily_random';
 
@@ -118,6 +129,7 @@ export interface MatrixTask {
   quota: EngageQuota;              // 仅 engage 用;reply_fan / video_download 任务为空对象
   funnel?: ReplyFanConfig;         // 仅 reply_fan 用:引流尾巴配置
   imageText?: ImageTextConfig;     // 仅 image_text 用:图文创作配置
+  viralRewrite?: ViralRewriteConfig; // 仅 viral_rewrite 用:爆款仿写配置
   urls?: string[];                 // 仅 video_download 用:用户粘贴的待下载视频链接清单
   concurrency?: number;            // 同时开窗数(video_download 固定 1,单账号顺序下载)
   frequency: MatrixTaskFrequency;  // 运行频率

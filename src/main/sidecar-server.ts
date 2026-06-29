@@ -225,7 +225,7 @@ async function runMatrixTaskById(taskId: string, kernelPath?: string): Promise<{
   if (!task) return { ok: false, error: 'task_not_found' };
   // engage(互动涨粉)+ reply_fan(自动回复粉丝评论)都由 engageRunner 跑(共用内核/登录/进度链路,
   // 仅剧本与 task 字段不同)。其它类型未支持。
-  if (task.type !== 'engage' && task.type !== 'reply_fan' && task.type !== 'video_download' && task.type !== 'image_text') return { ok: false, error: 'unsupported_task_type' };
+  if (task.type !== 'engage' && task.type !== 'reply_fan' && task.type !== 'video_download' && task.type !== 'image_text' && task.type !== 'viral_rewrite') return { ok: false, error: 'unsupported_task_type' };
   const platform = task.platform;
   if (runningPlatforms.has(platform)) return { ok: false, error: 'another_task_running' };       // 同平台已在跑
   if (runningPlatforms.size >= MATRIX_MAX_CONCURRENT) return { ok: false, error: 'concurrency_full' }; // 并发已满
@@ -237,6 +237,7 @@ async function runMatrixTaskById(taskId: string, kernelPath?: string): Promise<{
   try {
     const { runEngageTask } = await import('./libs/matrix/engageRunner');
     const { runImageTextTask } = await import('./libs/matrix/imageTextRunner');
+    const { runViralRewriteTask } = await import('./libs/matrix/viralRewriteRunner');
     const { addRun } = await import('./libs/matrix/runStore');
     const { getAccount } = await import('./libs/matrix/accountManager');
     const startedAt = Date.now();
@@ -283,6 +284,7 @@ async function runMatrixTaskById(taskId: string, kernelPath?: string): Promise<{
     const isReplyFan = task.type === 'reply_fan';
     const isVideoDownload = task.type === 'video_download';
     const isImageText = task.type === 'image_text';
+    const isViralRewrite = task.type === 'viral_rewrite';
     // 三个进度回调:image_text 与 engage 共用同款签名(EngageItemResult / EngageReport),闭包零改动复用。
     const cbOnLog = (accountId: string, msg: string) => { pushLog(accountId, msg); broadcastSSE('matrix:progress', { type: 'log', accountId, msg, taskId: task.id }); };
     const cbOnTargets = (accountId: string, t: { like?: number; follow?: number; comment?: number }) => {
@@ -310,7 +312,13 @@ async function runMatrixTaskById(taskId: string, kernelPath?: string): Promise<{
         broadcastSSE('matrix:progress', { type: 'item', accountId: item.accountId, state: item.state, reason: item.reason, counts: item.counts, chargedCredits: item.chargedCredits, chargedUsd: item.chargedUsd, taskId: task.id });
     };
 
-    const runP: Promise<any> = isImageText
+    const runP: Promise<any> = isViralRewrite
+      ? runViralRewriteTask({
+          platform: task.platform, taskId: task.id, accountIds: accIds, config: task.viralRewrite as any,
+          concurrency: task.concurrency, kernelPath, signal: abort.signal,
+          onLog: cbOnLog, onTargets: cbOnTargets, onItem: cbOnItem,
+        })
+      : isImageText
       ? runImageTextTask({
           platform: task.platform, taskId: task.id, accountIds: accIds, config: task.imageText as any,
           concurrency: task.concurrency, kernelPath, signal: abort.signal,
