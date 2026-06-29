@@ -6,14 +6,17 @@
  *   内容来源二选一:web3 资讯深度创作(抓近 3 周热点 → 紧贴资讯原创)/ 按账号身份自由创作。
  *
  *   Step 1 — 勾选 N 个账号(多选)
- *   Step 2 — 内容来源 + 语言 + 蓝V + 配图(free 模式可给每号填参考文案)
- *   Step 3 — 运行频率 + 摘要 + 条款
+ *   Step 2 — 内容来源 + 各号参考文案(free 模式各号独立一段,独立滚动区;web3 模式无参考文案)
+ *   Step 3 — 写作语言 + 配图 + 蓝V + 生成后(发布方式)
+ *   Step 4 — 运行频率 + 摘要 + 条款
+ *
+ *   参考文案拆成独立一步(不与其它设置同屏),账号多时也不挤。
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { i18nService } from '../../services/i18n';
 
-type WizardStep = 1 | 2 | 3;
+type WizardStep = 1 | 2 | 3 | 4;
 
 export interface WizardAccount { id: string; displayName: string; status: string; keywords?: string[]; group?: string; platform?: string; nickname?: string; displayId?: string; avatar?: string }
 
@@ -81,12 +84,13 @@ const MatrixTweetPostWizard: React.FC<Props> = ({ platformLabel, platform, accou
   const canAdvance: Record<WizardStep, { ok: boolean; reason?: string }> = {
     1: { ok: selectedIds.length > 0, reason: isZh ? '请至少勾选一个已登录账号' : 'Select at least one account' },
     2: { ok: true },
-    3: { ok: allTermsAccepted, reason: isZh ? '请勾选使用条款' : 'Please accept the terms' },
+    3: { ok: true },
+    4: { ok: allTermsAccepted, reason: isZh ? '请勾选使用条款' : 'Please accept the terms' },
   };
 
   const handleSave = async () => {
     if (saving) return;
-    if (!canAdvance[3].ok) { setSaveError(canAdvance[3].reason || ''); return; }
+    if (!canAdvance[4].ok) { setSaveError(canAdvance[4].reason || ''); return; }
     if (selectedIds.length === 0) { setSaveError(canAdvance[1].reason || ''); return; }
     setSaving(true);
     try {
@@ -122,7 +126,7 @@ const MatrixTweetPostWizard: React.FC<Props> = ({ platformLabel, platform, accou
       <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-800 shrink-0">
         <div className="text-base font-semibold dark:text-white">🐦 {editing ? '编辑推特自动发推任务' : '配置推特自动发推'}</div>
         <div className="flex items-center gap-3">
-          <span className="text-xs px-2.5 py-1 rounded-full border border-sky-500/40 text-sky-500 bg-sky-500/5">第 {step} / 3 步</span>
+          <span className="text-xs px-2.5 py-1 rounded-full border border-sky-500/40 text-sky-500 bg-sky-500/5">第 {step} / 4 步</span>
           <button type="button" onClick={onCancel} disabled={saving} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">✕</button>
         </div>
       </div>
@@ -197,7 +201,7 @@ const MatrixTweetPostWizard: React.FC<Props> = ({ platformLabel, platform, accou
             {mode === 'free' && (
               <div>
                 <label className="text-sm font-medium dark:text-gray-200 mb-1.5 block">📄 各号参考文案<span className="text-xs text-gray-400 font-normal ml-1">· 均可留空,留空则按本号身份生成</span></label>
-                <div className="space-y-2.5 max-h-52 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 p-2">
+                <div className="space-y-2.5 max-h-80 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700 p-2">
                   {selectedIds.map((id) => {
                     const a = accounts.find((x) => x.id === id);
                     const title = a?.nickname || a?.displayName || id;
@@ -216,6 +220,16 @@ const MatrixTweetPostWizard: React.FC<Props> = ({ platformLabel, platform, accou
               </div>
             )}
 
+            {mode === 'web3' && (
+              <div className="rounded-lg border px-3 py-2 text-[11px] leading-relaxed border-sky-500/20 bg-sky-500/5 text-sky-700 dark:text-sky-300">
+                📰 web3 资讯模式按热点资讯原创,<strong>无需参考文案</strong>;直接「下一步」设置语言 / 配图 / 发布即可。
+              </div>
+            )}
+          </>
+        )}
+
+        {step === 3 && (
+          <>
             <div>
               <label className="text-sm font-medium dark:text-gray-200 mb-1.5 block">🌐 写作语言</label>
               <div className="flex gap-2 flex-wrap">
@@ -258,7 +272,7 @@ const MatrixTweetPostWizard: React.FC<Props> = ({ platformLabel, platform, accou
           </>
         )}
 
-        {step === 3 && (
+        {step === 4 && (
           <>
             <div>
               <label className="text-sm font-medium dark:text-gray-200 mb-2 block">⏰ 运行频率</label>
@@ -303,7 +317,7 @@ const MatrixTweetPostWizard: React.FC<Props> = ({ platformLabel, platform, accou
         <button type="button" onClick={onCancel} disabled={saving} className="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 px-2">取消</button>
         <div className="flex-1" />
         {step > 1 && <button type="button" onClick={() => setStep((step - 1) as WizardStep)} disabled={saving} className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50">← 上一步</button>}
-        {step < 3 ? (
+        {step < 4 ? (
           <button type="button" onClick={() => { if (!canAdvance[step].ok) { setSaveError(canAdvance[step].reason || ''); return; } setSaveError(null); setStep((step + 1) as WizardStep); }} disabled={saving} className="px-4 py-2 rounded-lg text-sm font-semibold bg-sky-500 text-white hover:bg-sky-600 disabled:opacity-50">下一步 →</button>
         ) : (
           <button type="button" onClick={handleSave} disabled={saving || !allTermsAccepted} className="px-5 py-2 rounded-lg text-sm font-semibold bg-sky-500 text-white hover:bg-sky-600 disabled:opacity-50">{saving ? '保存中...' : (editing ? '✓ 保存修改' : '🐦 创建任务')}</button>
