@@ -2706,6 +2706,17 @@ const VideoConfigModal: React.FC<{
       setKeywords((a.keywords || []).join(' '));
     }
   };
+  // 新建:账号加载完默认选中第一个(平台→第一个号)→ 身份面板常驻、弹窗高度固定;编辑保留已存身份不覆盖。
+  useEffect(() => {
+    if (!matrixMode || isEdit || identityAccountId) return;
+    const first = matrixAccounts[0];
+    if (!first) return;
+    setIdentityPlatform(first.platform);
+    setIdentityAccountId(first.id);
+    setMatrixTrack(first.group || '');
+    setPersona(first.persona || '');
+    setKeywords((first.keywords || []).join(' '));
+  }, [matrixMode, isEdit, identityAccountId, matrixAccounts]);
   const matrixAccountsReady = !matrixMode || outputMode !== 'upload'
     || selectedPlatformIds.every((p) => !!accountByPlatform[p] && accountsFor(p).some((a) => a.id === accountByPlatform[p] && a.status !== 'login_required'));
 
