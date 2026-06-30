@@ -73,6 +73,10 @@ const MembershipPanel: React.FC<{ onPay?: (planCode: string, period: Period, cha
   const plans = cfg?.plans || [];
   const cur = cfg?.current;
   const curCode = cur?.planCode || 'free';
+  // 只升级不降级:订阅有效时,低于当前档的卡片置灰不可买;当前档=续费、更高档=升级。
+  //   未订阅/已过期 → 视同免费档(order 0),所有付费档都可选(「到期回免费版又都能选」)。
+  const subActive = !!cur?.subActive;
+  const curOrder = subActive ? (plans.find(p => p.code === curCode)?.sort_order ?? 0) : 0;
 
   // 订阅下单交给 WalletView,复用「购买积分」那套支付步骤(QR/倒计时/轮询/取消)。失败回错误串在此显示。
   const subscribe = async (planCode: string) => {
@@ -135,6 +139,9 @@ const MembershipPanel: React.FC<{ onPay?: (planCode: string, period: Period, cha
         {sorted.map(plan => {
           const isFree = plan.code === 'free';
           const isCur = plan.code === curCode;
+          const isCurActive = subActive && isCur;          // 当前档(订阅有效)→ 续费
+          const isLower = subActive && plan.sort_order < curOrder; // 低于当前档 → 不可降级(置灰)
+          const cta = isCurActive ? '续费' : (subActive ? '升级' : '订阅');
           const isRec = plan.code === RECOMMENDED;
           const price = plan.prices?.[period];
           const tier = TIER_COLOR[plan.code] || '#9aa0aa';
@@ -148,7 +155,7 @@ const MembershipPanel: React.FC<{ onPay?: (planCode: string, period: Period, cha
           const hasDiscount = !isFree && discount < 0.999;
           const off = Math.round(discount * 100) / 10; // 0.7→7、0.9→9
           return (
-            <div key={plan.code} className="relative rounded-2xl p-4 flex flex-col dark:bg-claude-darkSurface bg-claude-surface"
+            <div key={plan.code} className={`relative rounded-2xl p-4 flex flex-col dark:bg-claude-darkSurface bg-claude-surface ${isLower ? 'opacity-50' : ''}`}
               style={{ border: `${isRec ? 2 : 1}px solid`, borderColor: isRec ? tier : (isCur ? tier + '88' : 'rgba(255,255,255,0.08)'), boxShadow: isRec ? `0 0 26px -10px ${tier}` : undefined }}>
               {isRec && <span className="absolute -top-2.5 right-3 px-2 py-0.5 rounded-full text-[10px] font-bold text-black whitespace-nowrap" style={{ background: tier }}>最受欢迎</span>}
               {/* 档位名 + 档位色点 + 限时折扣 */}
@@ -168,12 +175,14 @@ const MembershipPanel: React.FC<{ onPay?: (planCode: string, period: Period, cha
                 <li>· 最大 {plan.max_accounts_per_platform} 矩阵号/平台</li>
                 <li>· {isFree ? '仅基础能力' : '全部能力可用'}</li>
               </ul>
-              {isFree ? (
-                <button disabled className="mt-3 py-2 rounded-lg text-xs font-bold text-center cursor-not-allowed dark:text-claude-darkTextSecondary text-claude-textSecondary" style={{ background: 'rgba(255,255,255,0.06)' }}>{isCur ? '当前方案' : '免费'}</button>
+              {isLower ? (
+                <button disabled className="mt-3 py-2 rounded-lg text-xs font-bold text-center cursor-not-allowed dark:text-claude-darkTextSecondary text-claude-textSecondary" style={{ background: 'rgba(255,255,255,0.06)' }} title="会员只能升级,不能降级;到期回免费版后可重新选择">低于当前会员</button>
+              ) : isFree ? (
+                <button disabled className="mt-3 py-2 rounded-lg text-xs font-bold text-center cursor-not-allowed dark:text-claude-darkTextSecondary text-claude-textSecondary" style={{ background: 'rgba(255,255,255,0.06)' }}>{!subActive ? '当前方案' : '免费'}</button>
               ) : method === 'RMB' ? (
                 <div className="mt-3 py-2 text-center text-[11px] dark:text-claude-darkTextSecondary text-claude-textSecondary">CNY 请用下方兑换码</div>
               ) : (
-                <button disabled={busy} onClick={() => subscribe(plan.code)} className="mt-3 py-2 rounded-lg text-xs font-bold text-black disabled:opacity-50 hover:brightness-95" style={{ background: tier }}>{isCur ? '续费 / 升级' : '订阅'}</button>
+                <button disabled={busy} onClick={() => subscribe(plan.code)} className="mt-3 py-2 rounded-lg text-xs font-bold text-black disabled:opacity-50 hover:brightness-95" style={{ background: tier }}>{cta}</button>
               )}
             </div>
           );
