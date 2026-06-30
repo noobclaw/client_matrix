@@ -1799,15 +1799,29 @@ export class SkillManager {
 
   private getBundledSkillsRoot(): string {
     if (isPackaged()) {
-      // Search multiple candidate paths for bundled SKILLs
+      const exeDir = path.dirname(process.execPath);
+      // Tauri bundles resources via the `resources/**/*` glob, which PRESERVES
+      // the leading `resources/` segment. On Windows the resource root is the
+      // install dir, so getResourcesPath() (== <install>/resources) lines up
+      // with <...>/SKILLs directly. On macOS the resource root is already
+      // Contents/Resources, so the glob nests the payload one level deeper at
+      // Contents/Resources/resources/SKILLs while getResourcesPath() returns
+      // Contents/Resources — one segment short. Probe BOTH the root and the
+      // nested `resources/` variant so SKILLs resolve on every platform.
+      // (mirrors ffmpegRuntime.ts / nativeDesktopMac.ts dual-path walk.)
       const candidates = [
         path.resolve(getResourcesPath(), SKILLS_DIR_NAME),
+        // macOS: getResourcesPath() == Contents/Resources, payload nested under resources/
+        path.resolve(getResourcesPath(), 'resources', SKILLS_DIR_NAME),
         // Tauri: next to the sidecar binary
-        path.resolve(path.dirname(process.execPath), SKILLS_DIR_NAME),
+        path.resolve(exeDir, SKILLS_DIR_NAME),
         // Tauri: in resources subdirectory
-        path.resolve(path.dirname(process.execPath), 'resources', SKILLS_DIR_NAME),
+        path.resolve(exeDir, 'resources', SKILLS_DIR_NAME),
         // Tauri: one level up (NSIS layout)
-        path.resolve(path.dirname(process.execPath), '..', SKILLS_DIR_NAME),
+        path.resolve(exeDir, '..', SKILLS_DIR_NAME),
+        // macOS .app sibling layout (Contents/MacOS/<bin> → Contents/Resources/[resources/]SKILLs)
+        path.resolve(exeDir, '..', 'Resources', SKILLS_DIR_NAME),
+        path.resolve(exeDir, '..', 'Resources', 'resources', SKILLS_DIR_NAME),
         // Electron: inside app.asar
         path.resolve(getAppPath(), SKILLS_DIR_NAME),
       ];

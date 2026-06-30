@@ -38,7 +38,6 @@ const HomeView: React.FC<HomeViewProps> = ({
   onShowMatrix,
   onShowMatrixTaskNew,
   onShowMatrixTasks,
-  onShowInvite,
   matrixExpiredCount = 0,
 }) => {
   const isMac = window.electron.platform === 'darwin';
@@ -76,15 +75,6 @@ const HomeView: React.FC<HomeViewProps> = ({
           <WalletBadge />
         </div>
         <div className="non-draggable flex items-center gap-1 mr-1">
-          {onShowInvite && (
-            <button
-              type="button"
-              onClick={onShowInvite}
-              className="h-7 inline-flex items-center gap-1.5 px-2.5 rounded-md text-[11px] font-semibold bg-green-500/10 text-green-500 border border-green-500/40 hover:bg-green-500/20 active:scale-95 transition-colors"
-            >
-              🎁 {isZh ? '分享给好友' : 'Share'}
-            </button>
-          )}
           <button
             type="button"
             onClick={() => openExternal(OFFICIAL_SITE)}
