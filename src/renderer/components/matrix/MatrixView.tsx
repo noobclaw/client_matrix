@@ -313,7 +313,20 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
 
   // 选中版本来源:已落盘的 selectedVersion 优先(后端唯一来源),其次配置的最新版。
   // 用 prev || 不覆盖用户本会话刚选的。
-  const loadKernel = useCallback(() => { M()?.kernelStatus?.().then((r: any) => { setKernel(r || {}); setSelectedVersion((prev) => prev || r?.selectedVersion || r?.configuredVersion || ''); }); }, []);
+  const loadKernel = useCallback(() => {
+    // ① 先读本地(毫秒级,不请求服务端):有已装内核就立刻判「就绪」,避免 fetchKernels 慢时
+    //   徽章长时间「未就绪」。② 再拉完整状态(含服务端 available 版本列表),merge 补全不覆盖。
+    M()?.kernelLocalStatus?.().then((r: any) => {
+      if (r && (r.installedVersions?.length || r.installed)) {
+        setKernel((prev) => ({ ...prev, ...r }));
+        setSelectedVersion((prev) => prev || r.selectedVersion || '');
+      }
+    }).catch(() => {});
+    M()?.kernelStatus?.().then((r: any) => {
+      setKernel((prev) => ({ ...prev, ...(r || {}) }));
+      setSelectedVersion((prev) => prev || r?.selectedVersion || r?.configuredVersion || '');
+    }).catch(() => {});
+  }, []);
   useEffect(() => {
     loadKernel();
     // 下载完成 → 自动选中刚下好的版本并落盘(让它成为后续任务用的版本)。

@@ -14,6 +14,7 @@
 import React from 'react';
 import { i18nService } from '../../services/i18n';
 import { noobClawAuth } from '../../services/noobclawAuth';
+import { openWallet } from '../../services/walletNav';
 
 function formatAddr(addr: string) {
   if (!addr || addr.length <= 10) return addr || '';
@@ -53,11 +54,18 @@ export const WalletBadge: React.FC<Props> = ({ size = 'normal' }) => {
   }
 
   const low = authState.tokenBalance < 1000;
-  const subActive = authState.subActive;
-  const usedPct = Math.min(100, Math.round((authState.subUsedRatio || 0) * 100));
-  const goWallet = () => window.dispatchEvent(new CustomEvent('noobclaw:show-wallet'));
+  const isPaid = !!authState.subActive;
+  const planName = authState.planName || (isZh ? '免费版' : 'Free');
+  // 免费→「订阅会员」、付费未满级→「升级会员」、最高档(max)→灰色禁用。
+  const isMaxTier = isPaid && authState.planCode === 'max';
+  const subLabel = (!isPaid || authState.planCode === 'free') ? (isZh ? '订阅会员' : 'Subscribe') : (isZh ? '升级会员' : 'Upgrade');
+  const pillStyle: React.CSSProperties = isPaid
+    ? { padding: compact ? '2px 8px' : '3px 10px', fontSize: compact ? 10 : 11, background: 'linear-gradient(135deg,#fde68a,#f59e0b)', color: '#3a2400', boxShadow: '0 0 10px rgba(245,158,11,0.45)' }
+    : { padding: compact ? '2px 8px' : '3px 10px', fontSize: compact ? 10 : 11, background: 'rgba(255,255,255,0.06)', color: '#9aa0aa', border: '1px solid rgba(255,255,255,0.12)' };
+  const btnPad = compact ? '3px 9px' : '4px 12px';
+  const btnFs = compact ? 11 : 13;
   return (
-    <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg dark:bg-claude-darkSurface bg-claude-surface`}>
+    <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg dark:bg-claude-darkSurface bg-claude-surface">
       <img src="bsc.svg" alt="BSC" className={compact ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
       {!compact && (
         <span className={`${txt} font-mono dark:text-claude-darkText text-claude-text`}>
@@ -65,46 +73,46 @@ export const WalletBadge: React.FC<Props> = ({ size = 'normal' }) => {
         </span>
       )}
 
-      {/* 会员 tag */}
-      <span
-        onClick={goWallet}
-        className={`non-draggable cursor-pointer px-1.5 py-0.5 rounded ${compact ? 'text-[9px]' : 'text-[10px]'} font-semibold whitespace-nowrap ${subActive ? 'bg-primary/15 text-primary' : 'dark:bg-claude-darkBg bg-claude-bg dark:text-claude-darkTextSecondary text-claude-textSecondary'}`}
-        title={isZh ? '我的会员' : 'My membership'}
-      >
-        {subActive ? '👑 ' : ''}{authState.planName || (isZh ? '免费版' : 'Free')}
-      </span>
-
-      {/* 订阅消耗进度条(仅有效订阅) */}
-      {subActive && (
-        <span className="flex items-center gap-1 non-draggable" title={isZh ? `订阅消耗 ${usedPct}%` : `Subscription used ${usedPct}%`}>
-          <span className={`${compact ? 'w-8' : 'w-12'} h-1.5 rounded-full dark:bg-claude-darkBg bg-claude-bg overflow-hidden`}>
-            <span className="block h-full bg-primary" style={{ width: `${usedPct}%` }} />
-          </span>
-          <span className={`${compact ? 'text-[9px]' : 'text-[10px]'} dark:text-claude-darkTextSecondary text-claude-textSecondary`}>{usedPct}%</span>
-        </span>
-      )}
-
-      <span className={`${txt} dark:text-claude-darkTextSecondary text-claude-textSecondary`}>·</span>
-
-      {/* 增量包余额(=永久桶) */}
-      <span className={`${txt} dark:text-claude-darkTextSecondary text-claude-textSecondary whitespace-nowrap`}>
-        {isZh ? '增量包' : 'Add-on'}{' '}
-        <span className={`font-semibold ${low ? 'text-red-500' : 'dark:text-claude-darkText text-claude-text'}`}>
-          {(authState.paidBalance || 0).toLocaleString()}
-        </span>
-      </span>
-
+      {/* 会员等级 — 醒目(付费档金色渐变+光晕,免费档低调) */}
       <button
         type="button"
-        onClick={goWallet}
-        className={`non-draggable px-3 py-1 rounded text-sm font-bold transition-colors shadow-sm ${
-          low
-            ? 'bg-yellow-500 text-white hover:bg-yellow-600 shadow-yellow-500/30'
-            : 'bg-green-500 text-white hover:bg-green-600 shadow-green-500/30'
-        }`}
-        title={isZh ? '点击去「我的充值」' : 'Open membership / top-up'}
+        onClick={() => openWallet('subscription')}
+        className="non-draggable inline-flex items-center gap-1 rounded-full font-bold leading-none whitespace-nowrap"
+        style={pillStyle}
+        title={isZh ? '我的会员' : 'Membership'}
       >
-        {low ? i18nService.t('coworkLowBalance') : subActive ? (isZh ? '💰 充值' : '💰 Top up') : (isZh ? '👑 升级' : '👑 Upgrade')}
+        {isPaid ? '👑' : '🪙'} {planName}
+      </button>
+
+      {/* 积分余额(可消费总额) */}
+      <span className={`${txt} dark:text-claude-darkTextSecondary text-claude-textSecondary whitespace-nowrap`}>
+        {isZh ? '积分余额' : 'Credits'}{' '}
+        <span className={`font-semibold ${low ? 'text-red-500' : 'dark:text-claude-darkText text-claude-text'}`}>
+          {authState.tokenBalance.toLocaleString()}
+        </span>
+      </span>
+
+      {/* 订阅/升级会员(金色,主 CTA;最高档灰色禁用) */}
+      <button
+        type="button"
+        disabled={isMaxTier}
+        onClick={isMaxTier ? undefined : () => openWallet('subscription')}
+        className={`non-draggable rounded font-bold whitespace-nowrap ${isMaxTier ? 'cursor-not-allowed' : 'transition-transform hover:scale-[1.03]'}`}
+        style={isMaxTier
+          ? { padding: btnPad, fontSize: btnFs, background: 'rgba(255,255,255,0.08)', color: '#777' }
+          : { padding: btnPad, fontSize: btnFs, background: 'linear-gradient(135deg,#fbbf24,#f59e0b)', color: '#3a2400', boxShadow: '0 2px 8px rgba(245,158,11,0.35)' }}
+        title={isMaxTier ? (isZh ? '已是最高等级' : 'Top tier') : ''}
+      >
+        {subLabel}
+      </button>
+      {/* 购买积分 */}
+      <button
+        type="button"
+        onClick={() => openWallet('topup')}
+        className={`non-draggable rounded font-bold whitespace-nowrap text-white transition-colors ${low ? 'bg-yellow-500 hover:bg-yellow-600' : 'bg-green-500 hover:bg-green-600'}`}
+        style={{ padding: btnPad, fontSize: btnFs }}
+      >
+        {isZh ? '购买积分' : 'Buy Credits'}
       </button>
     </div>
   );

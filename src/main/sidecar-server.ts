@@ -1683,6 +1683,11 @@ const server = http.createServer(async (req, res) => {
             const { kernelInfo } = await import('./libs/matrix/kernelInstaller');
             return writeJSON(res, 200, { ok: true, ...(await kernelInfo()) });
           }
+          case 'matrix:kernelLocalStatus': {
+            // 只读本地(不请求服务端),毫秒级返回 → UI 先据此判就绪。
+            const { localKernelInfo } = await import('./libs/matrix/kernelInstaller');
+            return writeJSON(res, 200, { ok: true, ...localKernelInfo() });
+          }
           case 'matrix:ensureKernel': {
             // 按需下载指定版本指纹内核(走后端下发的 OSS 地址)。进度走 matrix:kernel SSE。
             try {

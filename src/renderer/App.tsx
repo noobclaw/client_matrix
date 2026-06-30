@@ -1048,6 +1048,7 @@ const App: React.FC = () => {
                 onShowMatrixTaskNew={handleShowMatrixTaskNew}
                 onShowMatrixTasks={handleShowMatrixTasks}
                 onShowWallet={handleShowWallet}
+                onShowInvite={handleShowInvite}
                 matrixExpiredCount={matrixExpiredTotal}
               />
             ) : mainView === 'skills' ? (

@@ -19,6 +19,8 @@ export interface HomeViewProps {
   onShowMatrixTasks?: () => void;
   /** 充值入口 → 我的钱包 */
   onShowWallet?: () => void;
+  /** 右上角「分享给好友」→ 邀请返佣页 */
+  onShowInvite?: () => void;
   /** 登录过期账号数(喂步骤①的小角标) */
   matrixExpiredCount?: number;
 }
@@ -41,6 +43,7 @@ const HomeView: React.FC<HomeViewProps> = ({
   onShowMatrixTaskNew,
   onShowMatrixTasks,
   onShowWallet,
+  onShowInvite,
   matrixExpiredCount = 0,
 }) => {
   const isMac = window.electron.platform === 'darwin';
@@ -82,17 +85,11 @@ const HomeView: React.FC<HomeViewProps> = ({
                 <span className="text-xs font-mono dark:text-claude-darkText text-claude-text">
                   {formatWalletAddress(authState.walletAddress)}
                 </span>
-                <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap ${authState.subActive ? 'bg-primary/15 text-primary' : 'dark:bg-claude-darkBg bg-claude-bg dark:text-claude-darkTextSecondary text-claude-textSecondary'}`}>
-                  {authState.subActive ? '👑 ' : ''}{authState.planName || (isZh ? '免费版' : 'Free')}
+                <span className="inline-flex items-center gap-1 rounded-full font-bold leading-none whitespace-nowrap" style={authState.subActive ? { padding:'2px 8px', fontSize:10, background:'linear-gradient(135deg,#fde68a,#f59e0b)', color:'#3a2400', boxShadow:'0 0 8px rgba(245,158,11,0.4)' } : { padding:'2px 8px', fontSize:10, background:'rgba(255,255,255,0.06)', color:'#9aa0aa', border:'1px solid rgba(255,255,255,0.12)' }}>
+                  {authState.subActive ? '👑' : '🪙'} {authState.planName || (isZh ? '免费版' : 'Free')}
                 </span>
-                {authState.subActive && (
-                  <span className="w-10 h-1.5 rounded-full dark:bg-claude-darkBg bg-claude-bg overflow-hidden" title={`${Math.min(100, Math.round((authState.subUsedRatio || 0) * 100))}%`}>
-                    <span className="block h-full bg-primary" style={{ width: `${Math.min(100, Math.round((authState.subUsedRatio || 0) * 100))}%` }} />
-                  </span>
-                )}
-                <span className="text-xs dark:text-claude-darkTextSecondary text-claude-textSecondary">·</span>
-                <span className={`text-xs font-semibold ${authState.tokenBalance < 1000 ? 'text-red-500' : 'dark:text-claude-darkText text-claude-text'}`}>
-                  {(isZh ? '增量包 ' : 'Add-on ') + (authState.paidBalance || 0).toLocaleString()}
+                <span className="text-xs dark:text-claude-darkTextSecondary text-claude-textSecondary whitespace-nowrap">
+                  {isZh ? '积分余额 ' : 'Credits '}<span className={`font-semibold ${authState.tokenBalance < 1000 ? 'text-red-500' : 'dark:text-claude-darkText text-claude-text'}`}>{authState.tokenBalance.toLocaleString()}</span>
                 </span>
                 <button
                   type="button"
@@ -121,6 +118,15 @@ const HomeView: React.FC<HomeViewProps> = ({
           </div>
         </div>
         <div className="non-draggable flex items-center gap-1 mr-1">
+          {onShowInvite && (
+            <button
+              type="button"
+              onClick={onShowInvite}
+              className="h-7 inline-flex items-center gap-1.5 px-2.5 rounded-md text-[11px] font-semibold bg-green-500/10 text-green-500 border border-green-500/40 hover:bg-green-500/20 active:scale-95 transition-colors"
+            >
+              🎁 {isZh ? '分享给好友' : 'Share'}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => openExternal(OFFICIAL_SITE)}

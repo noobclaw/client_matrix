@@ -4,6 +4,7 @@ import { noobClawAuth } from '../../services/noobclawAuth';
 import { noobClawApi, PaymentInfo, RedeemPackagesResponse } from '../../services/noobclawApi';
 import { CnyWithdrawModal } from './CnyWithdrawModal';
 import MembershipPanel from '../membership/MembershipPanel';
+import { getPendingWalletTab } from '../../services/walletNav';
 import { readCachedProfile, writeCachedProfile } from '../../services/profileCache';
 import { readCachedPaymentInfo, writeCachedPaymentInfo, readCachedRedeemInfo, writeCachedRedeemInfo } from '../../services/paymentInfoCache';
 import { i18nService } from '../../services/i18n';
@@ -126,8 +127,8 @@ export const WalletView: React.FC<WalletViewProps> = ({ isSidebarCollapsed, onTo
     return cached?.chains?.TRON ? 'TRON' : 'BSC';
   });
   const [step, setStep] = useState<'select' | 'pay' | 'success'>('select');
-  // 顶部卡片下的两个 tab:会员订阅(默认第一)/ 增量包(=原充值套餐)。
-  const [topTab, setTopTab] = useState<'subscription' | 'topup'>('subscription');
+  // 顶部卡片下的两个 tab:会员订阅 / 购买积分。初始值来自 openWallet() 指定的目标 tab。
+  const [topTab, setTopTab] = useState<'subscription' | 'topup'>(getPendingWalletTab());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   // ─── CNY 卡密充值 ───
@@ -196,6 +197,13 @@ export const WalletView: React.FC<WalletViewProps> = ({ isSidebarCollapsed, onTo
   useEffect(() => {
     const unsub = noobClawAuth.subscribe(setAuthState);
     return unsub;
+  }, []);
+
+  // 顶部条/各处「订阅会员 / 购买积分」按钮:已在钱包页时也切到对应 tab。
+  useEffect(() => {
+    const onShow = () => setTopTab(getPendingWalletTab());
+    window.addEventListener('noobclaw:show-wallet', onShow);
+    return () => window.removeEventListener('noobclaw:show-wallet', onShow);
   }, []);
 
   useEffect(() => {
@@ -453,6 +461,30 @@ export const WalletView: React.FC<WalletViewProps> = ({ isSidebarCollapsed, onTo
       setError(result?.error || i18nService.t('walletCreateOrderFailed'));
     }
     setLoading(false);
+  };
+
+  // 订阅下单 → 复用下方同一套支付步骤(QR/倒计时/轮询)。返回错误串给 MembershipPanel 展示,null=已进支付。
+  const startSubscriptionPay = async (
+    planCode: string,
+    period: 'month' | 'quarter' | 'half' | 'year',
+    chain: 'BSC' | 'TRON',
+  ): Promise<string | null> => {
+    setError('');
+    const result = await noobClawApi.createSubscriptionOrder(planCode, period, chain);
+    if (result?.order) {
+      const order = result.order;
+      const amountStr = chain === 'TRON' ? String(parseFloat(order.usdt_amount)) : String(parseFloat(order.bnb_amount));
+      setPendingOrderNo(order.order_no);
+      setPendingAmount(amountStr);
+      setPendingChain(chain);
+      setPendingCreatedAt(order.created_at);
+      setIsExpired(false);
+      setStep('pay');
+      return null;
+    }
+    if (result?.code === 'PENDING_LIMIT') return i18nService.t('walletPendingLimitError');
+    if (result?.code === 'TRON_DISABLED') return 'USDT(TRON)通道未配置，请改用 BNB 或 CNY 兑换码';
+    return result?.error || i18nService.t('walletCreateOrderFailed');
   };
 
   const doCancelOrder = async (orderNo: string) => {
@@ -1378,6 +1410,18 @@ export const WalletView: React.FC<WalletViewProps> = ({ isSidebarCollapsed, onTo
               <div className="flex items-center justify-between mb-1 gap-2">
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="text-xs dark:text-claude-darkTextSecondary text-claude-textSecondary shrink-0">{i18nService.t('walletMyWalletBsc')}</span>
+                  {/* 会员等级徽章 — 跟在钱包名旁(对标即梦,等级跟着 UID);点击切到会员订阅 tab */}
+                  <button
+                    type="button"
+                    onClick={() => setTopTab('subscription')}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold transition-transform hover:scale-105 cursor-pointer shrink-0 whitespace-nowrap"
+                    style={authState.subActive
+                      ? { background: 'linear-gradient(135deg,#fde68a,#f59e0b)', color: '#3a2400', boxShadow: '0 0 8px rgba(245,158,11,0.4)' }
+                      : { background: 'rgba(255,255,255,0.06)', color: '#9aa0aa', border: '1px solid rgba(255,255,255,0.14)' }}
+                    title="我的会员"
+                  >
+                    {authState.subActive ? '👑 ' : ''}{authState.planName || '免费版'}
+                  </button>
                   {/* v1.x: 合伙人小徽章 — 显示 tier emoji + 等级名,点击跳到邀请
                       返佣页详细看返佣比例 + 邀请明细。普通用户不渲染。 */}
                   {partnerBadge && (
@@ -1431,7 +1475,7 @@ export const WalletView: React.FC<WalletViewProps> = ({ isSidebarCollapsed, onTo
               <p className="text-xs dark:text-claude-darkTextSecondary text-claude-textSecondary mb-1">{i18nService.t('walletTokenBalance')}</p>
               <div className="flex items-center gap-2">
                 <p className="text-2xl font-bold text-primary">
-                  {(authState.paidBalance / 1_000_000).toFixed(2)}M
+                  {(balance / 1_000_000).toFixed(2)}M
                 </p>
                 <button
                   onClick={() => setSubPage('creditDetail')}
@@ -1509,18 +1553,21 @@ export const WalletView: React.FC<WalletViewProps> = ({ isSidebarCollapsed, onTo
           </div>{/* /relative z-10 wrapper */}
         </div>
 
-        {/* 顶部 tab:会员订阅(默认) / 增量包(=原充值套餐) */}
+        {/* 顶部 tab:会员订阅 / 购买积分。仅 select 步骤显示;支付/成功时隐藏让支付屏干净。 */}
+        {step === 'select' && (
         <div className="flex gap-2 p-1 rounded-lg dark:bg-claude-darkSurface bg-claude-surface border dark:border-claude-darkBorder border-claude-border">
           <button onClick={() => setTopTab('subscription')} className={`flex-1 py-2 rounded-md text-sm font-semibold transition-all ${topTab === 'subscription' ? 'bg-primary/15 text-primary' : 'dark:text-claude-darkTextSecondary text-claude-textSecondary hover:dark:text-claude-darkText hover:text-claude-text'}`}>👑 会员订阅</button>
-          <button onClick={() => setTopTab('topup')} className={`flex-1 py-2 rounded-md text-sm font-semibold transition-all ${topTab === 'topup' ? 'bg-primary/15 text-primary' : 'dark:text-claude-darkTextSecondary text-claude-textSecondary hover:dark:text-claude-darkText hover:text-claude-text'}`}>💎 增量包</button>
+          <button onClick={() => setTopTab('topup')} className={`flex-1 py-2 rounded-md text-sm font-semibold transition-all ${topTab === 'topup' ? 'bg-primary/15 text-primary' : 'dark:text-claude-darkTextSecondary text-claude-textSecondary hover:dark:text-claude-darkText hover:text-claude-text'}`}>💎 购买积分</button>
         </div>
+        )}
 
-        {topTab === 'subscription' && <MembershipPanel />}
+        {/* 会员订阅 tab:选档/周期/支付方式 → onPay 复用下方同一套支付步骤 */}
+        {step === 'select' && topTab === 'subscription' && <MembershipPanel onPay={startSubscriptionPay} />}
 
-        {topTab === 'topup' && (
+        {step === 'select' && topTab === 'topup' && (
         <div>
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-medium dark:text-claude-darkText text-claude-text">增量包</h3>
+            <h3 className="text-sm font-medium dark:text-claude-darkText text-claude-text">购买积分</h3>
             <button
               onClick={() => { setSubPage('orderHistory'); setStatusFilter(''); setSearchOrderNo(''); setSearchFrom(''); setSearchTo(''); loadOrders(''); }}
               className="text-xs dark:text-claude-darkTextSecondary text-claude-textSecondary hover:text-primary transition-colors flex items-center gap-1"
@@ -1663,8 +1710,11 @@ export const WalletView: React.FC<WalletViewProps> = ({ isSidebarCollapsed, onTo
               )}
             </>
           )}
+        </div>
+        )}
 
-          {step === 'pay' && (
+        {/* 支付步骤 —— 订阅 / 购买积分 共用同一套(QR/倒计时/轮询/取消) */}
+        {step === 'pay' && (
             <div className="p-4 rounded-xl dark:bg-claude-darkSurface bg-claude-surface border dark:border-claude-darkBorder border-claude-border">
               {isExpired ? (
                 /* Expired state */
@@ -1790,8 +1840,6 @@ export const WalletView: React.FC<WalletViewProps> = ({ isSidebarCollapsed, onTo
               </button>
             </div>
           )}
-        </div>
-        )}
 
 
       </div>

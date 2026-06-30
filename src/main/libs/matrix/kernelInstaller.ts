@@ -180,6 +180,21 @@ export async function kernelInfo(): Promise<{
   return { installed: !!inst, installedVersion: inst, installedVersions: all, configuredVersion: cfg, needsUpdate: !!(inst && cfg && inst !== cfg), available, selectedVersion };
 }
 
+/**
+ * 仅本地的内核状态(不请求服务端,毫秒级返回)。供 UI「先读本地决定是否就绪、再等服务端
+ * 返回完整版本列表」——避免 fetchKernels() 慢/超时时「未就绪」徽章卡很久。
+ * available 留空(由后续完整 kernelInfo() 补)。selectedVersion 本地优先:已落盘选中 > 已装版。
+ */
+export function localKernelInfo(): {
+  installed: boolean; installedVersion: string; installedVersions: string[]; selectedVersion: string; local: true;
+} {
+  const all = installedVersions();
+  const inst = installedVersion() || all[0] || '';
+  let selectedVersion = getSelectedVersion();
+  if (!selectedVersion) selectedVersion = inst;
+  return { installed: !!inst, installedVersion: inst, installedVersions: all, selectedVersion, local: true };
+}
+
 /** 删除某个已装版本目录(UI 删除按钮 / 清理磁盘用)。返回是否删成功。 */
 export function deleteKernelVersion(version: string): boolean {
   try {
