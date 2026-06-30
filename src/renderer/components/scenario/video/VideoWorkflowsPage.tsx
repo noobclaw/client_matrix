@@ -458,7 +458,7 @@ function scriptSummary(input: VideoCreationInput, isZh: boolean): string {
 // 视频创作卖点标签(空状态 + 新建页都用,改一处即可)。突出:批量日更 100 条、百条成本 < $4、全自动、一键全平台。
 const VIDEO_FEATURE_PILLS: Array<{ icon: string; zh: string; en: string }> = [
   { icon: '🔥', zh: '批量日更,一次最多 100 条', en: 'Batch up to 100 shorts per run' },
-  { icon: '💰', zh: '100 条成本低于 $4 · 单条低至 $0.04', en: 'Under $4 for 100 clips · from $0.04 each' },
+  { icon: '💰', zh: '100 条高质量视频成本低于 $4 · 单条低至 $0.04', en: 'Under $4 for 100 HD clips · from $0.04 each' },
   { icon: '🎙️', zh: 'AI 写稿 + AI 配音 + 自动字幕,全程零剪辑', en: 'AI script + voiceover + subtitles, zero editing' },
   { icon: '🚀', zh: '一键发抖音 / 小红书 / 快手 / 视频号 等全平台', en: 'One-click to Douyin / XHS / Kuaishou / Channels & more' },
 ];
