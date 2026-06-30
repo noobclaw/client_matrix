@@ -14,6 +14,9 @@
  *    可能要据真机反馈微调(沿用旧 binance_square_post_creator 的 selector,生产已验证)。
  */
 
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { coworkLog } from '../coworkLogger';
 import { launchKernel, kernelNavigate, closeKernel, checkKernelLogin, NO_KERNEL_ERROR } from './kernelPool';
 import { installedKernelPath } from './kernelInstaller';
@@ -204,7 +207,33 @@ async function runOne(opts: BinancePostTaskOptions, pack: any, accountId: string
       aiCall,
       apiCall,
       // 仅本地模式落盘(可选;失败不阻塞)。
-      saveDrafts: async (_arr: any[]) => ({ ok: true }),
+      saveDrafts: async (arr: any[]) => {
+        try {
+          const base = process.env.NOOBCLAW_MATRIX_DIR || path.join(os.homedir(), 'NoobClaw', 'matrix');
+          const draftsBase = path.join(base, 'drafts', opts.platform || acc.platform || 'binance', accountId);
+          let lastDir = '';
+          for (const d of (Array.isArray(arr) ? arr : [])) {
+            const rawId = String(d?.source_post?.external_post_id || `draft_${Date.now()}`);
+            const safeId = rawId.replace(/[\\/:*?"<>|]/g, '_').slice(0, 120);
+            const dir = path.join(draftsBase, safeId);
+            fs.mkdirSync(dir, { recursive: true });
+            if (d?.text) { try { fs.writeFileSync(path.join(dir, 'text.txt'), String(d.text), 'utf8'); } catch { /* ignore */ } }
+            fs.writeFileSync(path.join(dir, 'draft.json'), JSON.stringify(d, null, 2), 'utf8');
+            const imgs = Array.isArray(d?.images) ? d.images : [];
+            for (let i = 0; i < imgs.length; i++) {
+              const img = imgs[i];
+              if (img && img.base64) {
+                const ext = String(img.mimeType || '').indexOf('png') >= 0 ? 'png' : 'jpg';
+                try { fs.writeFileSync(path.join(dir, `img_${i}.${ext}`), Buffer.from(img.base64, 'base64')); } catch { /* ignore */ }
+              }
+            }
+            lastDir = dir;
+          }
+          return { ok: true, dir: lastDir };
+        } catch (err: any) {
+          return { ok: false, reason: String(err?.message || err) };
+        }
+      },
       getPrompt: (name: string) => { const t = pack?.prompts?.[name]; if (!t) throw new Error('Missing prompt: ' + name); return t; },
       appendKeywords: (_arr: string[]) => { /* matrix: no-op */ },
       sleep: (min: number, max?: number) => new Promise<void>((resolve) => {
