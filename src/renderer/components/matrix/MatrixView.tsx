@@ -1026,6 +1026,9 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
             <div className="flex items-center gap-2 mb-4">
               <div className="text-base font-semibold">{editId ? '编辑账号' : `连接 ${PLATFORM_LABEL[platform]} 账号`}</div>
               {twoStep && <span className="text-xs px-2 py-0.5 rounded-full border border-violet-500/40 text-violet-500 bg-violet-500/5">第 {addStep} / 2 步 · {addStep === 1 ? '配账号' : '配代理 IP'}</span>}
+              <button type="button" onClick={() => setShowAdd(false)} aria-label="关闭" title="关闭" className="ml-auto shrink-0 w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-black/5 dark:hover:bg-white/10 transition-colors">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+              </button>
             </div>
 
             {showAccount && (<>
