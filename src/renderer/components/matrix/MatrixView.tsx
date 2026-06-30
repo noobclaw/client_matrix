@@ -39,8 +39,6 @@ function parseKeywords(s: string): string[] { return s.split(/[\s,，、\n]+/).m
 const PLATFORMS = ['douyin', 'xhs', 'kuaishou', 'bilibili', 'shipinhao', 'toutiao', 'x', 'binance', 'youtube', 'tiktok'];
 // 每个平台最多添加的账号数:客户端兜底 10,服务端 /api/matrix/config 的 maxAccountsPerPlatform 可覆盖(admin 调,不打包)。
 const MAX_ACCOUNTS_PER_PLATFORM_FALLBACK = 10;
-// 代理IP购买页默认地址(admin 配 matrix_proxy_purchase_url 可覆盖;为空则用此默认)。
-const DEFAULT_PROXY_PURCHASE_URL = 'https://www.ipoasis.com/s/4wac6n5umx';
 const PLATFORM_LABEL: Record<string, string> = { douyin: '抖音', xhs: '小红书', bilibili: 'B站', kuaishou: '快手', tiktok: 'TikTok', x: '推特', binance: '币安广场', youtube: 'YouTube', shipinhao: '视频号', toutiao: '头条' };
 // 平台号的标签:平台名已以「号」结尾(视频号)就不再加「号」,否则拼「号」(抖音号/快手号…)。
 const platformIdLabel = (p: string): string => { const l = PLATFORM_LABEL[p] || ''; return l.endsWith('号') ? l : l + '号'; };
@@ -195,7 +193,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
   const [accounts, setAccounts] = useState<MatrixAccount[]>([]);
   // 每个平台账号上限:服务端 /api/matrix/config 下发(admin 可调),拉不到/未登录 → 兜底 10。
   const [maxAccountsPerPlatform, setMaxAccountsPerPlatform] = useState<number>(MAX_ACCOUNTS_PER_PLATFORM_FALLBACK);
-  // 代理IP购买页:服务端 /api/matrix/config 下发(admin 配 matrix_proxy_purchase_url),为空则用 DEFAULT_PROXY_PURCHASE_URL 兜底,链接始终显示。
+  // 代理IP购买页:完全由服务端 /api/matrix/config 下发(admin 配 matrix_proxy_purchase_url,默认值也在后端),客户端不写死;空则不显示「点这里」入口。
   const [proxyPurchaseUrl, setProxyPurchaseUrl] = useState<string>('');
   // 赛道预设库:服务端 /api/matrix/config 下发(admin 可加/改赛道、不打包),拉不到/未登录 → 内置兜底。
   const [trackPresets, setTrackPresets] = useState<TrackPreset[]>(FALLBACK_TRACK_PRESETS);
@@ -1145,7 +1143,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
 
             {showProxy && (<>
               <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs text-amber-700 dark:text-amber-300 leading-relaxed mb-4">
-                ⚠️ 本平台已有账号。建议给这个新号配一个<strong>独立代理 IP</strong>:不配的话,它会和本平台其它号<strong>共用同一个本机 IP</strong>,多个号同 IP 容易被平台判定关联、有<strong>被风控/封号</strong>的风险。确实没有代理也可<strong>留空直接保存</strong>。 没有?<button type="button" onClick={() => { try { (window as any).electron?.shell?.openExternal(proxyPurchaseUrl || DEFAULT_PROXY_PURCHASE_URL); } catch { /* ignore */ } }} className="underline font-semibold hover:opacity-80">点这里 →</button>
+                ⚠️ 本平台已有账号。建议给这个新号配一个<strong>独立代理 IP</strong>:不配的话,它会和本平台其它号<strong>共用同一个本机 IP</strong>,多个号同 IP 容易被平台判定关联、有<strong>被风控/封号</strong>的风险。确实没有代理也可<strong>留空直接保存</strong>。{proxyPurchaseUrl && (<> 没有?<button type="button" onClick={() => { try { (window as any).electron?.shell?.openExternal(proxyPurchaseUrl); } catch { /* ignore */ } }} className="underline font-semibold hover:opacity-80">点这里 →</button></>)}
               </div>
               <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">代理 IP（可选）</label>
               <div className="flex gap-2 mb-2">
@@ -1248,7 +1246,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
               </button>
             </div>
-            <div className="text-xs opacity-60 mb-3">多开同平台必须每号一个独立 IP,否则同 IP 会被风控。第一个号可留空走本地 IP。 没有?<button type="button" onClick={() => { try { (window as any).electron?.shell?.openExternal(proxyPurchaseUrl || DEFAULT_PROXY_PURCHASE_URL); } catch { /* ignore */ } }} className="text-claude-accent hover:underline font-medium">点这里 →</button></div>
+            <div className="text-xs opacity-60 mb-3">多开同平台必须每号一个独立 IP,否则同 IP 会被风控。第一个号可留空走本地 IP。{proxyPurchaseUrl && (<> 没有?<button type="button" onClick={() => { try { (window as any).electron?.shell?.openExternal(proxyPurchaseUrl); } catch { /* ignore */ } }} className="text-claude-accent hover:underline font-medium">点这里 →</button></>)}</div>
             <div className="flex gap-2 mb-2">
               <select value={proxyForm.protocol} onChange={(e) => setProxyForm((f) => ({ ...f, protocol: e.target.value }))} className="text-sm px-2 py-2 rounded border dark:border-white/15 border-black/15 bg-transparent">
                 <option value="socks5">socks5</option><option value="socks5h">socks5h</option><option value="http">http</option><option value="https">https</option>
