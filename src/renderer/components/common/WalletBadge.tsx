@@ -110,11 +110,13 @@ export const WalletBadge: React.FC<Props> = ({ size = 'normal' }) => {
       >
         {subLabel}
       </button>
-      {/* 购买积分 */}
+      {/* 购买积分 —— 恒为绿色(订阅会员金 + 购买积分绿,始终一金一绿;
+          不再因低余额/未拉到余额时染黄,避免与金色「订阅会员」撞成两个黄按钮闪变)。
+          低余额提醒改由上面「积分余额」数字标红承担,不动按钮配色。 */}
       <button
         type="button"
         onClick={() => openWallet('topup')}
-        className={`non-draggable rounded font-bold whitespace-nowrap text-white transition-colors ${low ? 'bg-yellow-500 hover:bg-yellow-600' : 'bg-green-500 hover:bg-green-600'}`}
+        className="non-draggable rounded font-bold whitespace-nowrap text-white transition-colors bg-green-500 hover:bg-green-600"
         style={{ padding: btnPad, fontSize: btnFs }}
       >
         {isZh ? '购买积分' : 'Buy Credits'}
