@@ -26,7 +26,7 @@ import { coworkLog } from '../coworkLogger';
 import { launchKernel, kernelNavigate, closeKernel, checkKernelLogin, NO_KERNEL_ERROR } from './kernelPool';
 import { installedKernelPath } from './kernelInstaller';
 import { matrixCmd } from './cdpCommands';
-import { getAccount, setAccountStatus, accountBadgeLabel, matrixGroupTitle, markAccountAlive, platformKey } from './accountManager';
+import { getAccount, setAccountStatus, appendDerivedKeywords, effectiveKeywords, accountBadgeLabel, matrixGroupTitle, markAccountAlive, platformKey } from './accountManager';
 import { promptReloginForExpiredAccount } from './reloginPrompt';
 import { getNoobClawAuthToken } from '../claudeSettings';
 import type { EngageItemResult, EngageReport } from './engageRunner';
@@ -146,7 +146,7 @@ async function runOne(opts: ImageTextTaskOptions, pack: any, accountId: string, 
   if (acc.platform !== opts.platform) { log('❌ 跳过:账号平台与任务不符'); return { accountId, state: 'skipped', reason: 'platform_mismatch' }; }
   if (acc.status === 'banned' || acc.status === 'limited') { log('❌ 跳过:账号状态为 ' + acc.status); return { accountId, state: 'skipped', reason: 'account_' + acc.status }; }
   // 网络图模式靠本号关键词搜实景图 —— 没关键词且没填参考文案就没法搜,跳过(AI 生图模式不强制)。
-  const accKeywords = Array.isArray(acc.keywords) ? acc.keywords.filter((k) => String(k || '').trim()) : [];
+  const accKeywords = effectiveKeywords(acc); // 原始 + AI 衍生池
   if (cfg.useRealPhotos && accKeywords.length === 0) {
     log('❌ 跳过:网络图模式需要本号关键词(到「我的矩阵账号」编辑里添加)');
     return { accountId, state: 'skipped', reason: 'no_keywords_for_real_photos' };
@@ -308,7 +308,8 @@ async function runOne(opts: ImageTextTaskOptions, pack: any, accountId: string, 
       saveDrafts,
       getPrompt: (name: string) => { const t = pack?.prompts?.[name]; if (!t) throw new Error('Missing prompt: ' + name); return t; },
       // 网络图衍生关键词:不回写账号(避免污染 engage 关键词),当次 orchestrator 的本地数组已够用。
-      appendKeywords: (_arr: string[]) => { /* matrix: no-op,不污染账号关键词 */ },
+      // AI 衍生新词 → 存进【衍生池】(原始词永留,封顶 30,满了整批换);image_text 一般不衍生,留作统一。
+      appendKeywords: (arr: string[]) => { try { appendDerivedKeywords(accountId, arr); } catch { /* ignore */ } },
       sleep: (min: number, max?: number) => new Promise<void>((resolve) => {
         const ms = max ? randInt(min, max) : min;
         if (opts.signal?.aborted) return resolve();

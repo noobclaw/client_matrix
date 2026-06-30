@@ -231,6 +231,47 @@ export function setAccountKeywords(id: string, keywords: string[], track?: strin
   persist();
 }
 
+/** AI 衍生关键词池上限(到顶且仍耗尽 → 整批换)。 */
+export const DERIVED_KEYWORDS_CAP = 30;
+
+/**
+ * 把 AI 衍生的新词追加进【衍生池】(account.derivedKeywords),【绝不动原始 keywords】。
+ *  · 衍生词若与原始词重复则丢弃(避免冗余)。
+ *  · 池未满(<30):去重追加,封顶 30。
+ *  · 池已满(>=30)还在衍生(=旧池关键词也搜尽)→ 整批换:丢掉旧衍生池,换成这批新词(封顶 30)。
+ * 各任务 runner 的 ctx.appendKeywords 统一走这里 → 原始词永留、衍生池受控可换。
+ */
+export function appendDerivedKeywords(id: string, newWords: string[]): void {
+  const a = getAccount(id);
+  if (!a) return;
+  const orig = new Set((a.keywords || []).map((k) => String(k || '').trim()).filter(Boolean));
+  const fresh: string[] = [];
+  const seen = new Set<string>();
+  for (const w of (newWords || [])) {
+    const k = String(w || '').trim();
+    if (!k || orig.has(k) || seen.has(k)) continue;
+    seen.add(k); fresh.push(k);
+  }
+  if (!fresh.length) return;
+  const cur = (a.derivedKeywords || []).map((k) => String(k || '').trim()).filter(Boolean);
+  let next: string[];
+  if (cur.length >= DERIVED_KEYWORDS_CAP) {
+    next = fresh.slice(0, DERIVED_KEYWORDS_CAP);                 // 整批换
+  } else {
+    next = Array.from(new Set([...cur, ...fresh])).slice(0, DERIVED_KEYWORDS_CAP); // 追加
+  }
+  a.derivedKeywords = next;
+  persist();
+}
+
+/** 搜索用的有效关键词 = 原始词 + 衍生词(去重)。 */
+export function effectiveKeywords(acc: { keywords?: string[]; derivedKeywords?: string[] } | null | undefined): string[] {
+  if (!acc) return [];
+  const orig = (acc.keywords || []).map((k) => String(k || '').trim()).filter(Boolean);
+  const der = (acc.derivedKeywords || []).map((k) => String(k || '').trim()).filter(Boolean);
+  return Array.from(new Set([...orig, ...der]));
+}
+
 /** 编辑账号元信息(备注名/赛道分组/人设/关键词)。只更新传入的字段。 */
 export function updateAccountMeta(id: string, patch: { displayName?: string; group?: string; persona?: string; keywords?: string[]; track?: string }): void {
   const a = getAccount(id);

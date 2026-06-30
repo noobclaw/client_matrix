@@ -25,7 +25,7 @@ import { installedKernelPath } from './kernelInstaller';
 import { matrixCmd } from './cdpCommands';
 import { runMatrixDriver, runMatrixDouyinSearch } from './driverCtx';
 import { contentUsageStore, defaultContentReuseCap, type ContentUsage } from './contentUsage';
-import { getAccount, setAccountStatus, accountBadgeLabel, matrixGroupTitle, markAccountAlive, platformKey } from './accountManager';
+import { getAccount, setAccountStatus, effectiveKeywords, appendDerivedKeywords, accountBadgeLabel, matrixGroupTitle, markAccountAlive, platformKey } from './accountManager';
 import { promptReloginForExpiredAccount } from './reloginPrompt';
 import { getNoobClawAuthToken } from '../claudeSettings';
 import type { EngageItemResult, EngageReport } from './engageRunner';
@@ -241,7 +241,7 @@ async function collectFromSource(
   if (acc.platform !== cfg.sourcePlatform) { log('❌ 采集号平台与来源平台不符'); return { candidates: [], reason: 'source_platform_mismatch' }; }
 
   // 关键词:直接用采集号自己的关键词【全列表】(不再让用户在任务里填);cfg.keyword 仅作老任务/可选覆盖兼容。
-  const accKw = Array.isArray(acc.keywords) ? acc.keywords.map((k) => String(k || '').trim()).filter(Boolean) : [];
+  const accKw = effectiveKeywords(acc); // 采集号:原始 + AI 衍生池
   const keywords = (cfg.keyword && String(cfg.keyword).trim()) ? [String(cfg.keyword).trim()] : accKw;
   if (!keywords.length) { log('❌ 采集号没有关键词 —— 去「我的矩阵账号」给它加几个赛道关键词'); return { candidates: [], reason: 'no_keywords' }; }
 
@@ -291,6 +291,9 @@ async function collectFromSource(
       stepLog: (_s: number, _st: string, m: string) => log(m),
       stepDone: (_s: number) => {},
       finish: (_status: string, _err?: string) => {},
+      // 关键词搜尽时,采集剧本调 aiCall 衍生新词 → appendKeywords 存进采集号衍生池(下轮启用)。
+      aiCall: makeAiCall(authToken, undefined, opts.signal),
+      appendKeywords: (arr: string[]) => { try { appendDerivedKeywords(srcAccId, arr); } catch { /* ignore */ } },
       keywordMatch,
       seenPostIds: seen.set,
       recordSeen: (ids: any) => { try { (Array.isArray(ids) ? ids : [ids]).forEach((id) => { if (id) seen.record(String(id)); }); } catch { /* ignore */ } },

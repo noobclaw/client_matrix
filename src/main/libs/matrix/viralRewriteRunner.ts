@@ -20,7 +20,7 @@ import { coworkLog } from '../coworkLogger';
 import { launchKernel, kernelNavigate, closeKernel, checkKernelLogin, NO_KERNEL_ERROR } from './kernelPool';
 import { installedKernelPath } from './kernelInstaller';
 import { matrixCmd } from './cdpCommands';
-import { getAccount, setAccountStatus, accountBadgeLabel, matrixGroupTitle, markAccountAlive, platformKey } from './accountManager';
+import { getAccount, setAccountStatus, appendDerivedKeywords, effectiveKeywords, accountBadgeLabel, matrixGroupTitle, markAccountAlive, platformKey } from './accountManager';
 import { promptReloginForExpiredAccount } from './reloginPrompt';
 import { getNoobClawAuthToken } from '../claudeSettings';
 import type { EngageItemResult, EngageReport } from './engageRunner';
@@ -149,7 +149,7 @@ async function runOne(opts: ViralRewriteTaskOptions, pack: any, accountId: strin
   if (acc.platform !== opts.platform) { log('❌ 跳过:账号平台与任务不符'); return { accountId, state: 'skipped', reason: 'platform_mismatch' }; }
   if (acc.status === 'banned' || acc.status === 'limited') { log('❌ 跳过:账号状态为 ' + acc.status); return { accountId, state: 'skipped', reason: 'account_' + acc.status }; }
   // 爆款仿写靠本号关键词去搜 —— 没关键词没法搜,跳过。
-  const accKeywords = Array.isArray(acc.keywords) ? acc.keywords.filter((k) => String(k || '').trim()) : [];
+  const accKeywords = effectiveKeywords(acc); // 原始 + AI 衍生池
   if (accKeywords.length === 0) {
     log('❌ 跳过:爆款仿写需要本号关键词(到「我的矩阵账号」编辑里添加)');
     return { accountId, state: 'skipped', reason: 'no_keywords' };
@@ -298,7 +298,8 @@ async function runOne(opts: ViralRewriteTaskOptions, pack: any, accountId: strin
       apiCall,
       saveDrafts,
       getPrompt: (name: string) => { const t = pack?.prompts?.[name]; if (!t) throw new Error('Missing prompt: ' + name); return t; },
-      appendKeywords: (_arr: string[]) => { /* matrix: no-op,不污染账号关键词 */ },
+      // AI 衍生新词 → 存进【衍生池】(原始词永留,封顶 30,满了整批换);之前是 no-op → 衍生词丢失。
+      appendKeywords: (arr: string[]) => { try { appendDerivedKeywords(accountId, arr); } catch { /* ignore */ } },
       // ── 采集必需的 4 件(orchestrator 不守卫)──
       parseLikes,
       keywordMatch,

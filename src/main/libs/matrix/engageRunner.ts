@@ -31,7 +31,7 @@ const DOWNLOAD_REFERER: Record<string, string> = {
   xhs: 'https://www.xiaohongshu.com/',
 };
 import { matrixCmd } from './cdpCommands';
-import { getAccount, setAccountStatus, setAccountKeywords, accountBadgeLabel, matrixGroupTitle, markAccountAlive, platformKey } from './accountManager';
+import { getAccount, setAccountStatus, appendDerivedKeywords, effectiveKeywords, accountBadgeLabel, matrixGroupTitle, markAccountAlive, platformKey } from './accountManager';
 import { promptReloginForExpiredAccount, loginUrlFor } from './reloginPrompt';
 import { getNoobClawAuthToken } from '../claudeSettings';
 
@@ -236,7 +236,7 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string): Pr
     // reply_fan 剧本读 task.persona / funnel_phrase / funnel_probability;engage 剧本读 keywords/配额/comment_prompt。
     // 两套字段都带上(互不干扰),由各自剧本按需取。
     const task: any = {
-      id: accountId, keywords: acc.keywords, track: acc.track || 'douyin_default',
+      id: accountId, keywords: effectiveKeywords(acc), track: acc.track || 'douyin_default',
       // 人设 → 复用老剧本现成的 comment_prompt 槽(comment_composer 的 user_prompt 口味提示),
       // 不另造 persona 路径(老抖音剧本本就支持,backend 零改动)。
       comment_prompt: acc.persona || '',
@@ -321,7 +321,8 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string): Pr
       aiCall,
       getPrompt: (name: string) => { const t = pack?.prompts?.[name]; if (!t) throw new Error('Missing prompt: ' + name); return t; },
       engageHistory: history,
-      appendKeywords: (arr: string[]) => { try { const merged = Array.from(new Set([...(acc.keywords || []), ...arr])); setAccountKeywords(accountId, merged); } catch { /* ignore */ } },
+      // AI 衍生新词 → 存进【衍生池】(不污染原始关键词,封顶 30,满了整批换)。
+      appendKeywords: (arr: string[]) => { try { appendDerivedKeywords(accountId, arr); } catch { /* ignore */ } },
       // 互动报告落盘:写到 <matrixDir>/reports/<平台>/<accountId>/ 下,返回绝对路径给编排器记日志。
       // 老空桩只返 {ok:true} 没 path → 编排器日志「报告已保存 → undefined」且文件根本没存。
       writeReport: async (fname: string, md: string) => {
