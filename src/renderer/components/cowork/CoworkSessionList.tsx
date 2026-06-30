@@ -11,6 +11,8 @@ interface CoworkSessionListProps {
   isBatchMode: boolean;
   selectedIds: Set<string>;
   showBatchOption?: boolean;
+  /** 操作菜单按钮常驻显示(不靠 hover) */
+  alwaysShowActions?: boolean;
   onSelectSession: (sessionId: string) => void;
   onDeleteSession: (sessionId: string) => void;
   onTogglePin: (sessionId: string, pinned: boolean) => void;
@@ -25,6 +27,7 @@ const CoworkSessionList: React.FC<CoworkSessionListProps> = ({
   isBatchMode,
   selectedIds,
   showBatchOption = true,
+  alwaysShowActions = false,
   onSelectSession,
   onDeleteSession,
   onTogglePin,
@@ -73,6 +76,7 @@ const CoworkSessionList: React.FC<CoworkSessionListProps> = ({
           isBatchMode={isBatchMode}
           isSelected={selectedIds.has(session.id)}
           showBatchOption={showBatchOption}
+          alwaysShowActions={alwaysShowActions}
           onSelect={() => onSelectSession(session.id)}
           onDelete={() => onDeleteSession(session.id)}
           onTogglePin={(pinned) => onTogglePin(session.id, pinned)}

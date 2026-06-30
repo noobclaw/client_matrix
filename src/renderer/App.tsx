@@ -55,6 +55,8 @@ const App: React.FC = () => {
   // 「AI对话」二级折叠组只在其子项(cowork/mcp/web3news/scheduledTasks)激活时才强制展开,
   // 默认页非该组子项 → 该组保持收起(aiChatOpen 初始 false),正好满足「AI对话菜单默认收起」。
   const [mainView, setMainView] = useState<'home' | 'cowork' | 'coworkHistory' | 'skills' | 'scheduledTasks' | 'mcp' | 'wallet' | 'invite' | 'quickuse' | 'scenarioCreate' | 'scenarioRuns' | 'web3news' | 'hotsearch' | 'partners' | 'personality' | 'matrix' | 'matrixTaskNew' | 'matrixTasks' | 'matrixRuns'>(MATRIX_EDITION ? 'home' : 'scenarioCreate');
+  // 从「所有 AI 对话」列表点进某条对话时置 true:此时侧栏仍高亮「所有 AI 对话」、详情页左上显示返回按钮。
+  const [coworkFromHistory, setCoworkFromHistory] = useState(false);
   // v4.31.44: 主页 6 个涨粉标签可以指定打开"一键使用"时初选哪个平台
   const [quickUseInitialPlatform, setQuickUseInitialPlatform] = useState<'xhs' | 'x' | 'binance' | 'youtube' | 'tiktok' | 'douyin' | 'kuaishou' | 'bilibili' | 'shipinhao' | 'toutiao' | 'video' | undefined>(undefined);
   // ScenarioView 下钻到任务/运行记录详情时为 true:任务详情逻辑上属于「我的涨粉任务」,
@@ -259,6 +261,7 @@ const App: React.FC = () => {
   }, []);
 
   const handleShowCowork = useCallback(() => {
+    setCoworkFromHistory(false);
     setMainView('cowork');
   }, []);
 
@@ -283,6 +286,7 @@ const App: React.FC = () => {
     const shouldClearInput = mainView === 'cowork' || !!currentSessionId;
     coworkService.clearSession();
     dispatch(clearSelection());
+    setCoworkFromHistory(false);
     setMainView('cowork');
     window.setTimeout(() => {
       window.dispatchEvent(new CustomEvent('cowork:focus-input', {
@@ -639,6 +643,7 @@ const App: React.FC = () => {
   useEffect(() => {
     const forward = (payload: { prompt?: string; source?: string }) => {
       if (!payload?.prompt) return;
+      setCoworkFromHistory(false);
       setMainView('cowork');
       // Give React a tick to mount the cowork view before dispatching.
       setTimeout(() => {
@@ -798,6 +803,7 @@ const App: React.FC = () => {
     const handleViewSession = async (event: Event) => {
       const { sessionId } = (event as CustomEvent).detail;
       if (sessionId) {
+        setCoworkFromHistory(false);
         setMainView('cowork');
         await coworkService.loadSession(sessionId);
       }
@@ -1002,8 +1008,15 @@ const App: React.FC = () => {
           onShowLogin={handleShowLogin}
           onShowSettings={handleShowSettings}
           /* create/runs 菜单下钻到任务详情时,高亮临时归到「我的涨粉任务」(quickuse),
-             保持「任务详情属于我的涨粉任务」的认知一致;其余情况按真实 mainView 高亮。 */
-          activeView={scenarioInDetail && mainView === 'scenarioCreate' ? 'quickuse' : mainView}
+             保持「任务详情属于我的涨粉任务」的认知一致;从「所有 AI 对话」列表点进对话详情时,
+             高亮仍归到「所有 AI 对话」(coworkHistory);其余情况按真实 mainView 高亮。 */
+          activeView={
+            scenarioInDetail && mainView === 'scenarioCreate'
+              ? 'quickuse'
+              : mainView === 'cowork' && coworkFromHistory
+                ? 'coworkHistory'
+                : mainView
+          }
           onShowHome={handleShowHome}
           onShowSkills={handleShowSkills}
           onShowCowork={handleShowCowork}
@@ -1189,7 +1202,7 @@ const App: React.FC = () => {
                 onShowInvite={handleShowInvite}
               />
             ) : mainView === 'coworkHistory' ? (
-              <CoworkHistoryPage onOpenSession={() => setMainView('cowork')} />
+              <CoworkHistoryPage onOpenSession={() => { setCoworkFromHistory(true); setMainView('cowork'); }} />
             ) : (
               <CoworkView
                 onRequestAppSettings={handleShowSettings}
@@ -1201,6 +1214,7 @@ const App: React.FC = () => {
                 onToggleSidebar={handleToggleSidebar}
                 onNewChat={handleNewChat}
                 updateBadge={isSidebarCollapsed ? updateBadge : null}
+                onBackToHistory={coworkFromHistory ? handleShowCoworkHistory : undefined}
               />
             )}
             </ErrorBoundary>

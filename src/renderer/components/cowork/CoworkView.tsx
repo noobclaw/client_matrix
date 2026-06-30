@@ -21,6 +21,7 @@ import WindowTitleBar from '../window/WindowTitleBar';
 import type { SettingsOpenOptions } from '../Settings';
 import type { CoworkSession, CoworkImageAttachment } from '../../types/cowork';
 import { MATRIX_EDITION } from '../../matrixEdition';
+import { WalletBadge } from '../common/WalletBadge';
 
 export interface CoworkViewProps {
   onRequestAppSettings?: (options?: SettingsOpenOptions) => void;
@@ -34,9 +35,11 @@ export interface CoworkViewProps {
   onToggleSidebar?: () => void;
   onNewChat?: () => void;
   updateBadge?: React.ReactNode;
+  /** 从「所有 AI 对话」列表进入对话详情时提供:详情页左上显示返回按钮,点击回到列表页。 */
+  onBackToHistory?: () => void;
 }
 
-const CoworkView: React.FC<CoworkViewProps> = ({ onRequestAppSettings, onShowSkills, onShowWallet, onShowQuickUse, onShowInvite, isSidebarCollapsed, onToggleSidebar, onNewChat, updateBadge }) => {
+const CoworkView: React.FC<CoworkViewProps> = ({ onRequestAppSettings, onShowSkills, onShowWallet, onShowQuickUse, onShowInvite, isSidebarCollapsed, onToggleSidebar, onNewChat, updateBadge, onBackToHistory }) => {
   const dispatch = useDispatch();
   const isMac = window.electron.platform === 'darwin';
   const [isInitialized, setIsInitialized] = useState(false);
@@ -416,16 +419,11 @@ const CoworkView: React.FC<CoworkViewProps> = ({ onRequestAppSettings, onShowSki
           updateBadge={updateBadge}
           onOpenSettings={onRequestAppSettings}
           onShowWallet={onShowWallet}
+          onBackToHistory={onBackToHistory}
         />
       </>
     );
   }
-
-  // Format wallet address for display: 0x1234...5678
-  const formatWalletAddress = (addr: string) => {
-    if (addr.length <= 10) return addr;
-    return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
-  };
 
   // Home view - no current session
   return (
@@ -452,47 +450,8 @@ const CoworkView: React.FC<CoworkViewProps> = ({ onRequestAppSettings, onShowSki
               {updateBadge}
             </div>
           )}
-          {/* BSC + wallet address + balance */}
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg dark:bg-claude-darkSurface bg-claude-surface">
-            <img src="bsc.svg" alt="BSC" className="w-4 h-4" />
-            <span className="text-xs font-medium dark:text-claude-darkTextSecondary text-claude-textSecondary">BSC</span>
-            {authState.isAuthenticated && authState.walletAddress ? (
-              <>
-                <span className="text-xs font-mono dark:text-claude-darkText text-claude-text">
-                  {formatWalletAddress(authState.walletAddress)}
-                </span>
-                <span className="inline-flex items-center gap-1 rounded-full font-bold leading-none whitespace-nowrap" style={authState.subActive ? { padding:'2px 8px', fontSize:10, background:'linear-gradient(135deg,#fde68a,#f59e0b)', color:'#3a2400', boxShadow:'0 0 8px rgba(245,158,11,0.4)' } : { padding:'2px 8px', fontSize:10, background:'rgba(255,255,255,0.06)', color:'#9aa0aa', border:'1px solid rgba(255,255,255,0.12)' }}>
-                  {authState.subActive ? '👑' : '🪙'} {authState.planName || (i18nService.currentLanguage === 'zh' ? '免费版' : 'Free')}
-                </span>
-                <span className="text-xs dark:text-claude-darkTextSecondary text-claude-textSecondary whitespace-nowrap">
-                  {i18nService.currentLanguage === 'zh' ? '积分余额 ' : 'Credits '}<span className={`font-semibold ${authState.tokenBalance < 1000 ? 'text-red-500' : 'dark:text-claude-darkText text-claude-text'}`}>{authState.tokenBalance.toLocaleString()}</span>
-                </span>
-                {/* 充值入口 — 始终显示,实心彩色按钮让 user 一眼看到。点击跳到「我的钱包」。 */}
-                <button
-                  type="button"
-                  onClick={() => window.dispatchEvent(new CustomEvent('noobclaw:show-wallet'))}
-                  className={`non-draggable px-3 py-1 rounded text-sm font-bold transition-colors shadow-sm ${
-                    authState.tokenBalance < 1000
-                      ? 'bg-yellow-500 text-white hover:bg-yellow-600 shadow-yellow-500/30'
-                      : 'bg-green-500 text-white hover:bg-green-600 shadow-green-500/30'
-                  }`}
-                  title={i18nService.currentLanguage === 'zh' ? '点击去「我的充值」' : 'Open Top Up'}
-                >
-                  {authState.tokenBalance < 1000
-                    ? i18nService.t('coworkLowBalance')
-                    : (i18nService.currentLanguage === 'zh' ? '💰 充值' : '💰 Top up')}
-                </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                onClick={() => noobClawAuth.requireLoginUI()}
-                className="px-2 py-0.5 rounded text-xs font-semibold bg-claude-accent text-white hover:bg-claude-accentHover transition-colors"
-              >
-                {i18nService.t('coworkConnectWallet')}
-              </button>
-            )}
-          </div>
+          {/* BSC 钱包信息 + 订阅会员/购买积分(与矩阵头部一致) */}
+          <WalletBadge />
         </div>
         <div className="non-draggable flex items-center gap-1 mr-1">
           <button

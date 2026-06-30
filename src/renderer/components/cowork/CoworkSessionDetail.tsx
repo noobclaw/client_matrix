@@ -13,6 +13,7 @@ import {
   ExclamationTriangleIcon,
   ChevronRightIcon,
   PhotoIcon,
+  ArrowLeftIcon,
 } from '@heroicons/react/24/outline';
 import { FolderIcon } from '@heroicons/react/24/solid';
 import { coworkService } from '../../services/cowork';
@@ -26,8 +27,9 @@ import EllipsisHorizontalIcon from '../icons/EllipsisHorizontalIcon';
 import PencilSquareIcon from '../icons/PencilSquareIcon';
 import TrashIcon from '../icons/TrashIcon';
 import WindowTitleBar from '../window/WindowTitleBar';
+import { WalletBadge } from '../common/WalletBadge';
 import { getCompactFolderName } from '../../utils/path';
-import { noobClawAuth, type AuthState } from '../../services/noobclawAuth';
+import { noobClawAuth } from '../../services/noobclawAuth';
 import { configService } from '../../services/config';
 import type { SettingsOpenOptions } from '../Settings';
 import lauraAvatarUrl from '/laura-avatar.png?url';
@@ -50,6 +52,8 @@ interface CoworkSessionDetailProps {
   updateBadge?: React.ReactNode;
   onOpenSettings?: (options?: SettingsOpenOptions) => void;
   onShowWallet?: () => void;
+  /** 从「所有 AI 对话」列表进入时提供:头部左上显示返回按钮,点击回到列表页。 */
+  onBackToHistory?: () => void;
 }
 
 const AUTO_SCROLL_THRESHOLD = 120;
@@ -1281,6 +1285,7 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
   updateBadge,
   onOpenSettings,
   onShowWallet,
+  onBackToHistory,
 }) => {
   const isMac = window.electron.platform === 'darwin';
   const cfgSnap = configService.getConfig();
@@ -1314,14 +1319,6 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
   const actionButtonRef = useRef<HTMLButtonElement>(null);
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
   const [isExportingImage, setIsExportingImage] = useState(false);
-
-  // Auth state for BSC info
-  const [authState, setAuthState] = useState<AuthState>(noobClawAuth.getState());
-  useEffect(() => {
-    const unsub = noobClawAuth.subscribe(setAuthState);
-    return unsub;
-  }, []);
-  const formatWalletAddress = (addr: string) => addr.length <= 10 ? addr : `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 
   // Rename states
   const [isRenaming, setIsRenaming] = useState(false);
@@ -1891,8 +1888,19 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
     <div ref={detailRootRef} className="flex-1 flex flex-col dark:bg-claude-darkBg bg-claude-bg h-full">
       {/* Header */}
       <div className="draggable flex h-12 items-center justify-between px-4 border-b dark:border-claude-darkBorder border-claude-border dark:bg-claude-darkSurface/50 bg-claude-surface/50 shrink-0">
-        {/* Left side: Toggle buttons (when collapsed) + Title + Sandbox badge */}
+        {/* Left side: Back-to-history (when entered from 所有 AI 对话) + Toggle buttons (when collapsed) + Title + Sandbox badge */}
         <div className="flex h-full items-center gap-2 min-w-0">
+          {onBackToHistory && (
+            <button
+              type="button"
+              onClick={onBackToHistory}
+              className="non-draggable h-8 inline-flex items-center gap-1 pl-1.5 pr-2 rounded-lg dark:text-claude-darkTextSecondary text-claude-textSecondary hover:bg-claude-surfaceHover dark:hover:bg-claude-darkSurfaceHover transition-colors"
+              title={i18nService.t('coworkHistory')}
+            >
+              <ArrowLeftIcon className="h-4 w-4" />
+              <span className="text-xs font-medium">{i18nService.t('coworkHistory')}</span>
+            </button>
+          )}
           {isSidebarCollapsed && (
             <div className={`non-draggable flex items-center gap-1 ${isMac ? 'pl-[68px]' : ''}`}>
               <button
@@ -1943,37 +1951,8 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
 
         {/* Right side: BSC info + Folder + Menu */}
         <div className="non-draggable flex items-center gap-1">
-          {/* BSC info */}
-          <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg dark:bg-claude-darkSurface bg-claude-surface mr-1">
-            <img src="bsc.svg" alt="BSC" className="w-3.5 h-3.5" />
-            {authState.isAuthenticated && authState.walletAddress ? (
-              <>
-                <span className="text-[10px] font-mono dark:text-claude-darkText text-claude-text">{formatWalletAddress(authState.walletAddress)}</span>
-                <span className="inline-flex items-center gap-0.5 rounded-full font-bold leading-none whitespace-nowrap" style={authState.subActive ? { padding:'1px 6px', fontSize:9, background:'linear-gradient(135deg,#fde68a,#f59e0b)', color:'#3a2400', boxShadow:'0 0 6px rgba(245,158,11,0.4)' } : { padding:'1px 6px', fontSize:9, background:'rgba(255,255,255,0.06)', color:'#9aa0aa', border:'1px solid rgba(255,255,255,0.12)' }}>{authState.subActive ? '👑' : '🪙'} {authState.planName || (i18nService.currentLanguage === 'zh' ? '免费版' : 'Free')}</span>
-                <span className="text-[10px] dark:text-claude-darkTextSecondary text-claude-textSecondary whitespace-nowrap">{i18nService.currentLanguage === 'zh' ? '积分余额 ' : 'Credits '}<span className={`font-semibold ${authState.tokenBalance < 1000 ? 'text-red-500' : 'dark:text-claude-darkText text-claude-text'}`}>{authState.tokenBalance.toLocaleString()}</span></span>
-                <button
-                  type="button"
-                  onClick={() => window.dispatchEvent(new CustomEvent('noobclaw:show-wallet'))}
-                  className={`non-draggable px-2 py-0.5 rounded text-[10px] font-bold transition-colors shadow-sm ${
-                    authState.tokenBalance < 1000
-                      ? 'bg-yellow-500 text-white hover:bg-yellow-600 shadow-yellow-500/30'
-                      : 'bg-green-500 text-white hover:bg-green-600 shadow-green-500/30'
-                  }`}
-                  title={i18nService.currentLanguage === 'zh' ? '点击去「我的充值」' : 'Open Top Up'}
-                >
-                  {i18nService.currentLanguage === 'zh' ? '💰 充值' : '💰 Top up'}
-                </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                onClick={() => noobClawAuth.requireLoginUI()}
-                className="px-2 py-0.5 rounded text-[10px] font-semibold bg-claude-accent text-white hover:bg-claude-accentHover transition-colors"
-              >
-                {i18nService.t('coworkConnectWallet')}
-              </button>
-            )}
-          </div>
+          {/* BSC 钱包信息 + 订阅会员/购买积分(与矩阵头部一致) */}
+          <div className="mr-1"><WalletBadge size="compact" /></div>
           {/* Website + Twitter links */}
           <button
             type="button"

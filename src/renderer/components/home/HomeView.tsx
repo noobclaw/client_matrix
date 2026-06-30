@@ -5,6 +5,7 @@ import SidebarToggleIcon from '../icons/SidebarToggleIcon';
 import ComposeIcon from '../icons/ComposeIcon';
 import TickerMarquee from '../cowork/TickerMarquee';
 import WindowTitleBar from '../window/WindowTitleBar';
+import { WalletBadge } from '../common/WalletBadge';
 
 export interface HomeViewProps {
   isSidebarCollapsed?: boolean;
@@ -29,11 +30,6 @@ const OFFICIAL_SITE = 'https://noobclaw.com';
 const TUTORIAL_URL = 'https://docs.noobclaw.com/';
 const GITHUB_URL = 'https://github.com/noobclaw';
 
-const formatWalletAddress = (addr: string) => {
-  if (addr.length <= 10) return addr;
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
-};
-
 const HomeView: React.FC<HomeViewProps> = ({
   isSidebarCollapsed,
   onToggleSidebar,
@@ -42,7 +38,6 @@ const HomeView: React.FC<HomeViewProps> = ({
   onShowMatrix,
   onShowMatrixTaskNew,
   onShowMatrixTasks,
-  onShowWallet,
   onShowInvite,
   matrixExpiredCount = 0,
 }) => {
@@ -77,45 +72,8 @@ const HomeView: React.FC<HomeViewProps> = ({
               {updateBadge}
             </div>
           )}
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg dark:bg-claude-darkSurface bg-claude-surface">
-            <img src="bsc.svg" alt="BSC" className="w-4 h-4" />
-            <span className="text-xs font-medium dark:text-claude-darkTextSecondary text-claude-textSecondary">BSC</span>
-            {authState.isAuthenticated && authState.walletAddress ? (
-              <>
-                <span className="text-xs font-mono dark:text-claude-darkText text-claude-text">
-                  {formatWalletAddress(authState.walletAddress)}
-                </span>
-                <span className="inline-flex items-center gap-1 rounded-full font-bold leading-none whitespace-nowrap" style={authState.subActive ? { padding:'2px 8px', fontSize:10, background:'linear-gradient(135deg,#fde68a,#f59e0b)', color:'#3a2400', boxShadow:'0 0 8px rgba(245,158,11,0.4)' } : { padding:'2px 8px', fontSize:10, background:'rgba(255,255,255,0.06)', color:'#9aa0aa', border:'1px solid rgba(255,255,255,0.12)' }}>
-                  {authState.subActive ? '👑' : '🪙'} {authState.planName || (isZh ? '免费版' : 'Free')}
-                </span>
-                <span className="text-xs dark:text-claude-darkTextSecondary text-claude-textSecondary whitespace-nowrap">
-                  {isZh ? '积分余额 ' : 'Credits '}<span className={`font-semibold ${authState.tokenBalance < 1000 ? 'text-red-500' : 'dark:text-claude-darkText text-claude-text'}`}>{authState.tokenBalance.toLocaleString()}</span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => (onShowWallet ? onShowWallet() : window.dispatchEvent(new CustomEvent('noobclaw:show-wallet')))}
-                  className={`non-draggable px-3 py-1 rounded text-sm font-bold transition-colors shadow-sm ${
-                    authState.tokenBalance < 1000
-                      ? 'bg-yellow-500 text-white hover:bg-yellow-600 shadow-yellow-500/30'
-                      : 'bg-green-500 text-white hover:bg-green-600 shadow-green-500/30'
-                  }`}
-                  title={isZh ? '点击去「我的充值」' : 'Open Top Up'}
-                >
-                  {authState.tokenBalance < 1000
-                    ? i18nService.t('coworkLowBalance')
-                    : (isZh ? '💰 充值' : '💰 Top up')}
-                </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                onClick={() => noobClawAuth.requireLoginUI()}
-                className="px-2 py-0.5 rounded text-xs font-semibold bg-claude-accent text-white hover:bg-claude-accentHover transition-colors"
-              >
-                {i18nService.t('coworkConnectWallet')}
-              </button>
-            )}
-          </div>
+          {/* BSC 钱包信息 + 订阅会员/购买积分(与矩阵头部一致) */}
+          <WalletBadge />
         </div>
         <div className="non-draggable flex items-center gap-1 mr-1">
           {onShowInvite && (

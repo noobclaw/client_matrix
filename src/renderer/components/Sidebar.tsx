@@ -75,7 +75,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   // v6.x:「AI对话」二级折叠组(新建对话 / web3连接 / 行业热点)。默认收起;
   //   当组内某子项激活时强制展开,避免高亮项被折叠藏起来。
   const [aiChatOpen, setAiChatOpen] = useState(false);
-  const aiChildActive = activeView === 'cowork' || activeView === 'mcp' || activeView === 'web3news' || activeView === 'scheduledTasks' || activeView === 'skills';
+  const aiChildActive = activeView === 'cowork' || activeView === 'coworkHistory' || activeView === 'mcp' || activeView === 'web3news' || activeView === 'scheduledTasks' || activeView === 'skills';
   useEffect(() => { if (aiChildActive) setAiChatOpen(true); }, [aiChildActive]);
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());

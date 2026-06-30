@@ -188,7 +188,7 @@ const fmtTime = (ts?: number) => { if (!ts || ts >= Number.MAX_SAFE_INTEGER) ret
 
 interface Props { screen?: 'accounts' | 'newTask' | 'tasks' | 'runs'; initialPlatform?: string; onNavigate?: (s: string) => void; onPlatformChange?: (p: string) => void; isSidebarCollapsed?: boolean; onToggleSidebar?: () => void; onShowInvite?: () => void }
 
-const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onNavigate, onPlatformChange, onShowInvite }) => {
+const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onNavigate, onPlatformChange }) => {
   const [accounts, setAccounts] = useState<MatrixAccount[]>([]);
   // 每个平台账号上限:服务端 /api/matrix/config 下发(admin 可调),拉不到/未登录 → 兜底 10。
   const [maxAccountsPerPlatform, setMaxAccountsPerPlatform] = useState<number>(MAX_ACCOUNTS_PER_PLATFORM_FALLBACK);
@@ -595,11 +595,6 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
         <h1 className="text-lg font-medium mr-3">{SCREEN_TITLE[screen] || '矩阵号'}</h1>
         {/* 钱包(BSC/地址/积分/充值)—— 与新建页一致 */}
         <WalletBadge />
-        {/* 分享给好友 */}
-        {onShowInvite && (
-          <button type="button" onClick={onShowInvite} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-green-500/10 text-green-500 border border-green-500/40 hover:bg-green-500/20 active:scale-95">🎁 分享给好友</button>
-        )}
-
         <div className="ml-auto flex items-center gap-2">
           {/* 指纹浏览器:全局版本选择器。服务端有几个版本就列几个,已装打勾、未装给下载按钮。
               选中已装版本即可开跑任务(选中版即所有号/任务用的内核)。 */}

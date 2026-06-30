@@ -14,6 +14,8 @@ interface CoworkSessionItemProps {
   isBatchMode: boolean;
   isSelected: boolean;
   showBatchOption?: boolean;
+  /** 操作菜单按钮常驻显示(不靠 hover);用于「所有 AI 对话」主页面。 */
+  alwaysShowActions?: boolean;
   onSelect: () => void;
   onDelete: () => void;
   onTogglePin: (pinned: boolean) => void;
@@ -93,6 +95,7 @@ const CoworkSessionItem: React.FC<CoworkSessionItemProps> = ({
   isBatchMode,
   isSelected,
   showBatchOption = true,
+  alwaysShowActions = false,
   onSelect,
   onDelete,
   onTogglePin,
@@ -369,7 +372,7 @@ const CoworkSessionItem: React.FC<CoworkSessionItemProps> = ({
         className={`absolute right-1.5 top-1.5 transition-opacity ${
           isRenaming
             ? 'opacity-0 pointer-events-none'
-            : session.pinned
+            : alwaysShowActions || session.pinned
               ? 'opacity-100'
               : 'opacity-0 group-hover:opacity-100'
         }`}
