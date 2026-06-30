@@ -325,7 +325,9 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
   // 下载指定版本(不传则下当前选中/最新版)。进度走 matrix:kernel SSE。
   const downloadKernel = async (version?: string) => {
     const v = version || selectedVersion || kernel.configuredVersion || '';
-    setShowKernelModal(true); setKernelBusy(true); setKernelPct(0); setKernelMsg('准备下载…');
+    // 不强制开弹窗:从下拉点「下载」就只在下拉里显示进度;从「未就绪」拦截弹窗点下载时
+    // 弹窗本来就开着,进度显示在弹窗。避免下拉 + 弹窗两处重复显示同一条进度。
+    setKernelBusy(true); setKernelPct(0); setKernelMsg('准备下载…');
     await M()?.ensureKernel({ version: v });
   };
 
@@ -585,20 +587,18 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
               <>
                 {/* 点击空白关闭 */}
                 <div className="fixed inset-0 z-40" onClick={() => setKernelMenuOpen(false)} />
-                <div className="absolute right-0 mt-1 z-50 w-72 rounded-xl py-1 shadow-xl dark:bg-claude-darkBg bg-white border dark:border-white/10 border-black/10">
-                  <div className="px-3 py-1.5 text-[11px] opacity-50">指纹浏览器版本(选已下载的即可开始任务)</div>
+                <div className="absolute right-0 mt-1 z-50 w-64 rounded-xl py-1 shadow-xl dark:bg-claude-darkBg bg-white border dark:border-white/10 border-black/10">
+                  <div className="px-3 py-1.5 text-[11px] opacity-50">选择内核版本</div>
                   {(kernel.available && kernel.available.length) ? kernel.available.map((a) => {
                     const isSel = a.version === selectedVersion;
                     return (
-                      <div key={a.version} className={`flex items-center justify-between gap-2 px-3 py-2 ${isSel ? 'bg-green-500/10' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}>
+                      <div key={a.version} className={`flex items-center justify-between gap-2 px-3 py-1.5 ${isSel ? 'bg-green-500/10' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}>
                         <button type="button" disabled={!a.installed} onClick={() => a.installed && chooseVersion(a.version)}
-                          className={`flex-1 text-left ${a.installed ? 'cursor-pointer' : 'cursor-default opacity-70'}`}>
-                          <div className="text-xs font-medium flex items-center gap-1.5">
-                            {a.label || `v${a.version}`}
-                            {a.recommended && <span className="text-[10px] px-1 rounded bg-violet-500/20 text-violet-500">推荐</span>}
-                            {isSel && a.installed && <span className="text-[10px] text-green-500">使用中</span>}
-                          </div>
-                          {(a.note || a.sizeMb) ? <div className="text-[10px] opacity-50 mt-0.5">{a.note}{a.note && a.sizeMb ? ' · ' : ''}{a.sizeMb ? `约 ${a.sizeMb}MB` : ''}</div> : null}
+                          className={`flex-1 min-w-0 text-left flex items-center gap-1.5 ${a.installed ? 'cursor-pointer' : 'cursor-default opacity-70'}`}>
+                          <span className="text-xs font-medium truncate">{a.label || `v${a.version}`}</span>
+                          {a.sizeMb ? <span className="text-[10px] opacity-40 shrink-0">{a.sizeMb}MB</span> : null}
+                          {a.recommended && <span className="text-[10px] px-1 rounded bg-violet-500/20 text-violet-500 shrink-0">推荐</span>}
+                          {isSel && a.installed && <span className="text-[10px] text-green-500 shrink-0">使用中</span>}
                         </button>
                         {a.installed
                           ? <span className="text-green-500 text-sm shrink-0">✓</span>
@@ -607,19 +607,19 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
                       </div>
                     );
                   }) : (
-                    <div className="px-3 py-3 text-xs opacity-60">{kernel.installed ? '已安装本地版本' : '正在获取版本列表…(需联网)'}</div>
+                    <div className="px-3 py-3 text-xs opacity-60">{kernel.installed ? '已安装本地版本' : '正在获取版本列表…'}</div>
                   )}
-                  {(kernelBusy || (kernelMsg && kernelPct > 0)) && (
+                  {kernelBusy && (
                     <div className="px-3 pt-1.5 pb-1 border-t dark:border-white/10 border-black/10">
                       <div className="h-1.5 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden"><div className="h-full bg-violet-500 transition-all" style={{ width: `${Math.max(2, kernelPct)}%` }} /></div>
-                      <div className="text-[10px] opacity-60 mt-1 truncate">{kernelMsg}{kernelBusy ? ` · ${kernelPct}%` : ''}</div>
+                      <div className="text-[10px] opacity-60 mt-1 truncate">{kernelMsg} · {kernelPct}%</div>
                     </div>
                   )}
                 </div>
               </>
             )}
           </div>
-          {kernelMsg && !kernelMenuOpen && <span className="text-xs opacity-60 max-w-[160px] truncate">{kernelMsg}</span>}
+          {kernelBusy && !kernelMenuOpen && <span className="text-xs opacity-60 max-w-[160px] truncate">{kernelMsg} · {kernelPct}%</span>}
         </div>
       </div>
 
