@@ -1321,7 +1321,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
           </div>
           {/* 优势标签(对齐旧版各平台 WorkflowsPage 底部):矩阵涨粉通用卖点。 */}
           <div className="mt-6 flex flex-wrap gap-2 justify-center">
-            {[['🛡️', '完全模拟人类行为不封号'], ['🚀', '涨粉丝快(真实互动飞速涨粉)'], ['💰', '成本超低'], ['🤖', '全智能控制']].map(([icon, t]) => (
+            {[['🛡️', '完全模拟人类行为不封号'], ['🚀', '涨粉丝快(真实互动飞速涨粉)'], ['💰', '成本超低（1000点赞+500关注+300评论+500图文<$1）'], ['🤖', '全智能控制']].map(([icon, t]) => (
               <span key={t} className="inline-flex items-center gap-1 text-[11px] px-3 py-1.5 rounded-full border border-violet-500/20 bg-violet-500/5 text-gray-700 dark:text-gray-300">{icon} {t}</span>
             ))}
           </div>
