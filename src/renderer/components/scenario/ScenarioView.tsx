@@ -666,7 +666,6 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     const binanceRepost = {
       sourcePlatform: input.sourcePlatform,
       sourceAccountId: input.sourceAccountId,
-      keyword: input.keyword,
       material: input.material,
       withImage: input.withImage,
       language: input.language,

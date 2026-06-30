@@ -182,12 +182,13 @@ async function downloadVideoUrl(accountId: string, url: string, destPath: string
 
 // 抖音视频源:复用 douyin_search driver(返回无水印 play_addr urls + 同序 titles 文案),runner 侧逐个下载。
 async function collectDouyinVideos(
-  opts: BinanceRepostTaskOptions, srcAccId: string, keyword: string, want: number,
+  opts: BinanceRepostTaskOptions, srcAccId: string, keywords: string[], want: number,
   seen: { set: Set<string>; save: () => void }, log: (m: string) => void,
 ): Promise<RepostCandidate[]> {
   const out: RepostCandidate[] = [];
-  log('🎬 抖音搜索 + 取无水印源(douyin_search,最高码率)…');
-  const r = await runMatrixDouyinSearch(srcAccId, [keyword], Math.min(want * 2, 20), 'video', (m) => log(m));
+  // douyin_search driver 内部会逐个关键词搜直到够 want(随机轮换 + 自带去水印/最高码率)。
+  log('🎬 抖音搜索 + 取无水印源(关键词 ' + keywords.length + ' 个,搜尽自动换下一个)…');
+  const r = await runMatrixDouyinSearch(srcAccId, keywords, Math.min(want * 2, 20), 'video', (m) => log(m));
   const urls = Array.isArray(r.urls) ? r.urls : [];
   const titles = Array.isArray(r.titles) ? r.titles : [];
   if (!urls.length) { log('⚠️ 抖音未取到视频:' + (r.reason || 'empty')); return out; }
@@ -246,9 +247,10 @@ async function collectFromSource(
   if (!acc) { log('❌ 采集号不存在'); return { candidates: [], reason: 'source_account_not_found' }; }
   if (acc.platform !== cfg.sourcePlatform) { log('❌ 采集号平台与来源平台不符'); return { candidates: [], reason: 'source_platform_mismatch' }; }
 
-  const keyword = String(cfg.keyword || '').trim()
-    || (Array.isArray(acc.keywords) ? acc.keywords.filter((k) => String(k || '').trim())[0] : '') || '';
-  if (!keyword) { log('❌ 没有搜索关键词(任务未填、采集号也无关键词)'); return { candidates: [], reason: 'no_keyword' }; }
+  // 关键词:直接用采集号自己的关键词【全列表】(不再让用户在任务里填);cfg.keyword 仅作老任务/可选覆盖兼容。
+  const accKw = Array.isArray(acc.keywords) ? acc.keywords.map((k) => String(k || '').trim()).filter(Boolean) : [];
+  const keywords = (cfg.keyword && String(cfg.keyword).trim()) ? [String(cfg.keyword).trim()] : accKw;
+  if (!keywords.length) { log('❌ 采集号没有关键词 —— 去「我的矩阵账号」给它加几个赛道关键词'); return { candidates: [], reason: 'no_keywords' }; }
 
   const authToken = opts.authToken || getNoobClawAuthToken() || undefined;
   const seen = collectSeenStore(srcAccId, cfg.sourcePlatform);
@@ -276,7 +278,7 @@ async function collectFromSource(
 
     // 抖音视频源:不走采集剧本,runner 侧复用 douyin_search driver 搜+取无水印 + 逐个下载。
     if (cfg.sourcePlatform === 'douyin') {
-      const dyCands = await collectDouyinVideos(opts, srcAccId, keyword, want, seen, log);
+      const dyCands = await collectDouyinVideos(opts, srcAccId, keywords, want, seen, log);
       setAccountStatus(srcAccId, 'idle');
       log('采集完成:' + dyCands.length + ' 条候选');
       return { candidates: dyCands };
@@ -284,7 +286,7 @@ async function collectFromSource(
 
     const browserFn: any = (command: string, params?: any, timeout?: number) => matrixCmd(srcAccId, command, params, timeout);
     const ctx: any = {
-      task: { keyword, want },
+      task: { keywords, keyword: keywords[0], want },
       config: collectPack?.config || {}, manifest: collectPack?.manifest || {},
       appLocale: 'zh',
       aborted: () => !!opts.signal?.aborted,

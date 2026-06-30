@@ -45,7 +45,6 @@ export interface BinanceRepostWizardSave {
   frequency: string;
   sourcePlatform: 'xhs' | 'douyin' | 'tiktok' | 'x';
   sourceAccountId: string;
-  keyword: string;
   material: 'image' | 'video';
   withImage: boolean;
   language: 'zh' | 'en' | 'mixed';
@@ -77,7 +76,6 @@ const MatrixBinanceRepostWizard: React.FC<Props> = ({ platformLabel, platform, a
   const br = initialTask?.binanceRepost || {};
   const [sourcePlatform, setSourcePlatform] = useState<'xhs' | 'douyin' | 'tiktok' | 'x'>(br.sourcePlatform || 'xhs');
   const [sourceAccountId, setSourceAccountId] = useState<string>(br.sourceAccountId || '');
-  const [keyword, setKeyword] = useState<string>(br.keyword || '');
   const [material, setMaterial] = useState<'image' | 'video'>(br.material || 'image');
   const [withImage, setWithImage] = useState<boolean>(br.withImage !== false);
   const [language, setLanguage] = useState<'zh' | 'en' | 'mixed'>(br.language || 'mixed');
@@ -98,7 +96,7 @@ const MatrixBinanceRepostWizard: React.FC<Props> = ({ platformLabel, platform, a
   useEffect(() => {
     if (sourceAccountId && !sourceCandidates.some((a) => a.id === sourceAccountId)) setSourceAccountId('');
   }, [sourcePlatform]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (saveError) setSaveError(null); /* eslint-disable-next-line */ }, [selectedIds, sourcePlatform, sourceAccountId, keyword, withImage, language, runInterval]);
+  useEffect(() => { if (saveError) setSaveError(null); /* eslint-disable-next-line */ }, [selectedIds, sourcePlatform, sourceAccountId, withImage, language, runInterval]);
 
   const canAdvance: Record<WizardStep, { ok: boolean; reason?: string }> = {
     1: { ok: selectedIds.length > 0, reason: isZh ? '请至少勾选一个已登录币安账号' : 'Select at least one account' },
@@ -121,7 +119,6 @@ const MatrixBinanceRepostWizard: React.FC<Props> = ({ platformLabel, platform, a
         frequency: runInterval,
         sourcePlatform,
         sourceAccountId,
-        keyword: keyword.trim(),
         material,
         withImage,
         language,
@@ -252,8 +249,12 @@ const MatrixBinanceRepostWizard: React.FC<Props> = ({ platformLabel, platform, a
             </div>
 
             <div>
-              <label className="text-sm font-medium dark:text-gray-200 mb-1.5 block">🔍 搜索关键词<span className="text-xs text-gray-400 font-normal ml-1">· 空则用采集号自己的关键词</span></label>
-              <input type="text" value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder={srcAcc && Array.isArray(srcAcc.keywords) && srcAcc.keywords.length ? `留空则用:${srcAcc.keywords[0]}` : '例:比特币、链上数据、DeFi'} className="w-full px-3 py-2 rounded-lg text-sm border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 dark:text-white focus:border-amber-500 outline-none" />
+              <label className="text-sm font-medium dark:text-gray-200 mb-1.5 block">🔍 搜索关键词<span className="text-xs text-gray-400 font-normal ml-1">· 直接用采集号自己的关键词(每轮随机轮换,搜尽自动换下一个)</span></label>
+              <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/40 px-3 py-2 text-[12px] text-gray-600 dark:text-gray-300 min-h-[38px] flex items-center">
+                {srcAcc && Array.isArray(srcAcc.keywords) && srcAcc.keywords.length > 0
+                  ? srcAcc.keywords.join('、')
+                  : <span className="text-amber-500">该采集号还没设关键词 —— 去「我的矩阵账号」给它加几个赛道关键词</span>}
+              </div>
             </div>
 
           </>
@@ -309,7 +310,7 @@ const MatrixBinanceRepostWizard: React.FC<Props> = ({ platformLabel, platform, a
             <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 px-4 py-3 text-sm space-y-1.5">
               <div className="font-semibold dark:text-gray-200 mb-1">📋 任务摘要</div>
               <SummaryRow label="来源" value={`${PLATFORM_NAME[sourcePlatform]} · 采集号 ${srcAcc ? (srcAcc.nickname || srcAcc.displayName) : '(未选)'}`} />
-              <SummaryRow label="关键词" value={keyword.trim() || '(用采集号关键词)'} />
+              <SummaryRow label="关键词" value={srcAcc && Array.isArray(srcAcc.keywords) && srcAcc.keywords.length ? `采集号关键词(${srcAcc.keywords.length} 个,随机轮换)` : '采集号关键词'} />
               <SummaryRow label="形态" value={material === 'image' ? '图文(源图+仿写)' : '视频'} />
               <SummaryRow label="发布号" value={`${selectedIds.length} 个币安号,各领一条独立仿写`} />
               <SummaryRow label="语言" value={langLabel(language)} />
