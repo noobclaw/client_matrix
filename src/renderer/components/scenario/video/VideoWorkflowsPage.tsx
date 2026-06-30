@@ -2747,9 +2747,9 @@ const VideoConfigModal: React.FC<{
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* 遮罩 */}
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      {/* 弹窗主体 */}
-      <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-2xl">
-        <div className="px-6 pt-6 pb-3 border-b border-gray-100 dark:border-gray-800 flex items-start justify-between">
+      {/* 弹窗主体:flex 列布局 → 头/底固定,中间内容区内部滚动(内容多时「下一步」按钮不会被挤出屏外) */}
+      <div className="relative w-full max-w-2xl max-h-[90vh] flex flex-col rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-2xl">
+        <div className="shrink-0 px-6 pt-6 pb-3 border-b border-gray-100 dark:border-gray-800 flex items-start justify-between">
           <div>
             <h3 className="text-lg font-bold dark:text-white flex items-center gap-2">
               🎬 {isEdit
@@ -2765,30 +2765,31 @@ const VideoConfigModal: React.FC<{
                   <div className={`h-px w-6 ${step > 1 ? 'bg-rose-500' : 'bg-gray-200 dark:bg-gray-700'}`} />
                 </>
               )}
-              <StepDot n={2} active={step === 2} done={step > 2} label={isZh ? (matrixMode ? '选号' : '赛道') : (matrixMode ? 'Account' : 'Track')} />
+              {/* forcedMode(从卡片进来跳过 step1「模式」)时显示编号 -1 → 选号=1…发布=7,不从 2 起 */}
+              <StepDot n={forcedMode ? 1 : 2} active={step === 2} done={step > 2} label={isZh ? (matrixMode ? '选号' : '赛道') : (matrixMode ? 'Account' : 'Track')} />
               <div className={`h-px w-6 ${step > 2 ? 'bg-rose-500' : 'bg-gray-200 dark:bg-gray-700'}`} />
-              <StepDot n={3} active={step === 3} done={step > 3} label={isZh ? '文案' : 'Script'} />
+              <StepDot n={forcedMode ? 2 : 3} active={step === 3} done={step > 3} label={isZh ? '文案' : 'Script'} />
               <div className={`h-px w-6 ${step > 3 ? 'bg-rose-500' : 'bg-gray-200 dark:bg-gray-700'}`} />
-              <StepDot n={4} active={step === 4} done={step > 4} label={isZh ? '画面' : 'Visuals'} />
+              <StepDot n={forcedMode ? 3 : 4} active={step === 4} done={step > 4} label={isZh ? '画面' : 'Visuals'} />
               <div className={`h-px w-6 ${step > 4 ? 'bg-rose-500' : 'bg-gray-200 dark:bg-gray-700'}`} />
-              <StepDot n={5} active={step === 5} done={step > 5} label={(mode === 'pure_ai' && !aiNarration) ? (isZh ? '音乐' : 'Music') : (isZh ? '音频' : 'Audio')} />
+              <StepDot n={forcedMode ? 4 : 5} active={step === 5} done={step > 5} label={(mode === 'pure_ai' && !aiNarration) ? (isZh ? '音乐' : 'Music') : (isZh ? '音频' : 'Audio')} />
               {/* Seedance 纯画面(未开 AI 配音)无字幕步 → 隐藏「字幕」圆点 + 一段连接线 */}
               {!(mode === 'pure_ai' && !aiNarration) && (
                 <>
                   <div className={`h-px w-6 ${step > 5 ? 'bg-rose-500' : 'bg-gray-200 dark:bg-gray-700'}`} />
-                  <StepDot n={6} active={step === 6} done={step > 6} label={isZh ? '字幕' : 'Subtitles'} />
+                  <StepDot n={forcedMode ? 5 : 6} active={step === 6} done={step > 6} label={isZh ? '字幕' : 'Subtitles'} />
                 </>
               )}
               <div className={`h-px w-6 ${step > 6 ? 'bg-rose-500' : 'bg-gray-200 dark:bg-gray-700'}`} />
-              <StepDot n={7} active={step === 7} done={step > 7} label={isZh ? '出片' : 'Output'} />
+              <StepDot n={forcedMode ? 6 : 7} active={step === 7} done={step > 7} label={isZh ? '出片' : 'Output'} />
               <div className={`h-px w-6 ${step > 7 ? 'bg-rose-500' : 'bg-gray-200 dark:bg-gray-700'}`} />
-              <StepDot n={8} active={step === 8} done={false} label={isZh ? '发布' : 'Publish'} />
+              <StepDot n={forcedMode ? 7 : 8} active={step === 8} done={false} label={isZh ? '发布' : 'Publish'} />
             </div>
           </div>
           <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
         </div>
 
-        <div className="px-6 py-4 space-y-4">
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
           {/* ── 步骤 1:生成模式(先定这条视频怎么做)── */}
           {step === 1 && (
             <>
@@ -3645,7 +3646,7 @@ const VideoConfigModal: React.FC<{
           )}
         </div>
 
-        <div className="px-6 py-4 border-t border-gray-100 dark:border-gray-800 flex gap-2">
+        <div className="shrink-0 px-6 py-4 border-t border-gray-100 dark:border-gray-800 flex gap-2">
           <button
             type="button"
             onClick={() => {
@@ -4932,8 +4933,8 @@ export const TemplateSpeedModal: React.FC<{ isZh: boolean; matrixMode?: boolean;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-2xl">
-        <div className="px-6 pt-6 pb-3 border-b border-gray-100 dark:border-gray-800 flex items-start justify-between">
+      <div className="relative w-full max-w-2xl max-h-[90vh] flex flex-col rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-2xl">
+        <div className="shrink-0 px-6 pt-6 pb-3 border-b border-gray-100 dark:border-gray-800 flex items-start justify-between">
           <div>
             <h3 className="text-lg font-bold dark:text-white">⚡ {isZh ? (isEdit ? '编辑模板速生' : '模板速生') : (isEdit ? 'Edit Template' : 'Template Speed')}</h3>
             <div className="flex items-center gap-2 mt-3 flex-wrap">
@@ -4951,7 +4952,7 @@ export const TemplateSpeedModal: React.FC<{ isZh: boolean; matrixMode?: boolean;
           <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
         </div>
 
-        <div className="px-6 py-4 space-y-4">
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
           {step === 1 && (
             <>
               {/* 数据源二选一:粘贴任意内容 / 选一个热榜(取前 N 条) */}
@@ -5212,7 +5213,7 @@ export const TemplateSpeedModal: React.FC<{ isZh: boolean; matrixMode?: boolean;
           {err && <div className="text-xs text-red-500">{err}</div>}
         </div>
 
-        <div className="px-6 py-4 border-t border-gray-100 dark:border-gray-800 flex gap-2">
+        <div className="shrink-0 px-6 py-4 border-t border-gray-100 dark:border-gray-800 flex gap-2">
           <button type="button" onClick={goBack}
             className="flex-1 py-2.5 rounded-lg text-sm font-medium border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800">
             {step === 1 ? (isZh ? '取消' : 'Cancel') : `← ${isZh ? '上一步' : 'Back'}`}
