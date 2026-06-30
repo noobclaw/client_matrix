@@ -13,6 +13,9 @@
  *    大概率要据真机反馈微调。这是预期内的。
  */
 
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { coworkLog } from '../coworkLogger';
 import { launchKernel, kernelNavigate, closeKernel, checkKernelLogin, NO_KERNEL_ERROR } from './kernelPool';
 import { installedKernelPath } from './kernelInstaller';
@@ -206,8 +209,35 @@ async function runOne(opts: TweetPostTaskOptions, pack: any, accountId: string):
       finish: (status: string, error?: string) => { finished = { status, error }; },
       aiCall,
       apiCall,
-      // 仅本地模式落盘(可选;失败不阻塞)。
-      saveDrafts: async (_arr: any[]) => ({ ok: true }),
+      // 落盘:文案 + 配图(源原图/AI 图)存一份到本地,返回 { dir } 供 orchestrator 打到日志尾巴。
+      // 对齐 imageTextRunner 的 saveDrafts(inline 不抽公用件);发布与仅本地两种模式 orchestrator 都会调。
+      saveDrafts: async (arr: any[]) => {
+        try {
+          const base = process.env.NOOBCLAW_MATRIX_DIR || path.join(os.homedir(), 'NoobClaw', 'matrix');
+          const draftsBase = path.join(base, 'drafts', opts.platform || acc.platform || 'x', accountId);
+          let lastDir = '';
+          for (const d of (Array.isArray(arr) ? arr : [])) {
+            const rawId = String(d?.source_post?.external_post_id || `draft_${Date.now()}`);
+            const safeId = rawId.replace(/[\\/:*?"<>|]/g, '_').slice(0, 120);
+            const dir = path.join(draftsBase, safeId);
+            fs.mkdirSync(dir, { recursive: true });
+            if (d?.text) { try { fs.writeFileSync(path.join(dir, 'text.txt'), String(d.text), 'utf8'); } catch { /* ignore */ } }
+            fs.writeFileSync(path.join(dir, 'draft.json'), JSON.stringify(d, null, 2), 'utf8');
+            const imgs = Array.isArray(d?.images) ? d.images : [];
+            for (let i = 0; i < imgs.length; i++) {
+              const img = imgs[i];
+              if (img && img.base64) {
+                const ext = String(img.mimeType || '').indexOf('png') >= 0 ? 'png' : 'jpg';
+                try { fs.writeFileSync(path.join(dir, `img_${i}.${ext}`), Buffer.from(img.base64, 'base64')); } catch { /* ignore */ }
+              }
+            }
+            lastDir = dir;
+          }
+          return { ok: true, dir: lastDir };
+        } catch (err: any) {
+          return { ok: false, reason: String(err?.message || err) };
+        }
+      },
       getPrompt: (name: string) => { const t = pack?.prompts?.[name]; if (!t) throw new Error('Missing prompt: ' + name); return t; },
       appendKeywords: (_arr: string[]) => { /* matrix: no-op */ },
       sleep: (min: number, max?: number) => new Promise<void>((resolve) => {
