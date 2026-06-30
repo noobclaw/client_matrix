@@ -194,6 +194,8 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
   const [maxAccountsPerPlatform, setMaxAccountsPerPlatform] = useState<number>(MAX_ACCOUNTS_PER_PLATFORM_FALLBACK);
   // 赛道预设库:服务端 /api/matrix/config 下发(admin 可加/改赛道、不打包),拉不到/未登录 → 内置兜底。
   const [trackPresets, setTrackPresets] = useState<TrackPreset[]>(FALLBACK_TRACK_PRESETS);
+  // 赛道下拉是否展开(自绘两列面板,替代原生 select:赛道多,两列更矮)。
+  const [trackOpen, setTrackOpen] = useState(false);
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -363,7 +365,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
     // 新号从第 1 步开始;代理表单清空(第 2 步填,不填则共用本机 IP)。
     setAddStep(1); setProxyForm({ protocol: 'socks5', host: '', port: '', username: '', password: '', geo: '' });
     setProxyMsg(null); setPendingProxySave(null); setProxyBusy(false);
-    setNotice(''); setShowAdd(true);
+    setTrackOpen(false); setNotice(''); setShowAdd(true);
   };
   // 选赛道 → 关键词 + 人设自动带出(可再改);选「自定义」(空)则保留当前内容让用户自己填。
   const pickTrack = (name: string) => {
@@ -371,7 +373,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
     const p = trackPresets.find((t) => t.name === name);
     if (p) { setNewKeywords(trackKeywords(p, platform).join(' ')); setNewPersona(p.persona); }
   };
-  const openEdit = (a: MatrixAccount) => { if (!requireLogin()) return; setEditId(a.id); setNewName(a.displayName); setNewGroup(a.group || ''); setNewPersona(a.persona || ''); setNewKeywords((a.keywords || []).join(' ')); setNewScope((a.loginScope as 'main' | 'creator') || 'main'); setNotice(''); setShowAdd(true); };
+  const openEdit = (a: MatrixAccount) => { if (!requireLogin()) return; setEditId(a.id); setNewName(a.displayName); setNewGroup(a.group || ''); setNewPersona(a.persona || ''); setNewKeywords((a.keywords || []).join(' ')); setNewScope((a.loginScope as 'main' | 'creator') || 'main'); setTrackOpen(false); setNotice(''); setShowAdd(true); };
   const confirmAdd = async (thenLogin: boolean) => {
     if (!requireLogin()) return;
     const m = M(); if (!m) { setNotice('matrix 接口未就绪'); return; }
@@ -1048,16 +1050,36 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
                 </div>
               )}
               <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">赛道（必选）<span className="ml-2 font-normal text-gray-400">选完自动带出人设和关键词，可再改</span></label>
-              <div className="relative mb-3">
-                <select value={trackPresets.some((t) => t.name === newGroup) ? newGroup : ''} onChange={(e) => pickTrack(e.target.value)} className="w-full appearance-none text-sm pl-3 pr-9 py-2.5 rounded-lg border dark:border-white/15 border-black/15 bg-transparent dark:bg-gray-800 cursor-pointer">
-                  {trackPresets.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}
-                  <option value="">自定义 / 其他(自己填人设 + 关键词)</option>
-                </select>
-                {/* 下拉箭头(对齐旧 client 的赛道下拉:appearance-none 去原生箭头 + 自绘 chevron) */}
-                <svg className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
+              {/* 赛道选择:自绘两列面板替代原生 select(赛道 30+ 项,单列太长,两列更矮)。
+                  弹窗容器 overflow-y-auto 会裁绝对定位浮层,故面板用行内展开、随弹窗滚动。 */}
+              {(() => { const isPreset = trackPresets.some((t) => t.name === newGroup); return (
+              <div className="mb-3">
+                <button type="button" onClick={() => setTrackOpen((v) => !v)}
+                  className="relative w-full text-left text-sm pl-3 pr-9 py-2.5 rounded-lg border dark:border-white/15 border-black/15 bg-transparent dark:bg-gray-800 cursor-pointer">
+                  {isPreset ? newGroup : '自定义 / 其他(自己填人设 + 关键词)'}
+                  <svg className={`absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none transition-transform ${trackOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                {trackOpen && (
+                  <div className="mt-1 grid grid-cols-2 gap-1 p-1 rounded-lg border dark:border-white/15 border-black/15 dark:bg-gray-800 bg-white max-h-72 overflow-y-auto">
+                    {trackPresets.map((t) => {
+                      const active = t.name === newGroup;
+                      return (
+                        <button key={t.name} type="button" onClick={() => { pickTrack(t.name); setTrackOpen(false); }}
+                          className={`text-left text-sm px-2.5 py-2 rounded-md truncate transition-colors ${active ? 'bg-claude-accent/15 text-claude-accent font-medium' : 'hover:bg-black/5 dark:hover:bg-white/10'}`}>
+                          {active ? '✓ ' : ''}{t.name}
+                        </button>
+                      );
+                    })}
+                    <button type="button" onClick={() => { pickTrack(''); setTrackOpen(false); }}
+                      className={`col-span-2 text-left text-sm px-2.5 py-2 rounded-md transition-colors ${!isPreset ? 'bg-claude-accent/15 text-claude-accent font-medium' : 'hover:bg-black/5 dark:hover:bg-white/10'}`}>
+                      {!isPreset ? '✓ ' : ''}自定义 / 其他(自己填人设 + 关键词)
+                    </button>
+                  </div>
+                )}
               </div>
+              ); })()}
               <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">人设<span className="ml-2 font-normal text-gray-400">你是谁、对谁说话、什么口吻</span></label>
               <textarea value={newPersona} onChange={(e) => setNewPersona(e.target.value)} placeholder="如:爱吃会做的美食博主,评论真诚接地气" rows={4} className="w-full text-sm px-3 py-2.5 rounded-lg border dark:border-white/15 border-black/15 bg-transparent mb-3" />
               <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">关键词<span className="ml-2 font-normal text-gray-400">空格分隔,互动时按这些搜</span></label>
