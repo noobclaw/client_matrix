@@ -174,6 +174,58 @@ class NoobClawApiService {
     }
   }
 
+  // ─── 会员订阅 ───
+
+  /** 拉套餐矩阵(含各周期折后价)+ 周期折扣 + 当前用户订阅/用量。会员中心用。 */
+  async getPlanConfig(): Promise<{
+    ok: boolean;
+    plans: Array<{
+      code: string; name_zh: string; name_en: string; sort_order: number;
+      price_cny: number; price_usd: number; monthly_credits: number;
+      max_accounts_per_platform: number; allowed_platforms: string;
+      prices: Record<string, { usd: number; cny: number; months: number; discount: number }>;
+    }>;
+    periodDiscounts: Record<string, number>;
+    current: {
+      planCode: string; subActive: boolean; period: string | null;
+      periodEnd: string | null; nextGrantAt: string | null;
+      subUsedRatio: number; subExpireAt: string | null; paidBalance: number;
+    };
+  } | null> {
+    try {
+      const res = await this.authedFetch(`${this.backendUrl}/api/plan/config`, {
+        headers: this.getAuthHeaders(),
+      });
+      if (!res.ok) return null;
+      return res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * 下订阅订单。金额由后端按套餐价(月价×月数×折扣)算,客户端只传档位+周期+链。
+   * 复用充值同款 /api/payment/create + /status 轮询;返回结构同 createOrder。
+   */
+  async createSubscriptionOrder(
+    planCode: string,
+    period: 'month' | 'quarter' | 'half' | 'year',
+    chain: 'BSC' | 'TRON' = 'TRON',
+  ): Promise<{ order?: any; treasuryWallet?: string; error?: string; code?: string } | null> {
+    try {
+      const res = await this.authedFetch(`${this.backendUrl}/api/payment/create`, {
+        method: 'POST',
+        headers: { ...this.getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chain, productType: 'subscription', planCode, period }),
+      });
+      const data = await res.json();
+      if (!res.ok) return { error: data.message || data.error, code: data.code };
+      return data;
+    } catch {
+      return null;
+    }
+  }
+
   // ─── CNY 卡密充值 ───
   // /packages 是 public(不需登录)— 充值页一进来就能拉档位 + 咸鱼地址。
   // /preview 和 /redeem 需要登录,走 authedFetch(401 自动弹登录)。
@@ -189,7 +241,7 @@ class NoobClawApiService {
   }
 
   /** 预查询卡密面额 + 积分,不核销。前端弹 confirm 前用。 */
-  async previewRedeemCode(code: string): Promise<{ ok?: boolean; face_value_rmb?: number; credits?: number; error?: string; message?: string } | null> {
+  async previewRedeemCode(code: string): Promise<{ ok?: boolean; face_value_rmb?: number; credits?: number; product_type?: string; plan_code?: string; plan_period?: string; plan_name?: string; error?: string; message?: string } | null> {
     try {
       const res = await this.authedFetch(`${this.backendUrl}/api/redeem/preview`, {
         method: 'POST',
@@ -203,7 +255,7 @@ class NoobClawApiService {
   }
 
   /** 原子化核销卡密,成功后积分秒到账。 */
-  async redeemCode(code: string): Promise<{ ok?: boolean; credits?: number; face_value_rmb?: number; balance_after?: number; error?: string; message?: string } | null> {
+  async redeemCode(code: string): Promise<{ ok?: boolean; credits?: number; face_value_rmb?: number; balance_after?: number; product_type?: string; plan_code?: string; plan_period?: string; error?: string; message?: string } | null> {
     try {
       const res = await this.authedFetch(`${this.backendUrl}/api/redeem`, {
         method: 'POST',

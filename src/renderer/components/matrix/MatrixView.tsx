@@ -209,6 +209,17 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
         const tp = data?.trackPresets;
         if (alive && Array.isArray(tp) && tp.length > 0 && tp.every((t: any) => t && t.name)) setTrackPresets(tp as TrackPreset[]);
       } catch { /* 网络/未登录 → 用兜底 */ }
+      // 号数墙以【订阅档位】为准:拉 /api/plan/config 取当前档的单平台上限,覆盖 matrix/config 的全局兜底。
+      try {
+        const pres = await fetch(`${getBackendApiUrl()}/api/plan/config`, { headers: noobClawAuth.getAuthHeaders() });
+        if (pres.ok) {
+          const pdata = await pres.json();
+          const cur = pdata?.current?.planCode;
+          const plan = (pdata?.plans || []).find((p: any) => p && p.code === cur);
+          const lim = Number(plan?.max_accounts_per_platform);
+          if (alive && Number.isInteger(lim) && lim > 0) setMaxAccountsPerPlatform(lim);
+        }
+      } catch { /* 拉不到 → 沿用 matrix/config 或兜底上限 */ }
     })();
     return () => { alive = false; };
   }, []);
@@ -357,7 +368,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
     if (!requireKernel()) return;
     // 每个平台账号数上限(快手两端按平台总数合并计):达上限不开弹窗,只提示。上限服务端可调。
     const platformTotal = accounts.filter((a) => a.platform === platform).length;
-    if (platformTotal >= maxAccountsPerPlatform) { setNotice(`${PLATFORM_LABEL[platform]}账号已达上限(每个平台最多 ${maxAccountsPerPlatform} 个),如需添加请先移除部分账号`); return; }
+    if (platformTotal >= maxAccountsPerPlatform) { setNotice(`${PLATFORM_LABEL[platform]}账号已达套餐上限(每个平台最多 ${maxAccountsPerPlatform} 个)。升级订阅可提升上限 —— 见左侧「会员中心」;或先移除部分账号`); return; }
     setEditId(null); setNewName(`账号${platformAccounts.length + 1}-`); setNewScope(ksScope);
     // 默认选中一个赛道并带出人设 + 关键词(可再改)。x/tiktok/youtube 带英文词。
     const def = trackPresets.find((t) => t.name === DEFAULT_TRACK) || trackPresets[0];

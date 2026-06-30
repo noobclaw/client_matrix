@@ -301,13 +301,19 @@ export const WalletView: React.FC<WalletViewProps> = ({ isSidebarCollapsed, onTo
       }
       const faceValue = preview.face_value_rmb ?? 0;
       const credits = preview.credits ?? 0;
+      // 订阅码:确认弹窗显示「开通 进阶版·年付」而非积分数。其它(充值码)走原文案。
+      const isSubCode = preview.product_type === 'subscription';
+      const periodLabel: Record<string, string> = { month: '月付', quarter: '季付', half: '半年', year: '年付' };
+      const confirmMessage = isSubCode
+        ? `确认开通会员【${preview.plan_name || '会员'} · ${periodLabel[preview.plan_period || ''] || ''}】?(卡面价值 ¥${faceValue})`
+        : i18nService.t('walletRedeemConfirmMsg', {
+            rmb: String(faceValue),
+            credits: Number(credits).toLocaleString(),
+          });
       setConfirmDialog({
         visible: true,
         title: i18nService.t('walletRedeemConfirmTitle'),
-        message: i18nService.t('walletRedeemConfirmMsg', {
-          rmb: String(faceValue),
-          credits: Number(credits).toLocaleString(),
-        }),
+        message: confirmMessage,
         onConfirm: async () => {
           setConfirmDialog(d => ({ ...d, visible: false }));
           setRedeemBusy(true);
@@ -320,11 +326,13 @@ export const WalletView: React.FC<WalletViewProps> = ({ isSidebarCollapsed, onTo
             }
             setRedeemCodeInput('');
             setRedeemMsg({
-              text: i18nService.t('walletRedeemSuccess', {
-                credits: Number(d.credits ?? 0).toLocaleString(),
-                rmb: String(d.face_value_rmb ?? 0),
-                balance: Number(d.balance_after ?? 0).toLocaleString(),
-              }),
+              text: d.product_type === 'subscription'
+                ? `✅ 会员已开通（${periodLabel[d.plan_period || ''] || ''}），本月算力已发放`
+                : i18nService.t('walletRedeemSuccess', {
+                    credits: Number(d.credits ?? 0).toLocaleString(),
+                    rmb: String(d.face_value_rmb ?? 0),
+                    balance: Number(d.balance_after ?? 0).toLocaleString(),
+                  }),
               color: '#4ade80',
             });
             await noobClawAuth.refreshBalance();
