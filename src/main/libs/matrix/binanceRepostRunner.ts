@@ -186,13 +186,15 @@ async function collectDouyinVideos(
   const titles = Array.isArray(r.titles) ? r.titles : [];
   if (!urls.length) { log('⚠️ 抖音未取到视频:' + (r.reason || 'empty')); return out; }
   const dir = path.join(matrixDir(), 'repost_src', 'douyin', srcAccId, '原文');
+  const pickedLocal = new Set<string>(); // 本轮内去重(seen.set 只含已用满的,采集不再记 → 靠这个防同轮重复)
   for (let i = 0; i < urls.length && out.length < want; i++) {
     if (opts.signal?.aborted) break;
     const u = String(urls[i] || '');
     if (!/^https?:\/\//i.test(u)) continue;
     const idm = u.match(/(\d{15,})/);
     const id = idm ? idm[1] : `dy_${i}_${randInt(1e5, 9e5)}`;
-    if (seen.set.has(id)) continue;
+    if (seen.set.has(id) || pickedLocal.has(id)) continue;
+    pickedLocal.add(id);
     const cap = String(titles[i] || '').trim();
     if (cap.length < 6) { log('   ⏭ 文案过短,跳过'); continue; } // 仿写需要源文案
     const dest = path.join(dir, `repost_douyin_${id}.mp4`);
@@ -200,7 +202,7 @@ async function collectDouyinVideos(
     const ok = await downloadVideoUrl(srcAccId, u, dest, 'https://www.douyin.com/', opts.signal);
     if (!ok) { log('   ⏭ 下载失败,跳过'); continue; }
     out.push({ post_id: id, source_url: u, author: '抖音用户', text: cap.slice(0, 1500), images: [], video_path: dest });
-    seen.record(id);
+    // 采集不计数;计数在发布成功后(runBinanceRepostTask)。本轮内同 id 不重复靠下面 seen.set + 顺序去重。
     log(`   ✅ 采到 1 条视频(文案 ${cap.length} 字)`);
   }
   return out;
@@ -226,7 +228,7 @@ function makeWaitForCaptcha(accountId: string, log: (m: string) => void, signal?
 
 // ═══════════════════════ 阶段A · 采集 ═══════════════════════
 async function collectFromSource(
-  opts: BinanceRepostTaskOptions, collectPack: any, want: number,
+  opts: BinanceRepostTaskOptions, collectPack: any, want: number, seen: ContentUsage,
 ): Promise<{ candidates: RepostCandidate[]; reason?: string }> {
   const cfg = opts.config;
   const srcAccId = cfg.sourceAccountId;
@@ -246,7 +248,8 @@ async function collectFromSource(
   if (!keywords.length) { log('❌ 采集号没有关键词 —— 去「我的矩阵账号」给它加几个赛道关键词'); return { candidates: [], reason: 'no_keywords' }; }
 
   const authToken = opts.authToken || getNoobClawAuthToken() || undefined;
-  const seen = contentUsageStore(srcAccId, cfg.sourcePlatform, REPOST_CONTENT_CAP);
+  // seen 由 runBinanceRepostTask 创建并传入:采集阶段【只查不记】(seen.set.has 跳过已用满的),
+  // 真正计数(record)挪到【发布成功后】—— 下载了但没发出去不算一次,可下轮重试(用户要求)。
   let candidates: RepostCandidate[] = [];
 
   try {
@@ -296,7 +299,8 @@ async function collectFromSource(
       appendKeywords: (arr: string[]) => { try { appendDerivedKeywords(srcAccId, arr); } catch { /* ignore */ } },
       keywordMatch,
       seenPostIds: seen.set,
-      recordSeen: (ids: any) => { try { (Array.isArray(ids) ? ids : [ids]).forEach((id) => { if (id) seen.record(String(id)); }); } catch { /* ignore */ } },
+      // 采集阶段不计数(只在发布成功后由 runBinanceRepostTask 调 seen.record);本轮内去重靠剧本自己的 local set。
+      recordSeen: (_ids: any) => { /* no-op:计数挪到发布成功后 */ },
       // 视频采集落盘:base64 → <matrixDir>/repost_src/<platform>/<srcAccId>/<subdir>/<name>,返回 {ok,path}。
       writeAsset: async (fileName: string, base64: string, o?: { subdir?: string }) => {
         try {
@@ -660,9 +664,12 @@ export async function runBinanceRepostTask(opts: BinanceRepostTaskOptions): Prom
 
   coworkLog('INFO', 'binanceRepostRunner', `repost src=${cfg.sourcePlatform} want=${postCount} → binance x${accIds.length}`);
 
+  // 采集号内容复用计数(默认 cap=1=只用一次)。采集只查(seen.set.has 跳过已用满的),发布成功后才 record。
+  const srcSeen = contentUsageStore(cfg.sourceAccountId, cfg.sourcePlatform, REPOST_CONTENT_CAP);
+
   // ── 阶段A:采集 ──
   if (opts.signal?.aborted) return { platform: opts.platform, total: accIds.length, success: 0, failed: 0, skipped: accIds.length, items: accIds.map((id) => ({ accountId: id, state: 'skipped' as const, reason: 'aborted' })) };
-  const { candidates, reason: collectReason } = await collectFromSource(opts, collectPack, postCount);
+  const { candidates, reason: collectReason } = await collectFromSource(opts, collectPack, postCount, srcSeen);
   if (!candidates.length) {
     const r = collectReason || 'no_candidates';
     for (const id of accIds) opts.onLog?.(id, `⚠️ 采集为空(${r}),本次无可搬运素材`);
@@ -679,6 +686,8 @@ export async function runBinanceRepostTask(opts: BinanceRepostTaskOptions): Prom
       ? await publishVideoOne(opts, publishPack, accIds[i], candidate)
       : await publishOne(opts, publishPack, accIds[i], candidate);
     items.push(r);
+    // 仅【发布成功】才把这条源计 1 次 → 用满 cap(默认 1)后下轮跳过;发布失败不计,可下轮重试。
+    if (r.state === 'success' && candidate.post_id) { try { srcSeen.record(String(candidate.post_id)); } catch { /* ignore */ } }
     try { opts.onItem?.(r); } catch { /* ignore */ }
     // 下一号发布前睡 60-120s(最后一号不睡;停止立即退)。
     const hasNext = i < accIds.length - 1 && !!candidates[i + 1];

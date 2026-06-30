@@ -19,10 +19,10 @@ function matrixDir(): string {
   return process.env.NOOBCLAW_MATRIX_DIR || path.join(os.homedir(), 'NoobClaw', 'matrix');
 }
 
-/** 生产型任务的默认内容复用上限(env 可调,不写死)。 */
+/** 内容复用上限(env 可调,不写死)。默认 1 = 同一条内容只用一次(下载+上传成功即计 1 次,之后跳过)。 */
 export function defaultContentReuseCap(): number {
   const n = parseInt(String(process.env.MATRIX_CONTENT_REUSE_CAP || ''), 10);
-  return Number.isFinite(n) && n > 0 ? n : 3;
+  return Number.isFinite(n) && n > 0 ? n : 1;
 }
 
 export interface ContentUsage {
