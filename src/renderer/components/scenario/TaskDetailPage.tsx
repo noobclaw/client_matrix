@@ -990,6 +990,8 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
       if (isBilibiliTask) return { icon: '💬', label: isZh ? '哔哩哔哩 · 互动涨粉' : 'Bilibili Engage & Grow', color: 'text-pink-500 bg-pink-500/10 border-pink-500/30' };
       return { icon: '💬', label: isZh ? '小红书 · 互动涨粉' : 'XHS Engage & Grow', color: 'text-cyan-500 bg-cyan-500/10 border-cyan-500/30' };
     }
+    if (sid === 'binance_post')   return { icon: '📊', label: isZh ? '币安广场 · 自动发帖' : 'Binance Square Auto Post', color: 'text-amber-500 bg-amber-500/10 border-amber-500/30' };
+    if (sid === 'binance_repost') return { icon: '♻️', label: isZh ? '币安广场 · 批量搬运' : 'Binance Square Batch Repost', color: 'text-amber-500 bg-amber-500/10 border-amber-500/30' };
     if (isBinanceTask) return { icon: '🔶', label: isZh ? '币安广场发帖' : 'Binance Square Post', color: 'text-amber-500 bg-amber-500/10 border-amber-500/30' };
     if (isXTask)       return { icon: '🐦', label: isZh ? '推特任务' : 'Twitter Task', color: 'text-sky-500 bg-sky-500/10 border-sky-500/30' };
     if (isYoutubeTask) return { icon: '📺', label: isZh ? 'YouTube 任务' : 'YouTube Task', color: 'text-red-500 bg-red-500/10 border-red-500/30' };
