@@ -21,12 +21,12 @@ export interface WizardAccount { id: string; displayName: string; status: string
 
 const PLATFORM_NAME: Record<string, string> = { douyin: '抖音', xhs: '小红书', bilibili: 'B站', kuaishou: '快手', tiktok: 'TikTok', x: 'X', binance: '币安广场', youtube: 'YouTube', shipinhao: '视频号', toutiao: '头条' };
 
-// 来源平台按【搬运形态】给:图文→小红书;视频→TikTok(须 VPN)。其余敬请期待。
+// 来源平台按【搬运形态】给:图文→小红书 / X;视频→抖音 / TikTok。只列已实现的平台(不展示「敬请期待」)。
 type SrcOpt = { id: 'xhs' | 'douyin' | 'tiktok' | 'x'; label: string; enabled: boolean };
 const SOURCE_BY_MATERIAL: Record<'image' | 'video', SrcOpt[]> = {
   image: [
     { id: 'xhs', label: '小红书', enabled: true },
-    { id: 'x', label: 'X', enabled: false },
+    { id: 'x', label: 'X(须VPN)', enabled: true },
   ],
   video: [
     { id: 'douyin', label: '抖音', enabled: true },
@@ -201,7 +201,7 @@ const MatrixBinanceRepostWizard: React.FC<Props> = ({ platformLabel, platform, a
               <label className="text-sm font-medium dark:text-gray-200 mb-2 block">🎞️ 搬运形态<span className="text-xs text-gray-400 font-normal ml-1">· 先选形态,下面来源平台跟着变</span></label>
               <div className="grid grid-cols-2 gap-2">
                 <button type="button" onClick={() => { setMaterial('image'); setSourcePlatform(firstEnabledSource('image')); setSourceAccountId(''); }} className={`px-3 py-2.5 rounded-lg text-sm border text-left transition-colors ${material === 'image' ? 'border-amber-500 bg-amber-500/10 text-amber-600 dark:text-amber-400 font-medium' : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-amber-500/50'}`}>
-                  🖼️ 图文<div className="text-[11px] text-gray-400 font-normal mt-0.5">小红书源图 + 仿写正文 → 币安图文帖</div>
+                  🖼️ 图文<div className="text-[11px] text-gray-400 font-normal mt-0.5">小红书 / X 源图 + 仿写正文 → 币安图文帖</div>
                 </button>
                 <button type="button" onClick={() => { setMaterial('video'); setSourcePlatform(firstEnabledSource('video')); setSourceAccountId(''); }} className={`px-3 py-2.5 rounded-lg text-sm border text-left transition-colors ${material === 'video' ? 'border-amber-500 bg-amber-500/10 text-amber-600 dark:text-amber-400 font-medium' : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-amber-500/50'}`}>
                   🎬 视频<div className="text-[11px] text-gray-400 font-normal mt-0.5">抖音 / TikTok 无水印源视频 + 仿写配文 → 币安视频帖(TikTok 须VPN)</div>
@@ -210,7 +210,7 @@ const MatrixBinanceRepostWizard: React.FC<Props> = ({ platformLabel, platform, a
             </div>
 
             <div>
-              <label className="text-sm font-medium dark:text-gray-200 mb-1.5 block">🌐 来源平台<span className="text-xs text-gray-400 font-normal ml-1">· {material === 'image' ? '图文源:小红书(X 敬请期待)' : '视频源:抖音 / TikTok'}</span></label>
+              <label className="text-sm font-medium dark:text-gray-200 mb-1.5 block">🌐 来源平台<span className="text-xs text-gray-400 font-normal ml-1">· {material === 'image' ? '图文源:小红书 / X' : '视频源:抖音 / TikTok'}</span></label>
               <div className="flex gap-2 flex-wrap">
                 {SOURCE_BY_MATERIAL[material].map((sp) => (
                   <button key={sp.id} type="button" disabled={!sp.enabled} onClick={() => { if (sp.enabled) { setSourcePlatform(sp.id); setSourceAccountId(''); } }} className={`px-2.5 py-1 rounded-md text-xs border transition-colors ${sourcePlatform === sp.id ? 'border-amber-500 bg-amber-500/10 text-amber-500 font-medium' : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-amber-500/50'} ${!sp.enabled ? 'opacity-40 cursor-not-allowed' : ''}`}>{sp.label}{!sp.enabled ? '(敬请期待)' : ''}</button>
