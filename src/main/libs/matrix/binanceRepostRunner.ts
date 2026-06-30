@@ -24,6 +24,7 @@ import { launchKernel, kernelNavigate, closeKernel, checkKernelLogin, NO_KERNEL_
 import { installedKernelPath } from './kernelInstaller';
 import { matrixCmd } from './cdpCommands';
 import { runMatrixDriver, runMatrixDouyinSearch } from './driverCtx';
+import { contentUsageStore, defaultContentReuseCap, type ContentUsage } from './contentUsage';
 import { getAccount, setAccountStatus, accountBadgeLabel, matrixGroupTitle, markAccountAlive, platformKey } from './accountManager';
 import { promptReloginForExpiredAccount } from './reloginPrompt';
 import { getNoobClawAuthToken } from '../claudeSettings';
@@ -143,16 +144,8 @@ function keywordMatch(text: any, kws: any): boolean {
   return kws.some((k: any) => k && t.indexOf(String(k).toLowerCase()) >= 0);
 }
 
-// 采集号「已采」去重库(跨运行,不重复采同一条)。
-function collectSeenStore(accountId: string, platform: string) {
-  const dir = path.join(matrixDir(), 'repost_seen', platform || 'src');
-  const file = path.join(dir, `${accountId}.json`);
-  let ids: string[] = [];
-  try { ids = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { ids = []; }
-  const set = new Set<string>(Array.isArray(ids) ? ids : []);
-  const save = () => { try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(file, JSON.stringify(Array.from(set).slice(-5000))); } catch { /* ignore */ } };
-  return { set, save };
-}
+// 采集号内容去重 + 复用计数:同一条源最多用 cap 次(默认 3,见 contentUsage)。.set=已用满的 id;.record(id)=+1。
+const REPOST_CONTENT_CAP = defaultContentReuseCap();
 
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
@@ -183,7 +176,7 @@ async function downloadVideoUrl(accountId: string, url: string, destPath: string
 // 抖音视频源:复用 douyin_search driver(返回无水印 play_addr urls + 同序 titles 文案),runner 侧逐个下载。
 async function collectDouyinVideos(
   opts: BinanceRepostTaskOptions, srcAccId: string, keywords: string[], want: number,
-  seen: { set: Set<string>; save: () => void }, log: (m: string) => void,
+  seen: ContentUsage, log: (m: string) => void,
 ): Promise<RepostCandidate[]> {
   const out: RepostCandidate[] = [];
   // douyin_search driver 内部会逐个关键词搜直到够 want(随机轮换 + 自带去水印/最高码率)。
@@ -207,7 +200,7 @@ async function collectDouyinVideos(
     const ok = await downloadVideoUrl(srcAccId, u, dest, 'https://www.douyin.com/', opts.signal);
     if (!ok) { log('   ⏭ 下载失败,跳过'); continue; }
     out.push({ post_id: id, source_url: u, author: '抖音用户', text: cap.slice(0, 1500), images: [], video_path: dest });
-    seen.set.add(id); seen.save();
+    seen.record(id);
     log(`   ✅ 采到 1 条视频(文案 ${cap.length} 字)`);
   }
   return out;
@@ -253,7 +246,7 @@ async function collectFromSource(
   if (!keywords.length) { log('❌ 采集号没有关键词 —— 去「我的矩阵账号」给它加几个赛道关键词'); return { candidates: [], reason: 'no_keywords' }; }
 
   const authToken = opts.authToken || getNoobClawAuthToken() || undefined;
-  const seen = collectSeenStore(srcAccId, cfg.sourcePlatform);
+  const seen = contentUsageStore(srcAccId, cfg.sourcePlatform, REPOST_CONTENT_CAP);
   let candidates: RepostCandidate[] = [];
 
   try {
@@ -300,7 +293,7 @@ async function collectFromSource(
       finish: (_status: string, _err?: string) => {},
       keywordMatch,
       seenPostIds: seen.set,
-      recordSeen: (ids: any) => { try { (Array.isArray(ids) ? ids : [ids]).forEach((id) => { if (id) seen.set.add(String(id)); }); seen.save(); } catch { /* ignore */ } },
+      recordSeen: (ids: any) => { try { (Array.isArray(ids) ? ids : [ids]).forEach((id) => { if (id) seen.record(String(id)); }); } catch { /* ignore */ } },
       // 视频采集落盘:base64 → <matrixDir>/repost_src/<platform>/<srcAccId>/<subdir>/<name>,返回 {ok,path}。
       writeAsset: async (fileName: string, base64: string, o?: { subdir?: string }) => {
         try {

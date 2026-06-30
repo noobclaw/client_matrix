@@ -25,6 +25,7 @@ import { promptReloginForExpiredAccount } from './reloginPrompt';
 import { getNoobClawAuthToken } from '../claudeSettings';
 import type { EngageItemResult, EngageReport } from './engageRunner';
 import type { ViralRewriteConfig } from './types';
+import { contentUsageStore, defaultContentReuseCap } from './contentUsage';
 
 const DEFAULT_BASE_URL = 'https://api.noobclaw.com';
 function baseUrl(): string { return process.env.NOOBCLAW_API_BASE_URL || DEFAULT_BASE_URL; }
@@ -136,16 +137,8 @@ async function chargeAction(authToken: string | undefined, actionType: string, p
 
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
-// ── 本号「已采爆款」去重库(持久化,跨运行不重复仿写同一篇)──
-function viralSeenStore(accountId: string, platform: string) {
-  const dir = path.join(matrixDir(), 'viral_seen', platform || 'xhs');
-  const file = path.join(dir, `${accountId}.json`);
-  let ids: string[] = [];
-  try { ids = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { ids = []; }
-  const set = new Set<string>(Array.isArray(ids) ? ids : []);
-  const save = () => { try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(file, JSON.stringify(Array.from(set).slice(-5000))); } catch { /* ignore */ } };
-  return { set, save };
-}
+// ── 本号「已采爆款」复用计数(跨运行;同一篇最多仿写 cap 次,默认 3,见 contentUsage)──
+const VIRAL_CONTENT_CAP = defaultContentReuseCap();
 
 async function runOne(opts: ViralRewriteTaskOptions, pack: any, accountId: string): Promise<EngageItemResult> {
   const acc = getAccount(accountId);
@@ -168,7 +161,7 @@ async function runOne(opts: ViralRewriteTaskOptions, pack: any, accountId: strin
   let chargedCredits = 0, chargedUsd = 0;
   const authToken = opts.authToken || getNoobClawAuthToken() || undefined;
   let finished: { status: string; error?: string } | null = null;
-  const seen = viralSeenStore(accountId, opts.platform);
+  const seen = contentUsageStore(accountId, opts.platform, VIRAL_CONTENT_CAP);
 
   try {
     setAccountStatus(accountId, 'running');
@@ -310,7 +303,7 @@ async function runOne(opts: ViralRewriteTaskOptions, pack: any, accountId: strin
       parseLikes,
       keywordMatch,
       seenPostIds: seen.set,
-      recordSeen: (ids: any) => { try { (Array.isArray(ids) ? ids : [ids]).forEach((id) => { if (id) seen.set.add(String(id)); }); seen.save(); } catch { /* ignore */ } },
+      recordSeen: (ids: any) => { try { (Array.isArray(ids) ? ids : [ids]).forEach((id) => { if (id) seen.record(String(id)); }); } catch { /* ignore */ } },
       // ── 可选(存源图)──
       writeAsset,
       sleep: (min: number, max?: number) => new Promise<void>((resolve) => {
