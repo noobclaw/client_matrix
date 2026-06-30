@@ -61,12 +61,19 @@ const MembershipPanel: React.FC<{ onPay?: (planCode: string, period: Period, cha
   const [redeemInput, setRedeemInput] = useState('');
   const [redeemMsg, setRedeemMsg] = useState<{ text: string; color: string }>({ text: '', color: '' });
   const [redeemBusy, setRedeemBusy] = useState(false);
+  // CNY 店铺地址:复用「购买积分」同一个后端下发地址(system_config.xianyu_shop_url,admin 可改)。
+  const [shopUrl, setShopUrl] = useState('https://pay.ldxp.cn/shop/LDH5OSFE');
 
   const load = useCallback(async () => {
     const data = await noobClawApi.getPlanConfig();
     if (data) { setCfg(data); writeCachedPlanConfig(data); }
     setLoading(false);
+    // 拉 CNY 店铺地址(失败保留默认);与购买积分共用 /cny/packages 的 xianyu_shop_url。
+    try { const rp = await noobClawApi.getRedeemPackages(); if (rp?.xianyu_shop_url) setShopUrl(rp.xianyu_shop_url); } catch { /* 用默认 */ }
   }, []);
+
+  // CNY「订阅」按钮:新开系统浏览器到店铺(店铺买卡密 → 回来在下方兑换码框输入开通)。
+  const openShop = () => { try { (window as any).electron?.shell?.openExternal?.(shopUrl); } catch { /* noop */ } };
 
   useEffect(() => { load(); }, [load]);
 
@@ -180,7 +187,8 @@ const MembershipPanel: React.FC<{ onPay?: (planCode: string, period: Period, cha
               ) : isFree ? (
                 <button disabled className="mt-3 py-2 rounded-lg text-xs font-bold text-center cursor-not-allowed dark:text-claude-darkTextSecondary text-claude-textSecondary" style={{ background: 'rgba(255,255,255,0.06)' }}>{!subActive ? '当前方案' : '免费'}</button>
               ) : method === 'RMB' ? (
-                <div className="mt-3 py-2 text-center text-[11px] dark:text-claude-darkTextSecondary text-claude-textSecondary">CNY 请用下方兑换码</div>
+                // CNY:同样显示「订阅」按钮,点击新开浏览器到店铺购买卡密(回来在下方输入兑换码开通)。
+                <button onClick={openShop} className="mt-3 py-2 rounded-lg text-xs font-bold text-black hover:brightness-95" style={{ background: tier }}>{cta}</button>
               ) : (
                 <button disabled={busy} onClick={() => subscribe(plan.code)} className="mt-3 py-2 rounded-lg text-xs font-bold text-black disabled:opacity-50 hover:brightness-95" style={{ background: tier }}>{cta}</button>
               )}
@@ -192,8 +200,11 @@ const MembershipPanel: React.FC<{ onPay?: (planCode: string, period: Period, cha
       {/* 人民币兑换码 */}
       {method === 'RMB' && (
         <div className="mt-4 p-4 rounded-xl dark:bg-claude-darkSurface bg-claude-surface border dark:border-claude-darkBorder border-claude-border">
-          <div className="text-sm font-medium dark:text-claude-darkText text-claude-text mb-1">CNY 订阅(兑换码)</div>
-          <div className="text-xs dark:text-claude-darkTextSecondary text-claude-textSecondary mb-3">在店铺购买订阅卡密后,在此输入兑换即可开通对应档位与周期。</div>
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <div className="text-sm font-medium dark:text-claude-darkText text-claude-text">CNY 订阅(兑换码)</div>
+            <button onClick={openShop} className="px-3 py-1 rounded-lg text-xs font-semibold bg-primary/15 text-primary hover:bg-primary/25 transition-colors">去店铺购买 →</button>
+          </div>
+          <div className="text-xs dark:text-claude-darkTextSecondary text-claude-textSecondary mb-3">点上方档位「订阅」或「去店铺购买」进店买卡密,回来在此输入兑换即可开通对应档位与周期。</div>
           <div className="flex gap-2">
             <input value={redeemInput} onChange={e => setRedeemInput(e.target.value)} placeholder="输入订阅兑换码" className="flex-1 px-3 py-2 rounded-lg dark:bg-claude-darkBg bg-claude-bg border dark:border-claude-darkBorder border-claude-border text-sm dark:text-claude-darkText text-claude-text focus:border-primary outline-none" />
             <button disabled={redeemBusy} onClick={submitRedeem} className="px-5 py-2 rounded-lg bg-primary text-black text-sm font-semibold disabled:opacity-50">{redeemBusy ? '兑换中…' : '兑换'}</button>
