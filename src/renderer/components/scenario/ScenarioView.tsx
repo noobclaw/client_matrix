@@ -244,6 +244,8 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   // 指纹浏览器内核守卫:没装内核时弹「去下载」,后续流程不走(创建/运行矩阵任务都先过这关)。
   const [matrixKernelMissing, setMatrixKernelMissing] = useState(false);
   const [matrixKernelBusy, setMatrixKernelBusy] = useState(false);
+  // 重复任务提示:某平台已有同类型任务时,关掉向导并弹此提示,给「去查看 / 编辑」入口跳对应管理 tab。
+  const [dupNotice, setDupNotice] = useState<{ platform: string; label: string } | null>(null);
   const ensureMatrixKernel = async (): Promise<boolean> => {
     try {
       const r = await (window as any).electron?.matrix?.kernelStatus?.();
@@ -314,7 +316,10 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     const m = (window as any).electron?.matrix;
     // 带 id = 更新现有任务(saveTask 是整体 upsert);无 id = 新建。
     const r = await m?.saveTask?.({ id: matrixWizardTask?.id, platform: matrixWizardPlatform, type: 'engage', name: input.name, accountIds: input.accountIds, quota: input.quota, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
-    if (!r?.ok) throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限', duplicate_type: '该平台已有同类型(互动)任务,直接编辑它即可' } as any)[r?.error] || r?.error || '保存失败');
+    if (!r?.ok) {
+      if (r?.error === 'duplicate_type') { const dp = matrixWizardPlatform; setMatrixWizardPlatform(null); setMatrixWizardTask(null); setDupNotice({ platform: dp as string, label: '互动' }); return; }
+      throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限' } as any)[r?.error] || r?.error || '保存失败');
+    }
     const wasEdit = !!matrixWizardTask?.id;
     const plat = matrixWizardPlatform;
     setMatrixWizardPlatform(null);
@@ -376,7 +381,10 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     const m = (window as any).electron?.matrix;
     // type='reply_fan' + funnel(无配额)。与同平台互动任务是不同 type,可并存。
     const r = await m?.saveTask?.({ id: matrixReplyTask?.id, platform: matrixReplyPlatform, type: 'reply_fan', name: input.name, accountIds: input.accountIds, funnel: input.funnel, quota: {}, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
-    if (!r?.ok) throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限', duplicate_type: '该平台已有同类型(回复粉丝)任务,直接编辑它即可' } as any)[r?.error] || r?.error || '保存失败');
+    if (!r?.ok) {
+      if (r?.error === 'duplicate_type') { const dp = matrixReplyPlatform; setMatrixReplyPlatform(null); setMatrixReplyTask(null); setDupNotice({ platform: dp as string, label: '回复粉丝' }); return; }
+      throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限' } as any)[r?.error] || r?.error || '保存失败');
+    }
     const wasEdit = !!matrixReplyTask?.id;
     const plat = matrixReplyPlatform;
     setMatrixReplyPlatform(null);
@@ -425,7 +433,10 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     const m = (window as any).electron?.matrix;
     // type='video_download' + urls(单账号、无配额)。与同平台互动/回复是不同 type,可并存。
     const r = await m?.saveTask?.({ id: matrixDownloadTask?.id, platform: matrixDownloadPlatform, type: 'video_download', name: input.name, accountIds: input.accountIds, urls: input.urls, quota: {}, concurrency: 1, frequency: input.frequency, enabled: true });
-    if (!r?.ok) throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限', duplicate_type: '该平台已有同类型(视频下载)任务,直接编辑它即可' } as any)[r?.error] || r?.error || '保存失败');
+    if (!r?.ok) {
+      if (r?.error === 'duplicate_type') { const dp = matrixDownloadPlatform; setMatrixDownloadPlatform(null); setMatrixDownloadTask(null); setDupNotice({ platform: dp as string, label: '视频下载' }); return; }
+      throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限' } as any)[r?.error] || r?.error || '保存失败');
+    }
     const wasEdit = !!matrixDownloadTask?.id;
     const plat = matrixDownloadPlatform;
     setMatrixDownloadPlatform(null);
@@ -487,7 +498,10 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       imageDownloadAccountId: input.imageDownloadAccountId,
     };
     const r = await m?.saveTask?.({ id: matrixImageTextTask?.id, platform: matrixImageTextPlatform, type: 'image_text', name: input.name, accountIds: input.accountIds, imageText, quota: {}, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
-    if (!r?.ok) throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限', duplicate_type: '该平台已有同类型(图文创作)任务,直接编辑它即可' } as any)[r?.error] || r?.error || '保存失败');
+    if (!r?.ok) {
+      if (r?.error === 'duplicate_type') { const dp = matrixImageTextPlatform; setMatrixImageTextPlatform(null); setMatrixImageTextTask(null); setDupNotice({ platform: dp as string, label: '图文创作' }); return; }
+      throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限' } as any)[r?.error] || r?.error || '保存失败');
+    }
     const wasEdit = !!matrixImageTextTask?.id;
     const plat = matrixImageTextPlatform;
     setMatrixImageTextPlatform(null);
@@ -543,7 +557,10 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       references: input.references,
     };
     const r = await m?.saveTask?.({ id: matrixTweetTask?.id, platform: matrixTweetPlatform, type: 'x_post', name: input.name, accountIds: input.accountIds, tweetPost, quota: {}, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
-    if (!r?.ok) throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限', duplicate_type: '该平台已有同类型(自动发推)任务,直接编辑它即可' } as any)[r?.error] || r?.error || '保存失败');
+    if (!r?.ok) {
+      if (r?.error === 'duplicate_type') { const dp = matrixTweetPlatform; setMatrixTweetPlatform(null); setMatrixTweetTask(null); setDupNotice({ platform: dp as string, label: '自动发推' }); return; }
+      throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限' } as any)[r?.error] || r?.error || '保存失败');
+    }
     const wasEdit = !!matrixTweetTask?.id;
     const plat = matrixTweetPlatform;
     setMatrixTweetPlatform(null);
@@ -596,7 +613,10 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       autoPublish: input.autoPublish,
     };
     const r = await m?.saveTask?.({ id: matrixBinanceTask?.id, platform: matrixBinancePlatform, type: 'binance_post', name: input.name, accountIds: input.accountIds, binancePost, quota: {}, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
-    if (!r?.ok) throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限', duplicate_type: '该平台已有同类型(币安广场发帖)任务,直接编辑它即可' } as any)[r?.error] || r?.error || '保存失败');
+    if (!r?.ok) {
+      if (r?.error === 'duplicate_type') { const dp = matrixBinancePlatform; setMatrixBinancePlatform(null); setMatrixBinanceTask(null); setDupNotice({ platform: dp as string, label: '币安广场发帖' }); return; }
+      throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限' } as any)[r?.error] || r?.error || '保存失败');
+    }
     const wasEdit = !!matrixBinanceTask?.id;
     const plat = matrixBinancePlatform;
     setMatrixBinancePlatform(null);
@@ -639,7 +659,10 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     const m = (window as any).electron?.matrix;
     const viralRewrite = { dailyCount: input.dailyCount, aiImageStyle: input.aiImageStyle, autoPublish: input.autoPublish };
     const r = await m?.saveTask?.({ id: matrixViralTask?.id, platform: matrixViralPlatform, type: 'viral_rewrite', name: input.name, accountIds: input.accountIds, viralRewrite, quota: {}, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
-    if (!r?.ok) throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限', duplicate_type: '该平台已有同类型(爆款仿写)任务,直接编辑它即可' } as any)[r?.error] || r?.error || '保存失败');
+    if (!r?.ok) {
+      if (r?.error === 'duplicate_type') { const dp = matrixViralPlatform; setMatrixViralPlatform(null); setMatrixViralTask(null); setDupNotice({ platform: dp as string, label: '爆款仿写' }); return; }
+      throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限' } as any)[r?.error] || r?.error || '保存失败');
+    }
     const wasEdit = !!matrixViralTask?.id;
     const plat = matrixViralPlatform;
     setMatrixViralPlatform(null);
@@ -1785,6 +1808,24 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
             <div className="flex justify-end gap-2">
               <button onClick={() => setMatrixKernelMissing(false)} disabled={matrixKernelBusy} className="px-3.5 py-1.5 text-sm rounded-lg border dark:border-white/15 border-black/15 disabled:opacity-50">取消</button>
               <button onClick={downloadMatrixKernel} disabled={matrixKernelBusy} className="px-3.5 py-1.5 text-sm rounded-lg bg-violet-500 hover:bg-violet-600 text-white disabled:opacity-50">{matrixKernelBusy ? '下载中…' : '下载内核'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 重复任务提示:某平台已有同类型任务 → 关掉向导并弹此提示,给「去查看 / 编辑」入口跳对应管理 tab */}
+      {dupNotice && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" onClick={() => setDupNotice(null)}>
+          <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-2xl p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start gap-3">
+              <span className="text-xl leading-none">⚠️</span>
+              <div className="text-sm text-gray-700 dark:text-gray-200 leading-relaxed">
+                该平台已有同类型（{dupNotice.label}）任务，无需重复创建。可直接去编辑它。
+              </div>
+            </div>
+            <div className="mt-5 flex gap-2 justify-end">
+              <button type="button" onClick={() => setDupNotice(null)} className="px-4 py-2 rounded-lg text-sm border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800">关闭</button>
+              <button type="button" onClick={() => { const p = dupNotice.platform; setDupNotice(null); onSwitchToManage?.(p as any); }} className="px-4 py-2 rounded-lg text-sm font-semibold bg-violet-500 text-white hover:bg-violet-600">去查看 / 编辑 →</button>
             </div>
           </div>
         </div>
