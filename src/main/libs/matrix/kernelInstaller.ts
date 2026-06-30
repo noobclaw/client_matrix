@@ -252,16 +252,25 @@ async function streamToFile(res: Response, dest: string, append: boolean, total:
  * Range(Accept-Ranges: bytes),断了就从已落盘字节续传,而不是整包重来或直接失败。
  */
 async function download(url: string, dest: string, onProgress?: ProgressFn): Promise<boolean> {
+  // URL 守卫:地址空/非法时给清楚话,不要让 fetch 抛 "Failed to parse URL" 这种原始报错暴露给用户。
+  let parsed: URL | null = null;
+  try { parsed = new URL(String(url || '').trim()); } catch { parsed = null; }
+  if (!parsed || !/^https?:$/.test(parsed.protocol)) {
+    coworkLog('ERROR', 'kernelInstaller', 'invalid kernel download url', { url });
+    onProgress?.(0, '暂无可用的下载地址,请稍后重试或联系客服');
+    return false;
+  }
+  const href = parsed.href;
   const MAX_ATTEMPTS = 5;
   let total = 0, got = 0;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     let resume = got > 0;
     try {
       const headers: Record<string, string> = resume ? { Range: `bytes=${got}-` } : {};
-      const res = await fetch(url, { headers });
+      const res = await fetch(href, { headers });
       if (resume && res.status !== 206) { resume = false; got = 0; } // 服务端没给续传 → 从头来
       if (!res.ok || !res.body) {
-        if (attempt === MAX_ATTEMPTS) { onProgress?.(0, `下载失败 HTTP ${res.status}`); return false; }
+        if (attempt === MAX_ATTEMPTS) { coworkLog('ERROR', 'kernelInstaller', 'kernel download http error', { status: res.status, href }); onProgress?.(0, '下载失败,服务暂时不可用,请稍后重试'); return false; }
         await sleep(1500 * attempt); continue;
       }
       if (!total) { // 首次确定总大小:206 从 Content-Range 末段,200 从 Content-Length
@@ -270,8 +279,8 @@ async function download(url: string, dest: string, onProgress?: ProgressFn): Pro
       }
       got = await streamToFile(res, dest, resume, total, got, onProgress);
       if (total && got < total) { // 流提前结束(连接被掐)→ 续传重试
-        if (attempt === MAX_ATTEMPTS) { onProgress?.(0, `下载不完整 ${mb(got)}/${mb(total)}MB`); return false; }
-        onProgress?.(Math.round((got / total) * 100), `网络中断,续传重试 ${attempt}/${MAX_ATTEMPTS}…`);
+        if (attempt === MAX_ATTEMPTS) { coworkLog('ERROR', 'kernelInstaller', 'kernel download incomplete', { got, total, href }); onProgress?.(0, '网络不稳定,下载未完成,请重试'); return false; }
+        onProgress?.(Math.round((got / total) * 100), `网络较慢,正在重试 ${attempt}/${MAX_ATTEMPTS}…`);
         await sleep(1500 * attempt); continue;
       }
       return true; // 完整(或无 total 时流正常结束)
@@ -279,10 +288,12 @@ async function download(url: string, dest: string, onProgress?: ProgressFn): Pro
       try { got = fs.existsSync(dest) ? fs.statSync(dest).size : got; } catch { /* keep got */ } // 以实际落盘为准续传
       if (attempt === MAX_ATTEMPTS) {
         try { fs.rmSync(dest, { force: true }); } catch { /* ignore */ }
-        onProgress?.(0, '下载失败(网络多次中断):' + String(e?.message || e).slice(0, 60));
+        // 原始报错(Failed to parse URL / fetch failed 等)只进日志,不展示给用户。
+        coworkLog('ERROR', 'kernelInstaller', 'kernel download failed', { err: String(e?.message || e), href });
+        onProgress?.(0, '下载失败,请检查网络后重试');
         return false;
       }
-      onProgress?.(total ? Math.round((got / total) * 100) : 0, `网络中断,续传重试 ${attempt}/${MAX_ATTEMPTS}…`);
+      onProgress?.(total ? Math.round((got / total) * 100) : 0, `网络较慢,正在重试 ${attempt}/${MAX_ATTEMPTS}…`);
       await sleep(1500 * attempt);
     }
   }
@@ -296,7 +307,16 @@ async function download(url: string, dest: string, onProgress?: ProgressFn): Pro
 export async function ensureKernel(version?: string, onProgress?: ProgressFn): Promise<string | null> {
   const list = await fetchKernels();
   const entry = version ? list.find((k) => k.version === version) : list[0];
-  if (!entry) { onProgress?.(0, '后端未配置可用内核版本(matrix_kernels)'); return null; }
+  if (!entry) {
+    coworkLog('ERROR', 'kernelInstaller', 'no kernel entry for platform/version', { version, PLATKEY, count: list.length });
+    onProgress?.(0, '当前系统暂无可用的指纹浏览器版本,请稍后重试或联系客服');
+    return null;
+  }
+  if (!entry.url || !/^https?:\/\//i.test(String(entry.url).trim())) {
+    coworkLog('ERROR', 'kernelInstaller', 'kernel entry has invalid url', { version: entry.version, url: entry.url });
+    onProgress?.(0, '该版本暂无可用下载地址,请稍后重试或联系客服');
+    return null;
+  }
 
   const have = installedKernelPath(entry.version);
   if (have) { onProgress?.(100, '内核已就绪'); return have; }
@@ -336,19 +356,18 @@ export async function ensureKernel(version?: string, onProgress?: ProgressFn): P
       // -noverify/-noautoopen:跳过校验+不弹访达;部分 dmg 不加会卡/失败。捕获 stderr 以便报准原因。
       const att = spawnSync('hdiutil', ['attach', tmp, '-nobrowse', '-readonly', '-noverify', '-noautoopen', '-mountpoint', mnt], { encoding: 'utf8' });
       if (att.status !== 0) {
-        const why = (att.stderr || String(att.error || '')).trim().slice(0, 140);
-        onProgress?.(0, '挂载 dmg 失败:' + (why || `status ${att.status}`));
+        onProgress?.(0, '内核安装失败,请重试');
         coworkLog('ERROR', 'kernelInstaller', 'hdiutil attach failed', { status: att.status, stderr: att.stderr, err: String(att.error || '') });
       }
       try {
         const app = findDirEndingWith(mnt, '.app');
         if (!app) {
-          onProgress?.(0, 'dmg 内未找到 .app(可能不是浏览器内核包)');
+          onProgress?.(0, '内核安装失败,请重试');
           coworkLog('ERROR', 'kernelInstaller', 'no .app inside dmg', { mnt });
         } else {
           const cpr = spawnSync('cp', ['-R', app, path.join(d, 'Chromium.app')], { encoding: 'utf8' });
           if (cpr.status !== 0) {
-            onProgress?.(0, '拷贝内核失败:' + ((cpr.stderr || '').trim().slice(0, 120) || `status ${cpr.status}`));
+            onProgress?.(0, '内核安装失败,请重试');
             coworkLog('ERROR', 'kernelInstaller', 'cp app failed', { status: cpr.status, stderr: cpr.stderr });
           }
           const macos = path.join(d, 'Chromium.app', 'Contents', 'MacOS');
@@ -368,12 +387,13 @@ export async function ensureKernel(version?: string, onProgress?: ProgressFn): P
     const exe = installedKernelPath(entry.version);
     // 多版本共存:不再删其它版本(用户可在下拉里切版本、各号也可绑不同版本)。
     // 删除只在用户主动点删除(deleteKernelVersion)时做。
-    onProgress?.(100, exe ? `内核就绪 (${entry.label})` : '解压后未找到内核(格式异常)');
+    onProgress?.(100, exe ? `内核就绪 (${entry.label})` : '内核安装失败,请重试');
     if (!exe) coworkLog('ERROR', 'kernelInstaller', 'kernel exe not found after extract', { version: entry.version });
     return exe;
   } catch (e: any) {
-    onProgress?.(0, '内核安装失败:' + String(e?.message || e).slice(0, 100));
-    coworkLog('ERROR', 'kernelInstaller', 'ensureKernel failed', { err: String(e) });
+    // 原始报错只进日志,展示给用户的是友好话。
+    coworkLog('ERROR', 'kernelInstaller', 'ensureKernel failed', { err: String(e?.message || e) });
+    onProgress?.(0, '内核安装失败,请重试');
     return null;
   }
 }
