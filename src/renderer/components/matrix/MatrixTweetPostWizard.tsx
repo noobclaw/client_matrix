@@ -15,6 +15,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { i18nService } from '../../services/i18n';
+import Web3NewsSourcesPreview from './Web3NewsSourcesPreview';
 
 type WizardStep = 1 | 2 | 3 | 4;
 
@@ -221,8 +222,11 @@ const MatrixTweetPostWizard: React.FC<Props> = ({ platformLabel, platform, accou
             )}
 
             {mode === 'web3' && (
-              <div className="rounded-lg border px-3 py-2 text-[11px] leading-relaxed border-sky-500/20 bg-sky-500/5 text-sky-700 dark:text-sky-300">
-                📰 web3 资讯模式按热点资讯原创,<strong>无需参考文案</strong>;直接「下一步」设置语言 / 配图 / 发布即可。
+              <div className="space-y-2.5">
+                <div className="rounded-lg border px-3 py-2 text-[11px] leading-relaxed border-sky-500/20 bg-sky-500/5 text-sky-700 dark:text-sky-300">
+                  📰 web3 资讯模式按热点资讯原创,<strong>无需参考文案</strong>;直接「下一步」设置语言 / 配图 / 发布即可。
+                </div>
+                <Web3NewsSourcesPreview isZh={isZh} />
               </div>
             )}
           </>

@@ -14,6 +14,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { i18nService } from '../../services/i18n';
+import Web3NewsSourcesPreview from './Web3NewsSourcesPreview';
 
 type WizardStep = 1 | 2 | 3;
 
@@ -160,9 +161,7 @@ const MatrixBinancePostWizard: React.FC<Props> = ({ platformLabel, platform, acc
                 })}
               </div>
             </div>
-            <div className="rounded-lg border px-3 py-2 text-[11px] leading-relaxed border-amber-500/20 bg-amber-500/5 text-amber-700 dark:text-amber-300">
-              📰 内容来源固定为 <strong>web3 资讯深度创作</strong>(抓近 3 周加密/链上热点资讯,紧贴事实原创快评)。直接「下一步」设置语言 / 配图 / 发布即可。
-            </div>
+            <Web3NewsSourcesPreview isZh={isZh} />
           </>
         )}
 
