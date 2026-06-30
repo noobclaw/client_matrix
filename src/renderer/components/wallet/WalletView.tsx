@@ -1458,18 +1458,32 @@ export const WalletView: React.FC<WalletViewProps> = ({ isSidebarCollapsed, onTo
               <div className="flex items-center justify-between mb-1 gap-2">
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="text-xs dark:text-claude-darkTextSecondary text-claude-textSecondary shrink-0">{i18nService.t('walletMyWalletBsc')}</span>
-                  {/* 会员等级徽章 — 跟在钱包名旁(对标即梦,等级跟着 UID);点击切到会员订阅 tab */}
-                  <button
-                    type="button"
-                    onClick={() => setTopTab('subscription')}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold transition-transform hover:scale-105 cursor-pointer shrink-0 whitespace-nowrap"
-                    style={authState.subActive
-                      ? { background: 'linear-gradient(135deg,#fde68a,#f59e0b)', color: '#3a2400', boxShadow: '0 0 8px rgba(245,158,11,0.4)' }
-                      : { background: 'rgba(255,255,255,0.06)', color: '#9aa0aa', border: '1px solid rgba(255,255,255,0.14)' }}
-                    title="我的会员"
-                  >
-                    {authState.subActive ? '👑 ' : ''}{authState.planName || '免费版'}
-                  </button>
+                  {/* 会员等级徽章 — 跟在钱包名旁(对标即梦,等级跟着 UID);显示档名 + 到期日/已过期;
+                      到期后仍显示原档名(subPlanName)+「已过期」。点击切到会员订阅 tab。 */}
+                  {(() => {
+                    const pe = authState.subPeriodEnd ? new Date(authState.subPeriodEnd).getTime() : 0;
+                    const active = pe > Date.now();
+                    const exp = !!authState.subStatus && !active;
+                    const nm = authState.subPlanName || authState.planName || '免费版';
+                    const d = pe ? new Date(pe) : null;
+                    const lbl = d ? `${d.getMonth() + 1}/${d.getDate()}` : '';
+                    const days = active ? Math.ceil((pe - Date.now()) / 86_400_000) : 0;
+                    const soon = active && days >= 0 && days <= 3;
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => setTopTab('subscription')}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold transition-transform hover:scale-105 cursor-pointer shrink-0 whitespace-nowrap"
+                        style={active
+                          ? { background: 'linear-gradient(135deg,#fde68a,#f59e0b)', color: '#3a2400', boxShadow: '0 0 8px rgba(245,158,11,0.4)' }
+                          : { background: 'rgba(255,255,255,0.06)', color: '#9aa0aa', border: '1px solid rgba(255,255,255,0.14)' }}
+                        title={exp ? '会员已过期,点此续费' : active ? `会员有效至 ${lbl}` : '我的会员'}
+                      >
+                        {(active || exp) ? '👑 ' : ''}{nm}
+                        {active ? <span className={soon ? 'text-red-600' : ''}>· {soon ? `${days}天后到期` : `${lbl}到期`}</span> : exp ? <span className="text-red-600">· 已过期</span> : null}
+                      </button>
+                    );
+                  })()}
                   {/* v1.x: 合伙人小徽章 — 显示 tier emoji + 等级名,点击跳到邀请
                       返佣页详细看返佣比例 + 邀请明细。普通用户不渲染。 */}
                   {partnerBadge && (

@@ -54,15 +54,22 @@ export const WalletBadge: React.FC<Props> = ({ size = 'normal' }) => {
   }
 
   const low = authState.tokenBalance < 1000;
-  const isPaid = !!authState.subActive;
-  const planName = authState.planName || (isZh ? '免费版' : 'Free');
+  // 会员状态以【整周期到期日 subPeriodEnd】为准(用户认知的会员到期),不是每月桶 subExpireAt。
+  const periodEndMs = authState.subPeriodEnd ? new Date(authState.subPeriodEnd).getTime() : 0;
+  const memberActive = periodEndMs > Date.now();           // 会员有效中
+  const hadSub = !!authState.subStatus;                    // 买过会员(active/expired 都算)
+  const expired = hadSub && !memberActive;                 // 买过但已过期
+  const isPaid = memberActive;                             // 金色 pill / 升级按钮判定
+  // 展示档名:有订阅记录 → 用订阅档名(到期后仍显示原档「进阶版」);否则免费版。
+  const planName = authState.subPlanName || authState.planName || (isZh ? '免费版' : 'Free');
   // 免费→「订阅会员」、付费未满级→「升级会员」、最高档(max)→灰色禁用。
-  const isMaxTier = isPaid && authState.planCode === 'max';
-  const subLabel = (!isPaid || authState.planCode === 'free') ? (isZh ? '订阅会员' : 'Subscribe') : (isZh ? '升级会员' : 'Upgrade');
-  // 到期前 3 天:pill 上挂红点 + 「N天后到期」轻提醒(强提醒走到期弹窗)。
-  const expMs = authState.subExpireAt ? new Date(authState.subExpireAt).getTime() : 0;
-  const daysLeft = isPaid && expMs ? Math.ceil((expMs - Date.now()) / 86_400_000) : null;
+  const isMaxTier = memberActive && authState.planCode === 'max';
+  const subLabel = !memberActive ? (isZh ? '订阅会员' : 'Subscribe') : (isZh ? '升级会员' : 'Upgrade');
+  // 到期日文案:有效中显示「M/D 到期」(≤3 天红字+红点);已过期显示「已过期」(红)。
+  const daysLeft = memberActive ? Math.ceil((periodEndMs - Date.now()) / 86_400_000) : null;
   const expiringSoon = daysLeft != null && daysLeft >= 0 && daysLeft <= 3;
+  const endD = periodEndMs ? new Date(periodEndMs) : null;
+  const endLabel = endD ? `${endD.getMonth() + 1}/${endD.getDate()}` : '';
   const pillStyle: React.CSSProperties = isPaid
     ? { padding: compact ? '2px 8px' : '3px 10px', fontSize: compact ? 10 : 11, background: 'linear-gradient(135deg,#fde68a,#f59e0b)', color: '#3a2400', boxShadow: '0 0 10px rgba(245,158,11,0.45)' }
     : { padding: compact ? '2px 8px' : '3px 10px', fontSize: compact ? 10 : 11, background: 'rgba(255,255,255,0.06)', color: '#9aa0aa', border: '1px solid rgba(255,255,255,0.12)' };
@@ -77,17 +84,28 @@ export const WalletBadge: React.FC<Props> = ({ size = 'normal' }) => {
         </span>
       )}
 
-      {/* 会员等级 — 醒目(付费档金色渐变+光晕,免费档低调) */}
+      {/* 会员等级 — 醒目(有效档金色渐变+光晕,过期/免费低调);右侧跟「到期日 / 已过期」状态 */}
       <button
         type="button"
         onClick={() => openWallet('subscription')}
         className="non-draggable relative inline-flex items-center gap-1 rounded-full font-bold leading-none whitespace-nowrap"
         style={pillStyle}
-        title={expiringSoon ? (isZh ? `会员将于 ${daysLeft} 天后到期,点此续费` : `Expires in ${daysLeft}d — renew`) : (isZh ? '我的会员' : 'Membership')}
+        title={expired ? (isZh ? '会员已过期,点此续费' : 'Membership expired — renew') : memberActive ? (isZh ? `会员有效至 ${endLabel}${expiringSoon ? `(${daysLeft}天后到期)` : ''}` : `Active until ${endLabel}`) : (isZh ? '我的会员' : 'Membership')}
       >
-        {expiringSoon && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500 ring-1 ring-white" />}
-        {isPaid ? '👑' : '🪙'} {planName}{expiringSoon ? (isZh ? ` · ${daysLeft}天后到期` : ` · ${daysLeft}d left`) : ''}
+        {(expiringSoon || expired) && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500 ring-1 ring-white" />}
+        {(memberActive || expired) ? '👑' : '🪙'} {planName}
       </button>
+      {/* 到期状态:有效→「M/D到期」(≤3天红);已过期→「已过期」红;从没买过→不显示 */}
+      {(memberActive || expired) && (
+        <button
+          type="button"
+          onClick={() => openWallet('subscription')}
+          className={`non-draggable ${txt} whitespace-nowrap font-medium ${expired || expiringSoon ? 'text-red-500' : 'dark:text-claude-darkTextSecondary text-claude-textSecondary'}`}
+          title={isZh ? '点此续费' : 'Renew'}
+        >
+          {expired ? (isZh ? '已过期' : 'Expired') : expiringSoon ? (isZh ? `${daysLeft}天后到期` : `${daysLeft}d left`) : (isZh ? `${endLabel} 到期` : `until ${endLabel}`)}
+        </button>
+      )}
 
       {/* 积分余额(可消费总额) */}
       <span className={`${txt} dark:text-claude-darkTextSecondary text-claude-textSecondary whitespace-nowrap`}>

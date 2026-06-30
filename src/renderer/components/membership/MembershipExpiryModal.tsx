@@ -25,11 +25,13 @@ export const MembershipExpiryModal: React.FC = () => {
     const check = async () => {
       const s = noobClawAuth.getState();
       if (!s.isAuthenticated || !s.walletAddress) return;
-      const expMs = s.subExpireAt ? new Date(s.subExpireAt).getTime() : 0;
-      if (!expMs || expMs > Date.now()) return;               // 没买过 / 还没到期 → 不弹
+      // 以【整周期到期日】判过期(subStatus 有值=买过会员;subPeriodEnd 已过=会员到期)。
+      //   比旧的 subExpireAt(每月桶,到期 cron 会清成 null)更可靠,cron 跑没跑都能判。
+      const pe = s.subPeriodEnd ? new Date(s.subPeriodEnd).getTime() : 0;
+      if (!s.subStatus || !pe || pe > Date.now()) return;     // 没买过 / 还没到期 → 不弹
       const limit = s.maxAccountsPerPlatform;
       if (!(limit > 0) || limit === 9999) return;             // 上限未知(老后端)→ 不弹
-      const key = `subExpiredModal:${s.walletAddress}:${expMs}`;
+      const key = `subExpiredModal:${s.walletAddress}:${pe}`;
       if (localStorage.getItem(key)) return;                  // 同一到期只弹一次
       try {
         const r = await (window as any).electron?.matrix?.listAccounts();

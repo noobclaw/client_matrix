@@ -10,7 +10,10 @@ export interface AuthState {
   planCode: string;           // 当前会员档位 free/basic/pro/max
   planName: string;           // 档位中文名
   subActive: boolean;         // 订阅是否有效
-  subExpireAt: string | null; // 订阅桶有效期(ISO);到期提醒角标/弹窗用
+  subExpireAt: string | null; // 订阅桶(每月)有效期(ISO);到期提醒角标/弹窗用
+  subStatus: string | null;   // 订阅行状态 active/expired/null(顶部条档名+到期/已过期)
+  subPlanName: string | null; // 订阅过的档位中文名(到期后仍显示原档名)
+  subPeriodEnd: string | null;// 会员整周期到期日(用户认知的到期时间)
   maxAccountsPerPlatform: number; // 当前生效的每平台号数上限(0/未知时按很大处理,不暂停)
   subUsedRatio: number;       // 订阅桶用量比例 0~1
   authToken: string | null;
@@ -31,6 +34,9 @@ class NoobClawAuthService {
     planName: '免费版',
     subActive: false,
     subExpireAt: null,
+    subStatus: null,
+    subPlanName: null,
+    subPeriodEnd: null,
     maxAccountsPerPlatform: 9999,
     subUsedRatio: 0,
     authToken: null,
@@ -248,6 +254,9 @@ class NoobClawAuthService {
         if (typeof data.planName === 'string') this.state.planName = data.planName;
         if (typeof data.subActive === 'boolean') this.state.subActive = data.subActive;
         this.state.subExpireAt = typeof data.subExpireAt === 'string' ? data.subExpireAt : null;
+        this.state.subStatus = typeof data.subStatus === 'string' ? data.subStatus : null;
+        this.state.subPlanName = typeof data.subPlanName === 'string' ? data.subPlanName : null;
+        this.state.subPeriodEnd = typeof data.subPeriodEnd === 'string' ? data.subPeriodEnd : null;
         // 后端老版本不返 maxAccountsPerPlatform 时,保持很大值(不误暂停任何号)。
         if (typeof data.maxAccountsPerPlatform === 'number' && data.maxAccountsPerPlatform > 0) this.state.maxAccountsPerPlatform = data.maxAccountsPerPlatform;
         if (typeof data.subUsedRatio === 'number') this.state.subUsedRatio = data.subUsedRatio;
@@ -406,6 +415,9 @@ class NoobClawAuthService {
       planName: '免费版',
       subActive: false,
       subExpireAt: null,
+      subStatus: null,
+      subPlanName: null,
+      subPeriodEnd: null,
       maxAccountsPerPlatform: 9999,
       subUsedRatio: 0,
       authToken: null,
