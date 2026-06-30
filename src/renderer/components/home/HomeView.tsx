@@ -15,8 +15,8 @@ export interface HomeViewProps {
   onShowMatrix?: () => void;
   /** 步骤②「创建矩阵任务并设为定期」→ 新建矩阵涨粉任务页 */
   onShowMatrixTaskNew?: () => void;
-  /** 步骤③「查看涨粉结果」→ 矩阵涨粉运行记录页 */
-  onShowMatrixRuns?: () => void;
+  /** 步骤③「查看涨粉情况」→ 我的矩阵涨粉任务页 */
+  onShowMatrixTasks?: () => void;
   /** 充值入口 → 我的钱包 */
   onShowWallet?: () => void;
   /** 登录过期账号数(喂步骤①的小角标) */
@@ -24,6 +24,7 @@ export interface HomeViewProps {
 }
 
 const OFFICIAL_SITE = 'https://noobclaw.com';
+const TUTORIAL_URL = 'https://docs.noobclaw.com/';
 const GITHUB_URL = 'https://github.com/noobclaw';
 
 const formatWalletAddress = (addr: string) => {
@@ -38,7 +39,7 @@ const HomeView: React.FC<HomeViewProps> = ({
   updateBadge,
   onShowMatrix,
   onShowMatrixTaskNew,
-  onShowMatrixRuns,
+  onShowMatrixTasks,
   onShowWallet,
   matrixExpiredCount = 0,
 }) => {
@@ -153,18 +154,27 @@ const HomeView: React.FC<HomeViewProps> = ({
           {/* Hero / 产品定位 */}
           <div className="text-center space-y-3">
             <img src="logo.png" alt="logo" className="w-14 h-14 mx-auto rounded-2xl shadow-lg" />
-            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight dark:text-claude-darkText text-claude-text">
-              NoobClaw · {isZh ? '矩阵自动涨粉引擎' : 'Matrix Auto-Growth Engine'}
+            {/* 标题样式照搬官网 index.html hero:NoobClaw 绿色霓虹 + 第二行粉紫蓝渐变 */}
+            <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight leading-tight">
+              <span style={{ color: '#00ff88', textShadow: '0 0 20px rgba(0,255,136,0.5), 0 0 40px rgba(0,255,136,0.2)' }}>NoobClaw</span>
+              <span className="dark:text-white text-gray-900"> - {isZh ? '矩阵自动涨粉引擎' : 'Matrix Auto-Growth Engine'}</span>
             </h1>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold dark:bg-claude-accent/15 bg-claude-accent/10 text-claude-accent">
-              <span>⚡ {isZh ? 'AI 驱动' : 'AI-Powered'}</span>
-              <span className="opacity-50">·</span>
-              <span>🌐 {isZh ? '全平台覆盖' : 'All Platforms'}</span>
+            <div
+              className="text-2xl sm:text-3xl font-extrabold tracking-tight"
+              style={{
+                backgroundImage: 'linear-gradient(to right, #ff006e, #8b5cf6, #00d4ff)',
+                WebkitBackgroundClip: 'text',
+                backgroundClip: 'text',
+                color: 'transparent',
+                filter: 'drop-shadow(0 0 12px rgba(139,92,246,0.35))',
+              }}
+            >
+              {isZh ? 'AI 驱动 · 全平台覆盖' : 'AI-Driven · All Platforms'}
             </div>
             <p className="text-sm leading-relaxed dark:text-claude-darkTextSecondary text-claude-textSecondary max-w-xl mx-auto">
               {isZh
-                ? '推特 / 小红书 / 抖音 / TikTok / YouTube —— 多平台图文 / 视频创作、互动、涨粉、跨平台搬运,全部交给 NoobClaw。'
-                : 'X / RED / Douyin / TikTok / YouTube — multi-platform image & video creation, engagement, follower growth and cross-platform reposting, all handled by NoobClaw.'}
+                ? '多平台图文 / 视频创作、互动、涨粉、跨平台搬运,全部交给 NoobClaw。'
+                : 'Multi-platform image & video creation, engagement, follower growth and cross-platform reposting — all handled by NoobClaw.'}
             </p>
             {/* 平台标签 */}
             <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
@@ -172,6 +182,10 @@ const HomeView: React.FC<HomeViewProps> = ({
                 ['🐦', isZh ? '推特' : 'X'],
                 ['📕', isZh ? '小红书' : 'RED'],
                 ['🎬', isZh ? '抖音' : 'Douyin'],
+                ['🎦', isZh ? '快手' : 'Kuaishou'],
+                ['📺', isZh ? 'B站' : 'Bilibili'],
+                ['📹', isZh ? '视频号' : 'Channels'],
+                ['📰', isZh ? '头条' : 'Toutiao'],
                 ['🎵', 'TikTok'],
                 ['▶️', 'YouTube'],
                 ['🔶', isZh ? '币安广场' : 'Binance'],
@@ -215,10 +229,10 @@ const HomeView: React.FC<HomeViewProps> = ({
               </h2>
               <button
                 type="button"
-                onClick={() => openExternal(OFFICIAL_SITE)}
+                onClick={() => openExternal(TUTORIAL_URL)}
                 className="text-xs font-medium text-claude-accent hover:underline inline-flex items-center gap-1"
               >
-                {isZh ? '查看完整图文教程' : 'Full tutorial'}
+                {isZh ? '查看完整教程' : 'Full tutorial'}
                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
               </button>
             </div>
@@ -244,10 +258,10 @@ const HomeView: React.FC<HomeViewProps> = ({
               <StepCard
                 index={3}
                 icon="📈"
-                title={isZh ? '运行后查看涨粉结果' : 'Watch followers grow'}
-                desc={isZh ? '任务到点自动跑,在运行记录里查看每个账号的涨粉与执行明细。' : 'Tasks run on schedule — track growth and run logs per account.'}
-                cta={isZh ? '看运行记录' : 'View runs'}
-                onClick={onShowMatrixRuns}
+                title={isZh ? '查看涨粉情况' : 'Check your growth'}
+                desc={isZh ? '任务到点自动跑,在「我的矩阵涨粉任务」里查看每个账号的涨粉与运行情况。' : 'Tasks run on schedule — check each account\'s growth and status in My Matrix Tasks.'}
+                cta={isZh ? '查看运行情况' : 'View status'}
+                onClick={onShowMatrixTasks}
               />
             </div>
           </div>
