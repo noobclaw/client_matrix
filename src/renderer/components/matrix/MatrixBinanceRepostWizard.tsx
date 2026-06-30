@@ -74,9 +74,9 @@ const MatrixBinanceRepostWizard: React.FC<Props> = ({ platformLabel, platform, a
   const toggle = (id: string) => setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   const br = initialTask?.binanceRepost || {};
-  const [sourcePlatform, setSourcePlatform] = useState<'xhs' | 'douyin' | 'tiktok' | 'x'>(br.sourcePlatform || 'xhs');
+  const [material, setMaterial] = useState<'image' | 'video'>(br.material || 'video'); // 默认视频
+  const [sourcePlatform, setSourcePlatform] = useState<'xhs' | 'douyin' | 'tiktok' | 'x'>(br.sourcePlatform || firstEnabledSource(br.material || 'video'));
   const [sourceAccountId, setSourceAccountId] = useState<string>(br.sourceAccountId || '');
-  const [material, setMaterial] = useState<'image' | 'video'>(br.material || 'image');
   const [withImage, setWithImage] = useState<boolean>(br.withImage !== false);
   const [language, setLanguage] = useState<'zh' | 'en' | 'mixed'>(br.language || 'mixed');
   const [autoPublish, setAutoPublish] = useState<boolean>(br.autoPublish !== false);

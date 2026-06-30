@@ -166,10 +166,12 @@ const Sidebar: React.FC<SidebarProps> = ({
     >
       <div className="pt-3 pb-3">
         {/* Logo + App Name + Collapse Button */}
+        {/* macOS:顶部留一条拖拽区给红绿灯窗控,logo 行下移 → 与下方菜单一样左对齐(不再 pl-68 居中) */}
+        {isMac && <div className="draggable h-5" />}
         <div className="draggable sidebar-header-drag h-10 flex items-center justify-between px-3">
-          <div className={`non-draggable flex items-center gap-2 ${isMac ? 'pl-[68px]' : ''}`}>
+          <div className="non-draggable flex items-center gap-2">
             <img src="logo.png" alt="logo" className="w-6 h-6 rounded-lg" />
-            <span className="font-bold text-sm dark:text-claude-darkText text-claude-text tracking-wide">NoobClaw</span>
+            <span className="font-bold text-sm dark:text-claude-darkText text-claude-text tracking-wide">NoobClaw矩阵版</span>
             {updateBadge}
           </div>
           <button
