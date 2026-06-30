@@ -1686,6 +1686,28 @@ const server = http.createServer(async (req, res) => {
               return writeJSON(res, 200, { ok: false, error: e?.message || String(e) });
             }
           }
+          case 'matrix:deleteKernel': {
+            // 删除某个已装内核版本(下拉里「删除」按钮)。
+            try {
+              const { deleteKernelVersion } = await import('./libs/matrix/kernelInstaller');
+              const version = (args[0] as any)?.version;
+              if (!version) return writeJSON(res, 200, { ok: false, error: 'missing_version' });
+              const ok = deleteKernelVersion(String(version));
+              return writeJSON(res, 200, { ok });
+            } catch (e: any) {
+              return writeJSON(res, 200, { ok: false, error: e?.message || String(e) });
+            }
+          }
+          case 'matrix:setSelectedKernel': {
+            // 设置全局选中版本(落盘,作为所有启动路径的唯一来源)。
+            try {
+              const { setSelectedVersion } = await import('./libs/matrix/kernelInstaller');
+              setSelectedVersion(String((args[0] as any)?.version || ''));
+              return writeJSON(res, 200, { ok: true });
+            } catch (e: any) {
+              return writeJSON(res, 200, { ok: false, error: e?.message || String(e) });
+            }
+          }
           case 'matrix:selftest': {
             try {
               const { runKernelSelfTest } = await import('./libs/matrix/selftest');

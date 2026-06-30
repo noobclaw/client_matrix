@@ -19,12 +19,32 @@ import { coworkLog } from '../coworkLogger';
 const DEFAULT_BASE_URL = 'https://api.noobclaw.com';
 function baseUrl(): string { return process.env.NOOBCLAW_API_BASE_URL || DEFAULT_BASE_URL; }
 
-const PLATKEY = process.platform === 'win32' ? 'win' : process.platform === 'darwin' ? 'mac' : 'linux';
+// 架构感知:mac 按 CPU 架构拆 intel/arm(Chromium mac 包按架构编译,跑错架构走 Rosetta
+// 指纹异常),对齐后端 platform = win / mac-intel / mac-arm。
+//   ⚠️ Apple Silicon 若 sidecar 跑在 Rosetta(x64)下 process.arch 会误报 x64 → 下成 intel 包;
+//   待真机若发现误判再加 sysctl.proc_translated 兜底。
+const PLATKEY = process.platform === 'win32' ? 'win'
+  : process.platform === 'darwin' ? (process.arch === 'arm64' ? 'mac-arm' : 'mac-intel')
+  : 'linux';
 
-export interface KernelEntry { version: string; platform: string; url: string; label: string; installed?: boolean }
+export interface KernelEntry { version: string; platform: string; url: string; label: string; sizeMb?: number; sha256?: string; note?: string; recommended?: boolean; installed?: boolean }
+
+// 给 UI 下拉用:服务端某平台的一个版本 + 本地是否已装。
+export interface KernelVersionInfo { version: string; label: string; recommended: boolean; installed: boolean; sizeMb: number; note: string }
 
 function runtimesDir(): string { return path.join(getUserDataPath(), 'runtimes'); }
 function versionDir(version: string): string { return path.join(runtimesDir(), `fingerprint-chromium-${PLATKEY}-${version}`); }
+
+// 全局选中版本(「先统一用一个版本」):落盘在 runtimes/selected-version,作为所有启动路径的
+// 唯一来源。installedKernelPath() 无显式版本时优先取它 → login/refresh/task/keepAlive 全用选中版,
+// 无需改各 runner。UI 在徽章下拉里改选时经 IPC 写这里。
+function selectedVersionFile(): string { return path.join(runtimesDir(), 'selected-version'); }
+export function getSelectedVersion(): string {
+  try { return fs.readFileSync(selectedVersionFile(), 'utf8').trim(); } catch { return ''; }
+}
+export function setSelectedVersion(version: string): void {
+  try { fs.mkdirSync(runtimesDir(), { recursive: true }); fs.writeFileSync(selectedVersionFile(), String(version || '').trim(), 'utf8'); } catch { /* ignore */ }
+}
 function exeIn(dir: string): string {
   return process.platform === 'win32' ? path.join(dir, 'chrome.exe')
     : process.platform === 'darwin' ? path.join(dir, 'Chromium.app', 'Contents', 'MacOS', 'Chromium')
@@ -77,6 +97,9 @@ setTimeout(groupAll, 600);
 export function installedKernelPath(version?: string): string | null {
   try {
     if (version) { const e = exeIn(versionDir(version)); return fs.existsSync(e) ? e : null; }
+    // 无显式版本:优先用户全局选中的版本(若已装),再退回任意已装。
+    const sel = getSelectedVersion();
+    if (sel) { const e = exeIn(versionDir(sel)); if (fs.existsSync(e)) return e; }
     const base = runtimesDir();
     if (fs.existsSync(base)) {
       for (const d of fs.readdirSync(base)) {
@@ -97,7 +120,12 @@ async function fetchKernels(): Promise<KernelEntry[]> {
     const j: any = await r.json();
     const list: any[] = Array.isArray(j.kernels) ? j.kernels : [];
     return list.filter((k) => k && k.platform === PLATKEY)
-      .map((k) => ({ version: String(k.version), platform: String(k.platform), url: String(k.url), label: String(k.label || `${k.platform} ${k.version}`) }));
+      .map((k) => ({
+        version: String(k.version), platform: String(k.platform), url: String(k.url),
+        label: String(k.label || `${k.platform} ${k.version}`),
+        sizeMb: Number(k.sizeMb) || 0, sha256: String(k.sha256 || ''),
+        note: String(k.note || ''), recommended: !!k.recommended,
+      }));
   } catch { return []; }
 }
 
@@ -128,13 +156,37 @@ export function installedVersions(): string[] {
   return out;
 }
 
-/** 内核状态:是否已装 / 已装版本(+全部已装版本列表)/ 后端配置版本 / 是否需更新。 */
-export async function kernelInfo(): Promise<{ installed: boolean; installedVersion: string; installedVersions: string[]; configuredVersion: string; needsUpdate: boolean }> {
+/**
+ * 内核状态。`available` = 服务端该平台【全部】版本 + 每个是否已装(给徽章下拉:已装打勾、
+ * 未装给下载按钮)。`configuredVersion` = 列表第一个(后端按 recommended DESC, created_at DESC
+ * 排序 → 即「推荐版/最新版」,UI 默认选它)。其余字段为旧 UI 兼容保留。
+ */
+export async function kernelInfo(): Promise<{
+  installed: boolean; installedVersion: string; installedVersions: string[];
+  configuredVersion: string; needsUpdate: boolean; available: KernelVersionInfo[]; selectedVersion: string;
+}> {
   const all = installedVersions();
+  const installedSet = new Set(all);
   const inst = installedVersion() || all[0] || '';
   const list = await fetchKernels();
+  const available: KernelVersionInfo[] = list.map((k) => ({
+    version: k.version, label: k.label, recommended: !!k.recommended,
+    installed: installedSet.has(k.version), sizeMb: k.sizeMb || 0, note: k.note || '',
+  }));
   const cfg = list[0]?.version || '';
-  return { installed: !!inst, installedVersion: inst, installedVersions: all, configuredVersion: cfg, needsUpdate: !!(inst && cfg && inst !== cfg) };
+  // 选中版本:已落盘的优先;没有就默认推荐/最新版(list[0]),由 UI 落盘固化。
+  let selectedVersion = getSelectedVersion();
+  if (!selectedVersion) selectedVersion = cfg;
+  return { installed: !!inst, installedVersion: inst, installedVersions: all, configuredVersion: cfg, needsUpdate: !!(inst && cfg && inst !== cfg), available, selectedVersion };
+}
+
+/** 删除某个已装版本目录(UI 删除按钮 / 清理磁盘用)。返回是否删成功。 */
+export function deleteKernelVersion(version: string): boolean {
+  try {
+    const d = versionDir(version);
+    if (fs.existsSync(d)) { fs.rmSync(d, { recursive: true, force: true }); return true; }
+  } catch { /* ignore */ }
+  return false;
 }
 
 type ProgressFn = (pct: number, msg: string) => void;
@@ -314,16 +366,8 @@ export async function ensureKernel(version?: string, onProgress?: ProgressFn): P
 
     try { fs.rmSync(tmp, { force: true }); } catch { /* ignore */ }
     const exe = installedKernelPath(entry.version);
-    // 单版本模式:装好新版后清掉其它版本目录,只留当前(省空间 + launch 不会误用旧版)。
-    if (exe) {
-      const prefix = `fingerprint-chromium-${PLATKEY}-`;
-      const keep = `${prefix}${entry.version}`;
-      try {
-        for (const dd of fs.readdirSync(runtimesDir())) {
-          if (dd.startsWith(prefix) && dd !== keep) fs.rmSync(path.join(runtimesDir(), dd), { recursive: true, force: true });
-        }
-      } catch { /* ignore */ }
-    }
+    // 多版本共存:不再删其它版本(用户可在下拉里切版本、各号也可绑不同版本)。
+    // 删除只在用户主动点删除(deleteKernelVersion)时做。
     onProgress?.(100, exe ? `内核就绪 (${entry.label})` : '解压后未找到内核(格式异常)');
     if (!exe) coworkLog('ERROR', 'kernelInstaller', 'kernel exe not found after extract', { version: entry.version });
     return exe;

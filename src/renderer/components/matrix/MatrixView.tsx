@@ -268,12 +268,13 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
   const [showReplyEditModal, setShowReplyEditModal] = useState(false); // 详情页编辑「回复粉丝」任务
 
   // 指纹浏览器内核
-  const [kernel, setKernel] = useState<{ installed?: boolean; installedVersion?: string; installedVersions?: string[]; configuredVersion?: string; needsUpdate?: boolean }>({});
+  const [kernel, setKernel] = useState<{ installed?: boolean; installedVersion?: string; installedVersions?: string[]; configuredVersion?: string; needsUpdate?: boolean; selectedVersion?: string; available?: { version: string; label: string; recommended: boolean; installed: boolean; sizeMb: number; note: string }[] }>({});
   const [selectedVersion, setSelectedVersion] = useState<string>('');
   const [kernelMsg, setKernelMsg] = useState('');
   const [kernelBusy, setKernelBusy] = useState(false);
   const [kernelPct, setKernelPct] = useState(0);
   const [showKernelModal, setShowKernelModal] = useState(false);
+  const [kernelMenuOpen, setKernelMenuOpen] = useState(false);
 
   const reload = useCallback(async () => { const r = await M()?.listAccounts(); if (r?.ok) setAccounts(r.accounts || []); }, []);
   const reloadTasks = useCallback(async () => { const r = await M()?.listTasks?.(); if (r?.ok) { setTasks(r.tasks || []); if (typeof r.running === 'boolean') setRunning(r.running); } }, []);
@@ -297,14 +298,36 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
   useEffect(() => { localStorage.setItem('matrix:kernelPath', kernelPath); }, [kernelPath]);
   useEffect(() => { const h = setInterval(() => { reloadTasks(); }, 30000); return () => clearInterval(h); }, [reloadTasks]);
 
-  const loadKernel = useCallback(() => { M()?.kernelStatus?.().then((r: any) => { setKernel(r || {}); setSelectedVersion((prev) => prev || r?.installedVersion || ''); }); }, []);
+  // 选中版本来源:已落盘的 selectedVersion 优先(后端唯一来源),其次配置的最新版。
+  // 用 prev || 不覆盖用户本会话刚选的。
+  const loadKernel = useCallback(() => { M()?.kernelStatus?.().then((r: any) => { setKernel(r || {}); setSelectedVersion((prev) => prev || r?.selectedVersion || r?.configuredVersion || ''); }); }, []);
   useEffect(() => {
     loadKernel();
-    const off = M()?.onKernel?.((p: any) => { if (typeof p?.pct === 'number') setKernelPct(p.pct); setKernelMsg(p?.msg || ''); if (p?.done) { setKernelBusy(false); loadKernel(); } });
+    // 下载完成 → 自动选中刚下好的版本并落盘(让它成为后续任务用的版本)。
+    const off = M()?.onKernel?.((p: any) => {
+      if (typeof p?.pct === 'number') setKernelPct(p.pct);
+      setKernelMsg(p?.msg || '');
+      if (p?.done) {
+        setKernelBusy(false);
+        if (p?.path && p?.version) { setSelectedVersion(String(p.version)); M()?.setSelectedKernel?.({ version: String(p.version) }); }
+        loadKernel();
+      }
+    });
     return () => { if (typeof off === 'function') off(); };
   }, [loadKernel]);
 
-  const downloadKernel = async () => { setShowKernelModal(true); setKernelBusy(true); setKernelPct(0); setKernelMsg('准备下载…'); await M()?.ensureKernel(); };
+  // 切换全局选中版本(已装的才可选);落盘成所有启动路径的唯一来源。
+  const chooseVersion = useCallback(async (v: string) => {
+    setSelectedVersion(v);
+    await M()?.setSelectedKernel?.({ version: v });
+    setKernelMenuOpen(false);
+  }, []);
+  // 下载指定版本(不传则下当前选中/最新版)。进度走 matrix:kernel SSE。
+  const downloadKernel = async (version?: string) => {
+    const v = version || selectedVersion || kernel.configuredVersion || '';
+    setShowKernelModal(true); setKernelBusy(true); setKernelPct(0); setKernelMsg('准备下载…');
+    await M()?.ensureKernel({ version: v });
+  };
 
   // 快手按子 tab 过滤(老号无 loginScope → 当主站);其它平台不分。
   const platformAccounts = accounts.filter((a) => a.platform === platform && (platform !== 'kuaishou' || (a.loginScope || 'main') === ksScope));
@@ -318,7 +341,8 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
     }
     return m;
   }, [accounts]);
-  const kernelReady = !!kernel.installed || !!kernelPath.trim();
+  // 就绪 = 选中的版本已下载到本地(或调试手填了路径)。否则任务/扫码一律拦下弹下载窗。
+  const kernelReady = (!!selectedVersion && (kernel.installedVersions || []).includes(selectedVersion)) || !!kernelPath.trim();
   const requireKernel = (): boolean => { if (kernelReady) return true; setShowKernelModal(true); return false; };
   // 未登录则弹登录窗(NoobClaw 账号),拦在所有矩阵操作(建号/编辑/删除/建任务/运行等)前面。
   const requireLogin = (): boolean => { if (noobClawAuth.getState().isAuthenticated) return true; noobClawAuth.requireLoginUI(); return false; };
@@ -549,26 +573,53 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
         )}
 
         <div className="ml-auto flex items-center gap-2">
-          {/* 指纹浏览器(版本下拉,多个时可选;不再手填路径) */}
-          {kernel.installed ? (
-            (kernel.installedVersions && kernel.installedVersions.length > 1) ? (
-              <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-green-500/15 text-green-500">
-                🧬 指纹浏览器
-                <select value={selectedVersion} onChange={(e) => setSelectedVersion(e.target.value)} className="bg-transparent text-green-500 text-xs outline-none">
-                  {kernel.installedVersions.map((v) => <option key={v} value={v} className="text-black">v{v}</option>)}
-                </select>
-                {!kernel.needsUpdate && '✓'}
-              </span>
-            ) : (
-              <span className={`text-xs px-2 py-1 rounded-lg ${kernel.needsUpdate ? 'bg-amber-500/15 text-amber-500' : 'bg-green-500/15 text-green-500'}`}>
-                🧬 指纹浏览器 v{kernel.installedVersion || ''}{kernel.needsUpdate ? '(有新版)' : ' ✓'}
-              </span>
-            )
-          ) : (
-            <span className="text-xs px-2 py-1 rounded-lg bg-amber-500/15 text-amber-500">🧬 指纹浏览器 未安装</span>
-          )}
-          {(!kernel.installed || kernel.needsUpdate) && <button onClick={downloadKernel} disabled={kernelBusy} className="text-xs px-2.5 py-1 rounded-lg bg-violet-500 text-white hover:bg-violet-600 disabled:opacity-50">{kernelBusy ? '下载中…' : (kernel.needsUpdate ? '更新' : '下载')}</button>}
-          {kernelMsg && <span className="text-xs opacity-60 max-w-[180px] truncate">{kernelMsg}</span>}
+          {/* 指纹浏览器:全局版本选择器。服务端有几个版本就列几个,已装打勾、未装给下载按钮。
+              选中已装版本即可开跑任务(选中版即所有号/任务用的内核)。 */}
+          <div className="relative">
+            <button type="button" onClick={() => setKernelMenuOpen((o) => !o)}
+              className={`inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border ${kernelReady ? 'bg-green-500/15 text-green-500 border-green-500/30' : 'bg-amber-500/15 text-amber-500 border-amber-500/30'}`}>
+              🧬 指纹浏览器 {selectedVersion ? `v${selectedVersion}` : ''} {kernelReady ? '✓' : '⚠ 未就绪'}
+              <span className="opacity-60">▾</span>
+            </button>
+            {kernelMenuOpen && (
+              <>
+                {/* 点击空白关闭 */}
+                <div className="fixed inset-0 z-40" onClick={() => setKernelMenuOpen(false)} />
+                <div className="absolute right-0 mt-1 z-50 w-72 rounded-xl py-1 shadow-xl dark:bg-claude-darkBg bg-white border dark:border-white/10 border-black/10">
+                  <div className="px-3 py-1.5 text-[11px] opacity-50">指纹浏览器版本(选已下载的即可开始任务)</div>
+                  {(kernel.available && kernel.available.length) ? kernel.available.map((a) => {
+                    const isSel = a.version === selectedVersion;
+                    return (
+                      <div key={a.version} className={`flex items-center justify-between gap-2 px-3 py-2 ${isSel ? 'bg-green-500/10' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}>
+                        <button type="button" disabled={!a.installed} onClick={() => a.installed && chooseVersion(a.version)}
+                          className={`flex-1 text-left ${a.installed ? 'cursor-pointer' : 'cursor-default opacity-70'}`}>
+                          <div className="text-xs font-medium flex items-center gap-1.5">
+                            {a.label || `v${a.version}`}
+                            {a.recommended && <span className="text-[10px] px-1 rounded bg-violet-500/20 text-violet-500">推荐</span>}
+                            {isSel && a.installed && <span className="text-[10px] text-green-500">使用中</span>}
+                          </div>
+                          {(a.note || a.sizeMb) ? <div className="text-[10px] opacity-50 mt-0.5">{a.note}{a.note && a.sizeMb ? ' · ' : ''}{a.sizeMb ? `约 ${a.sizeMb}MB` : ''}</div> : null}
+                        </button>
+                        {a.installed
+                          ? <span className="text-green-500 text-sm shrink-0">✓</span>
+                          : <button type="button" disabled={kernelBusy} onClick={() => downloadKernel(a.version)}
+                              className="shrink-0 text-[11px] px-2 py-1 rounded-lg bg-violet-500 text-white hover:bg-violet-600 disabled:opacity-50">{kernelBusy ? '下载中…' : '下载'}</button>}
+                      </div>
+                    );
+                  }) : (
+                    <div className="px-3 py-3 text-xs opacity-60">{kernel.installed ? '已安装本地版本' : '正在获取版本列表…(需联网)'}</div>
+                  )}
+                  {(kernelBusy || (kernelMsg && kernelPct > 0)) && (
+                    <div className="px-3 pt-1.5 pb-1 border-t dark:border-white/10 border-black/10">
+                      <div className="h-1.5 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden"><div className="h-full bg-violet-500 transition-all" style={{ width: `${Math.max(2, kernelPct)}%` }} /></div>
+                      <div className="text-[10px] opacity-60 mt-1 truncate">{kernelMsg}{kernelBusy ? ` · ${kernelPct}%` : ''}</div>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+          {kernelMsg && !kernelMenuOpen && <span className="text-xs opacity-60 max-w-[160px] truncate">{kernelMsg}</span>}
         </div>
       </div>
 
@@ -1084,20 +1135,20 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="w-[26rem] rounded-xl p-5 dark:bg-claude-darkBg bg-white border dark:border-white/10 border-black/10">
             <div className="text-sm font-medium mb-1">指纹浏览器</div>
-            {kernel.installed && !kernelBusy ? (
-              <div className="text-sm text-green-500 my-3">✓ 指纹浏览器已就绪{kernel.installedVersion ? `(v${kernel.installedVersion})` : ''},现在可以连接账号 / 扫码连接 / 跑任务了。</div>
+            {kernelReady && !kernelBusy ? (
+              <div className="text-sm text-green-500 my-3">✓ 指纹浏览器已就绪{selectedVersion ? `(v${selectedVersion})` : ''},现在可以连接账号 / 扫码连接 / 跑任务了。</div>
             ) : (
               <>
-                <div className="text-sm opacity-70 my-3">矩阵号需要专属指纹浏览器才能运行(独立指纹隔离,普通 Chrome 无法替代)。约 130MB,只需下载一次。</div>
+                <div className="text-sm opacity-70 my-3">矩阵号需要专属指纹浏览器才能运行(独立指纹隔离,普通 Chrome 无法替代)。请下载并选中一个版本{selectedVersion ? `(将下载 v${selectedVersion})` : ''}。约 130MB,只需下载一次。</div>
                 {(kernelBusy || kernelPct > 0) && (
                   <div className="mb-3"><div className="h-2 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden"><div className="h-full bg-claude-accent transition-all duration-200" style={{ width: `${Math.max(2, kernelPct)}%` }} /></div><div className="text-xs opacity-60 mt-1">{kernelMsg || '准备中…'}{kernelBusy ? ` · ${kernelPct}%` : ''}</div></div>
                 )}
-                {!kernelBusy && kernelMsg && !kernel.installed && <div className="text-xs text-red-500 mb-2">{kernelMsg}</div>}
+                {!kernelBusy && kernelMsg && !kernelReady && <div className="text-xs text-red-500 mb-2">{kernelMsg}</div>}
               </>
             )}
             <div className="flex justify-end gap-2 mt-2">
               <button onClick={() => setShowKernelModal(false)} className="px-3 py-1.5 text-sm rounded-lg border dark:border-white/15 border-black/15">关闭</button>
-              {!kernel.installed && <button onClick={downloadKernel} disabled={kernelBusy} className="px-3 py-1.5 text-sm rounded-lg bg-claude-accent text-white disabled:opacity-50">{kernelBusy ? '下载中…' : (kernelPct > 0 ? '重试下载' : '开始下载')}</button>}
+              {!kernelReady && <button onClick={() => downloadKernel()} disabled={kernelBusy} className="px-3 py-1.5 text-sm rounded-lg bg-claude-accent text-white disabled:opacity-50">{kernelBusy ? '下载中…' : (kernelPct > 0 ? '重试下载' : '开始下载')}</button>}
             </div>
           </div>
         </div>
