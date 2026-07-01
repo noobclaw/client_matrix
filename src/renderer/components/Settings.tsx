@@ -1624,6 +1624,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, forceC
                     { value: 'ru', label: 'Русский' },
                     { value: 'fr', label: 'Français' },
                     { value: 'de', label: 'Deutsch' },
+                    { value: 'vi', label: 'Tiếng Việt' },
                   ]}
                 />
               </div>
