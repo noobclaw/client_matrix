@@ -204,11 +204,11 @@ const MembershipPanel: React.FC<{ onPay?: (planCode: string, period: Period, cha
         <div className="mt-4 p-4 rounded-xl dark:bg-claude-darkSurface bg-claude-surface border dark:border-claude-darkBorder border-claude-border">
           <div className="flex items-center justify-between gap-2 mb-1">
             <div className="text-sm font-medium dark:text-claude-darkText text-claude-text">会员兑换码</div>
-            <button disabled={!shopUrl} onClick={openShop} className="px-3 py-1 rounded-lg text-xs font-semibold bg-primary/15 text-primary hover:bg-primary/25 transition-colors disabled:opacity-40">去店铺购买 →</button>
+            <button disabled={!shopUrl} onClick={openShop} className="px-3 py-1 rounded-lg text-xs font-semibold bg-primary/15 text-primary hover:bg-primary/25 transition-colors disabled:opacity-40">订阅</button>
           </div>
-          <div className="text-xs dark:text-claude-darkTextSecondary text-claude-textSecondary mb-3">点上方档位「订阅」或「去店铺购买」进店买卡密,回来在此输入兑换即可开通对应档位与周期。</div>
+          <div className="text-xs dark:text-claude-darkTextSecondary text-claude-textSecondary mb-3">在店铺购买会员码后,在此输入兑换即可开通对应档位与周期。</div>
           <div className="flex gap-2">
-            <input value={redeemInput} onChange={e => setRedeemInput(e.target.value)} placeholder="输入订阅兑换码" className="flex-1 px-3 py-2 rounded-lg dark:bg-claude-darkBg bg-claude-bg border dark:border-claude-darkBorder border-claude-border text-sm dark:text-claude-darkText text-claude-text focus:border-primary outline-none" />
+            <input value={redeemInput} onChange={e => setRedeemInput(e.target.value)} placeholder="输入会员订阅兑换码" className="flex-1 px-3 py-2 rounded-lg dark:bg-claude-darkBg bg-claude-bg border dark:border-claude-darkBorder border-claude-border text-sm dark:text-claude-darkText text-claude-text focus:border-primary outline-none" />
             <button disabled={redeemBusy} onClick={submitRedeem} className="px-5 py-2 rounded-lg bg-primary text-black text-sm font-semibold disabled:opacity-50">{redeemBusy ? '兑换中…' : '兑换'}</button>
           </div>
           {redeemMsg.text && <div className="mt-2 text-xs" style={{ color: redeemMsg.color }}>{redeemMsg.text}</div>}
