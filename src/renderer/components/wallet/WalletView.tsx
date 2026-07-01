@@ -774,6 +774,13 @@ export const WalletView: React.FC<WalletViewProps> = ({ isSidebarCollapsed, onTo
                 const rmbAmount = isRedeem
                   ? (order.rmb_amount ?? order.face_value_rmb ?? order.amount_cny ?? null)
                   : null;
+                // 订阅订单:展示「档位 · 时长」(plan_name 后端 join 下发、plan_period 本地映射标签),
+                // 并隐藏无意义的积分数(订阅订单 tokens_purchased 恒为 0)。总价仍走上面的金额显示(BNB/USDT/¥)。
+                const isSub = order.product_type === 'subscription';
+                const subPeriodLabel: Record<string, string> = { month: '月付', quarter: '季付', half: '半年', year: '年付' };
+                const subLabel = isSub
+                  ? `${order.plan_name || order.plan_code || '会员'}${order.plan_period ? ' · ' + (subPeriodLabel[order.plan_period] || order.plan_period) : ''}`
+                  : '';
 
                 return (
                   <div key={order.id} className="p-3.5 rounded-xl dark:bg-claude-darkSurface bg-claude-surface border dark:border-claude-darkBorder border-claude-border">
@@ -795,7 +802,11 @@ export const WalletView: React.FC<WalletViewProps> = ({ isSidebarCollapsed, onTo
                               {orderAmount} {orderUnit}
                             </>
                           )}
-                          <span className="dark:text-claude-darkTextSecondary text-claude-textSecondary font-normal"> · {(order.tokens_purchased / 1_000_000).toFixed(1)}{i18nService.t('walletMTokenUnit')}</span>
+                          {isSub ? (
+                            <span className="dark:text-claude-darkTextSecondary text-claude-textSecondary font-normal"> · {subLabel}</span>
+                          ) : (
+                            <span className="dark:text-claude-darkTextSecondary text-claude-textSecondary font-normal"> · {(order.tokens_purchased / 1_000_000).toFixed(1)}{i18nService.t('walletMTokenUnit')}</span>
+                          )}
                         </div>
                       </div>
                       <span className={`text-xs px-2 py-0.5 rounded-full ${getStatusColor(order.status)}`}>
