@@ -40,7 +40,10 @@ export const getWebsiteUrl = () => isTestMode()
   : 'https://noobclaw.com';
 
 // ── Auto-update (fetched from own backend) ─────────────────────────────────
-export const getUpdateCheckUrl = () => `${getBackendApiUrl()}/api/skills/latest-releases`;
+// 国际矩阵版:更新渠道 edition=global-matrix,独立于国际原版 global。
+// 后端 4 个 edition:global(国际原版)/global-matrix(国际矩阵版)/cn(国内原版)/cn-matrix(国内矩阵版),
+// 各自独立版本号+安装包,strict 不跨 edition fallback(不传参会被当 global → 更新成原版,故必须显式带上)。
+export const getUpdateCheckUrl = () => `${getBackendApiUrl()}/api/skills/latest-releases?edition=global-matrix`;
 
 export const getFallbackDownloadUrl = () => 'https://noobclaw.com/#/download-list';
 
