@@ -148,7 +148,10 @@ function badgeScript(label: string, proxyText: string, proxyMode: 'ok' | 'down' 
   else if (proxyMode === 'down') line2 += '  ⚠️ 代理不通,请检查';
   const P = JSON.stringify(line2);
   const bg2 = proxyMode === 'dup' ? '#dc2626' : proxyMode === 'down' ? '#d97706' : '#16a34a';
-  return `(function(){var node=null;function m(){try{var root=document.body||document.documentElement;if(!root)return;if(node&&node.isConnected)return;`
+  // 只在【顶层文档】渲染:addScriptToEvaluateOnNewDocument 会对所有 frame(含 iframe)生效,
+  //   视频号登录二维码等页面把内容放在 iframe 里,不守卫会在 iframe 内再渲染一个 position:fixed 角标盖住二维码。
+  //   cross-origin iframe 访问 window.top 可能抛,catch 即判定为子 frame → 不渲染。
+  return `(function(){try{if(window.top!==window.self)return;}catch(e){return;}var node=null;function m(){try{var root=document.body||document.documentElement;if(!root)return;if(node&&node.isConnected)return;`
     + `var host=document.createElement('div');host.style.cssText='position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:2147483647;pointer-events:none;display:flex;flex-direction:column;align-items:center';`
     + `var sr=host.attachShadow?host.attachShadow({mode:'closed'}):null;var box=sr||host;`
     + `var b=document.createElement('div');b.textContent=${L};b.style.cssText='background:#16a34a;color:#fff;font:bold 13px/1.5 system-ui,sans-serif;padding:3px 12px;border-radius:0 0 8px 8px';box.appendChild(b);`
@@ -161,7 +164,7 @@ function badgeScript(label: string, proxyText: string, proxyMode: 'ok' | 'down' 
 // 设 display:none —— 不改 badgeScript 本身)。登录成功跳页后本页 document 销毁、绿标在新页正常恢复。
 function expiredBadgeScript(text: string): string {
   const T = JSON.stringify(text);
-  return `(function(){var node=null;`
+  return `(function(){try{if(window.top!==window.self)return;}catch(e){return;}var node=null;`
     // 隐藏绿色身份角标:它是 body 直接子节点、position:fixed、top/left:0、z-index 拉满的 div(badgeScript 的签名);排除自己(node)。
     + `function hideGreen(root){try{var ch=root.children;for(var i=0;i<ch.length;i++){var el=ch[i];if(el!==node&&el.tagName==='DIV'&&el.style&&el.style.position==='fixed'&&el.style.top==='0px'&&el.style.zIndex==='2147483647'){el.style.display='none';}}}catch(e){}}`
     + `function m(){try{var root=document.body||document.documentElement;if(!root)return;hideGreen(root);if(node&&node.isConnected)return;var host=document.createElement('div');host.style.cssText='position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:2147483647;pointer-events:none';var sr=host.attachShadow?host.attachShadow({mode:'closed'}):null;var b=document.createElement('div');b.textContent=${T};b.style.cssText='background:#facc15;color:#1f2937;font:bold 13px/1.5 system-ui,sans-serif;padding:4px 14px;border-radius:0 0 8px 8px;box-shadow:0 1px 6px rgba(0,0,0,.3)';(sr||host).appendChild(b);root.appendChild(host);node=host;}catch(e){}}m();setInterval(m,2000);})();`;
