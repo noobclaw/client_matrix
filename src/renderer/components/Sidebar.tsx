@@ -175,7 +175,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         <div className="draggable sidebar-header-drag h-10 flex items-center justify-between px-3">
           <div className="non-draggable flex items-center gap-2">
             <img src="logo.png" alt="logo" className="w-6 h-6 rounded-lg" />
-            <span className="font-bold text-sm dark:text-claude-darkText text-claude-text tracking-wide">NoobClaw矩阵版</span>
+            <span className="font-bold text-sm dark:text-claude-darkText text-claude-text tracking-wide">{i18nService.t('appBrand')}</span>
             {updateBadge}
           </div>
           <button
