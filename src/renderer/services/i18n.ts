@@ -3082,6 +3082,7 @@ const translations: Record<LanguageType, Partial<Record<string, string>>> = {
     tokenInsufficientDesc: '您的积分余额不足以继续使用 AI 服务，请前往钱包充值。',
     tokenInsufficientBalance: '当前余额: {n} 积分',
     tokenInsufficientTopUp: '💰 前往充值',
+    tokenInsufficientSubscribe: '👑 续费会员',
     tokenInsufficientLater: '稍后再说',
 
     // PartnersView
@@ -6170,6 +6171,7 @@ const translations: Record<LanguageType, Partial<Record<string, string>>> = {
     tokenInsufficientDesc: 'Your credit balance is too low to continue using AI services. Please top up your wallet.',
     tokenInsufficientBalance: 'Current balance: {n} credits',
     tokenInsufficientTopUp: '💰 Top Up Now',
+    tokenInsufficientSubscribe: '👑 Renew Membership',
     tokenInsufficientLater: 'Later',
 
     // PartnersView
@@ -6921,6 +6923,7 @@ const translations: Record<LanguageType, Partial<Record<string, string>>> = {
     tokenInsufficientDesc: '您的積分餘額不足以繼續使用 AI 服務，請前往錢包充值。',
     tokenInsufficientBalance: '目前餘額: {n} 積分',
     tokenInsufficientTopUp: '💰 前往充值',
+    tokenInsufficientSubscribe: '👑 續費會員',
     tokenInsufficientLater: '稍後再說',
 
     // PartnersView
@@ -9597,6 +9600,7 @@ const translations: Record<LanguageType, Partial<Record<string, string>>> = {
     tokenInsufficientDesc: '크레딧 잔액이 부족하여 AI 서비스를 계속 사용할 수 없습니다. 지갑을 충전해 주세요.',
     tokenInsufficientBalance: '현재 잔액: {n} 크레딧',
     tokenInsufficientTopUp: '💰 충전하기',
+    tokenInsufficientSubscribe: '👑 멤버십 갱신',
     tokenInsufficientLater: '나중에',
 
     // PartnersView
@@ -12288,6 +12292,7 @@ const translations: Record<LanguageType, Partial<Record<string, string>>> = {
     tokenInsufficientDesc: 'クレジット残高が不足しており、AIサービスを続行できません。ウォレットにチャージしてください。',
     tokenInsufficientBalance: '現在の残高: {n} クレジット',
     tokenInsufficientTopUp: '💰 チャージする',
+    tokenInsufficientSubscribe: '👑 メンバーシップ更新',
     tokenInsufficientLater: '後で',
 
     // PartnersView
@@ -14928,6 +14933,7 @@ const translations: Record<LanguageType, Partial<Record<string, string>>> = {
     tokenInsufficientDesc: 'Баланс кредитов слишком мал для продолжения. Пополните кошелёк.',
     tokenInsufficientBalance: 'Текущий баланс: {n} кредитов',
     tokenInsufficientTopUp: '💰 Пополнить',
+    tokenInsufficientSubscribe: '👑 Продлить',
     tokenInsufficientLater: 'Позже',
 
     // PartnersView
@@ -17601,6 +17607,7 @@ const translations: Record<LanguageType, Partial<Record<string, string>>> = {
     tokenInsufficientDesc: 'Votre solde de crédits est trop bas pour continuer. Veuillez recharger votre portefeuille.',
     tokenInsufficientBalance: 'Solde actuel : {n} crédits',
     tokenInsufficientTopUp: '💰 Recharger',
+    tokenInsufficientSubscribe: '👑 Renouveler',
     tokenInsufficientLater: 'Plus tard',
 
     // PartnersView
@@ -20274,6 +20281,7 @@ const translations: Record<LanguageType, Partial<Record<string, string>>> = {
     tokenInsufficientDesc: 'Ihr Credits-Guthaben ist zu niedrig. Bitte laden Sie Ihr Wallet auf.',
     tokenInsufficientBalance: 'Aktuelles Guthaben: {n} Credits',
     tokenInsufficientTopUp: '💰 Aufladen',
+    tokenInsufficientSubscribe: '👑 Verlängern',
     tokenInsufficientLater: 'Später',
 
     // PartnersView
@@ -25284,6 +25292,7 @@ const translations: Record<LanguageType, Partial<Record<string, string>>> = {
     tokenInsufficientDesc: "Số dư điểm của bạn quá thấp để tiếp tục dùng dịch vụ AI. Vui lòng nạp thêm vào ví.",
     tokenInsufficientBalance: "Số dư hiện tại: {n} điểm",
     tokenInsufficientTopUp: "💰 Nạp ngay",
+    tokenInsufficientSubscribe: '👑 Gia hạn',
     tokenInsufficientLater: "Để sau",
     partnersLoading: "Đang tải...",
     partnersTitle: "🤝 Sự kiện & Đối tác",
