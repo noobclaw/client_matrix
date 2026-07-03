@@ -97,6 +97,16 @@ function makeAiCall(authToken: string | undefined, onCost?: (credits: number, us
       signal,
     });
     const data: any = await res.json().catch(() => ({}));
+    // 后端非 2xx(余额不足 402 / 内容审核 / 限流 / 5xx)必须抛错,不能把 {error,message}
+    //   当成空 content 静默吞掉 —— 否则 orchestrator 只看到空串,误报「改写返回空 (1秒)」,
+    //   用户完全看不出是余额不足。抛带原因的 Error 后:① 余额/权限类被 aiCallWithRetry
+    //   判定确定性失败不空转重试;② orchestrator catch 显示「改写失败: 余额不足...」真实原因;
+    //   ③ 5xx 仍会重试一次。
+    if (!res.ok) {
+      const beMsg = String((data && (data.message || data.error)) || ('http_' + res.status));
+      if (res.status === 402 || /INSUFFICIENT_TOKENS|insufficient|余额/i.test(beMsg)) throw new Error('余额不足,请充值后重试 (' + beMsg + ')');
+      throw new Error('AI 请求失败 ' + res.status + ': ' + beMsg);
+    }
     try {
       const aiCredits = Number(data?._noobclaw?.billableTokens) || 0;
       const aiUsd = Number(data?._noobclaw?.costUsd) || 0;
