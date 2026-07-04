@@ -14,6 +14,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { i18nService } from '../../services/i18n';
+import { POST_LANGS, postLangLabel } from './postLangs';
 
 type WizardStep = 1 | 2 | 3;
 
@@ -25,7 +26,7 @@ export interface FacebookPostWizardSave {
   concurrency: number;
   frequency: string;
   withImage: boolean;
-  language: 'zh' | 'en' | 'mixed';
+  language: string;
   autoPublish: boolean;
   sourceKind: 'news' | 'category' | 'hot';
   source?: string;
@@ -80,7 +81,7 @@ const MatrixFacebookPostWizard: React.FC<Props> = ({ platformLabel, platform, ac
   })();
   const [sourceId, setSourceId] = useState<string>(initSourceId);
   const [withImage, setWithImage] = useState<boolean>(fp.withImage !== false);
-  const [language, setLanguage] = useState<'zh' | 'en' | 'mixed'>(fp.language || 'mixed');
+  const [language, setLanguage] = useState<string>(fp.language || 'mixed');
   const [autoPublish, setAutoPublish] = useState<boolean>(fp.autoPublish !== false);
 
   const [runInterval, setRunInterval] = useState<string>(initialTask?.frequency || 'daily_random');
@@ -122,7 +123,7 @@ const MatrixFacebookPostWizard: React.FC<Props> = ({ platformLabel, platform, ac
     return m[runInterval] || runInterval;
   }, [runInterval, isZh]);
 
-  const langLabel = (l: string) => (l === 'zh' ? T('中文', 'Chinese') : l === 'en' ? T('英文', 'English') : T('随账号(默认中文)', 'Auto (default zh)'));
+  const langLabel = (l: string) => postLangLabel(l, isZh);
   const btn = (active: boolean) => `px-2.5 py-1 rounded-md text-xs border transition-colors ${active ? 'border-blue-500 bg-blue-500/10 text-blue-500 font-medium' : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-blue-500/50'}`;
   const bigBtn = (active: boolean) => `px-3 py-2.5 rounded-lg text-sm border text-left transition-colors ${active ? 'border-blue-500 bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium' : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-blue-500/50'}`;
 
@@ -197,9 +198,9 @@ const MatrixFacebookPostWizard: React.FC<Props> = ({ platformLabel, platform, ac
 
             <div>
               <label className="text-sm font-medium dark:text-gray-200 mb-1.5 block">{T('写作语言', 'Language')}</label>
-              <div className="flex gap-2 flex-wrap">
-                {(['mixed', 'zh', 'en'] as const).map((l) => (<button key={l} type="button" onClick={() => setLanguage(l)} className={btn(language === l)}>{langLabel(l)}</button>))}
-              </div>
+              <select value={language} onChange={(e) => setLanguage(e.target.value)} className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/40">
+                {POST_LANGS.map((l) => <option key={l.code} value={l.code}>{isZh ? l.zh : l.en}</option>)}
+              </select>
             </div>
 
             <div>

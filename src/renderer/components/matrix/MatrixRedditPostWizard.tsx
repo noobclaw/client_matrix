@@ -11,6 +11,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { i18nService } from '../../services/i18n';
+import { POST_LANGS, postLangLabel } from './postLangs';
 
 type WizardStep = 1 | 2 | 3;
 
@@ -21,7 +22,7 @@ export interface RedditPostWizardSave {
   accountIds: string[];
   concurrency: number;
   frequency: string;
-  language: 'zh' | 'en' | 'mixed';
+  language: string;
   autoPublish: boolean;
   sourceKind: 'news' | 'category' | 'hot';
   source?: string;
@@ -72,7 +73,7 @@ const MatrixRedditPostWizard: React.FC<Props> = ({ platformLabel, platform, acco
   })();
   const [sourceId, setSourceId] = useState<string>(initSourceId);
   const [subreddit, setSubreddit] = useState<string>(String(rp.subreddit || '').replace(/^\/?r\//i, ''));
-  const [language, setLanguage] = useState<'zh' | 'en' | 'mixed'>(rp.language || 'mixed');
+  const [language, setLanguage] = useState<string>(rp.language || 'mixed');
   const [autoPublish, setAutoPublish] = useState<boolean>(rp.autoPublish !== false);
 
   const [runInterval, setRunInterval] = useState<string>(initialTask?.frequency || 'daily_random');
@@ -113,7 +114,7 @@ const MatrixRedditPostWizard: React.FC<Props> = ({ platformLabel, platform, acco
     return m[runInterval] || runInterval;
   }, [runInterval, isZh]);
 
-  const langLabel = (l: string) => (l === 'zh' ? T('中文', 'Chinese') : l === 'en' ? T('英文', 'English') : T('随账号(默认英文)', 'Auto (default en)'));
+  const langLabel = (l: string) => postLangLabel(l, isZh);
   const btn = (active: boolean) => `px-2.5 py-1 rounded-md text-xs border transition-colors ${active ? 'border-orange-500 bg-orange-500/10 text-orange-500 font-medium' : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-orange-500/50'}`;
   const bigBtn = (active: boolean) => `px-3 py-2.5 rounded-lg text-sm border text-left transition-colors ${active ? 'border-orange-500 bg-orange-500/10 text-orange-600 dark:text-orange-400 font-medium' : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-orange-500/50'}`;
 
@@ -192,7 +193,9 @@ const MatrixRedditPostWizard: React.FC<Props> = ({ platformLabel, platform, acco
 
             <div>
               <label className="text-sm font-medium dark:text-gray-200 mb-1.5 block">{T('写作语言', 'Language')}</label>
-              <div className="flex gap-2 flex-wrap">{(['mixed', 'en', 'zh'] as const).map((l) => (<button key={l} type="button" onClick={() => setLanguage(l)} className={btn(language === l)}>{langLabel(l)}</button>))}</div>
+              <select value={language} onChange={(e) => setLanguage(e.target.value)} className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500/40">
+                {POST_LANGS.map((l) => <option key={l.code} value={l.code}>{isZh ? l.zh : l.en}</option>)}
+              </select>
             </div>
 
             <div>

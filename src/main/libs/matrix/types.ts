@@ -123,7 +123,7 @@ export interface ViralRewriteConfig {
 export interface TweetPostConfig {
   mode: 'web3' | 'free';         // 内容来源:web3 资讯流 / 按账号身份自由创作
   withImage: boolean;            // true=AI 生图配图,false=纯文字推
-  language: 'zh' | 'en' | 'mixed';
+  language: string;   // 'mixed'/'auto'=跟随账号;或 9 种语言码之一(见 postLangs.ts)
   isBlueV: boolean;              // 蓝V(X Premium)→ 字数自由(三档随机);普通号 ≤140 字
   autoPublish: boolean;          // true=直接发布,false=仅本地生成(不发)
   references?: Record<string, string>; // 可选:各账号参考文案 { accountId: text }(仅 free 模式参考);空则按身份生成
@@ -137,7 +137,7 @@ export interface TweetPostConfig {
  */
 export interface BinancePostConfig {
   withImage: boolean;            // true=配图(源图优先→AI 生图),false=纯文字
-  language: 'zh' | 'en' | 'mixed';
+  language: string;   // 'mixed'/'auto'=跟随账号;或 9 种语言码之一(见 postLangs.ts)
   autoPublish: boolean;          // true=直接发布,false=仅本地生成(不发)
 }
 
@@ -149,7 +149,7 @@ export interface BinancePostConfig {
  */
 export interface FacebookPostConfig {
   withImage: boolean;
-  language: 'zh' | 'en' | 'mixed';
+  language: string;   // 'mixed'/'auto'=跟随账号;或 9 种语言码之一(见 postLangs.ts)
   autoPublish: boolean;
   sourceKind: 'news' | 'category' | 'hot';  // 数据源类型
   source?: string;                          // hot 模式:热榜名(如 "微博热搜")
@@ -162,7 +162,7 @@ export interface FacebookPostConfig {
  * 复用 binancePostRunner(scenarioId = reddit_post)。
  */
 export interface RedditPostConfig {
-  language: 'zh' | 'en' | 'mixed';
+  language: string;   // 'mixed'/'auto'=跟随账号;或 9 种语言码之一(见 postLangs.ts)
   autoPublish: boolean;
   sourceKind: 'news' | 'category' | 'hot';
   source?: string;
@@ -186,7 +186,7 @@ export interface BinanceRepostConfig {
   keyword?: string;              // 搜索词(选填;空则用采集号 account.keywords)
   material: 'image' | 'video';   // 搬运形态:图文 / 视频
   withImage: boolean;            // 图文模式恒配源图;视频模式此项保留兼容(一般 true)
-  language: 'zh' | 'en' | 'mixed'; // 仿写语言(mixed 跟随客户端)
+  language: string;   // 'mixed'/'auto'=跟随账号;或 9 种语言码之一(见 postLangs.ts) // 仿写语言(mixed 跟随客户端)
   autoPublish: boolean;          // true=直接发布,false=仅本地生成(不发)
   perRunCount?: number;          // 本轮目标条数;缺省=min(币安号数, 候选池数)。封顶见 runner
 }
