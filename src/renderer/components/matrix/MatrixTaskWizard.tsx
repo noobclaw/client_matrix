@@ -42,6 +42,8 @@ interface Props {
 const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, platform, accounts, accountsLoading, initialTask, onCancel, onSave }) => {
   const editing = !!initialTask;
   const [step, setStep] = useState<WizardStep>(1);
+  // 评论语言选择器只给【海外平台 + 币安广场】;中文平台(抖音/小红书/B站/快手/视频号/头条)不显示(默认跟帖子语言)。
+  const overseasEngage = ['x', 'tiktok', 'youtube', 'binance', 'facebook', 'reddit'].includes(String(platform || ''));
 
   // 任务名不让用户填(对齐旧版):内部按平台+账号数自动命名。
   // 默认勾选所有「可用」账号(配了关键词 + 未封);编辑时用任务已存的账号。
@@ -189,8 +191,8 @@ const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, platform, accounts, 
             <RangeSlider label={i18nService.t('wzEngageFollowLabel')} min={folMin} max={folMax} setMin={setFolMin} setMax={setFolMax} hardCap={FOLLOW_HARDCAP} hint={i18nService.t('wzEngageFollowHint').replace('{min}', String(folMin)).replace('{max}', String(folMax)).replace('{cap}', String(FOLLOW_HARDCAP))} disabled={saving} />
             <RangeSlider label={i18nService.t('wzEngageCommentLabel')} min={cmtMin} max={cmtMax} setMin={setCmtMin} setMax={setCmtMax} hardCap={COMMENT_HARDCAP} hint={i18nService.t('wzEngageCommentHint').replace('{min}', String(cmtMin)).replace('{max}', String(cmtMax)).replace('{cap}', String(COMMENT_HARDCAP))} disabled={saving} />
 
-            {/* 评论语言(评论 max>0 才显示):auto=跟帖子语言;选具体语言=强制用该语言写评论。 */}
-            {cmtMax > 0 && (
+            {/* 评论语言(评论 max>0 且海外平台才显示):auto=跟帖子语言;选具体语言=强制用该语言写评论。中文平台不显示。 */}
+            {cmtMax > 0 && overseasEngage && (
               <div>
                 <label className="text-sm font-medium dark:text-gray-200 mb-1.5 block">
                   {i18nService.currentLanguage === 'zh' ? '评论语言' : 'Comment language'}
