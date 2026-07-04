@@ -52,7 +52,7 @@ import MatrixViralRewriteWizard, { type ViralRewriteWizardSave } from '../matrix
 type PlatformId = 'xhs' | 'x' | 'binance' | 'douyin' | 'shipinhao' | 'toutiao' | 'kuaishou' | 'bilibili' | 'tiktok' | 'youtube' | 'instagram' | 'facebook' | 'reddit' | 'video';
 
 // 矩阵 tab 顺序:多平台视频创作放最前(用户要求),其后与「我的矩阵账号」平台顺序一致(含视频号/头条)。
-const MATRIX_TAB_ORDER: PlatformId[] = ['video', 'douyin', 'xhs', 'kuaishou', 'bilibili', 'shipinhao', 'toutiao', 'x', 'binance', 'youtube', 'tiktok'];
+const MATRIX_TAB_ORDER: PlatformId[] = ['video', 'douyin', 'xhs', 'kuaishou', 'bilibili', 'shipinhao', 'toutiao', 'x', 'binance', 'youtube', 'tiktok', 'facebook', 'reddit'];
 // 后端 backend/matrix/scenarios 有 <platform>_auto_engage 互动涨粉剧本的平台(共 8 个)。
 // 视频号/头条暂无 engage 剧本 → tab 仍展示(与账号页一致),但「开始创作」标注「即将上线」不放行,避免跑出错任务。
 const MATRIX_ENGAGE_PLATFORMS = new Set<PlatformId>(['douyin', 'xhs', 'kuaishou', 'bilibili', 'x', 'binance', 'youtube', 'tiktok', 'facebook', 'reddit']);
@@ -149,6 +149,8 @@ const PLATFORM_TABS: Array<{ id: PlatformId; labelKey: string; icon: string; ena
   { id: 'x', labelKey: 'scenarioPlatformX', icon: '🐦', enabled: true },
   { id: 'youtube', labelKey: 'scenarioPlatformYoutube', icon: '📺', enabled: true },
   { id: 'tiktok', labelKey: 'scenarioPlatformTiktok', icon: '🎵', enabled: true },
+  { id: 'facebook', labelKey: 'scenarioPlatformFacebook', icon: '👥', enabled: true },
+  { id: 'reddit', labelKey: 'scenarioPlatformReddit', icon: '🟠', enabled: true },
   // 国内平台:接在后面同一行排,放不下由容器(flex-wrap)自然换行,不再写死断行。
   { id: 'xhs', labelKey: 'scenarioPlatformXhs', icon: '📕', enabled: true },
   { id: 'douyin', labelKey: 'scenarioPlatformDouyin', icon: '🎶', enabled: true },
