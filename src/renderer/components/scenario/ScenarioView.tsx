@@ -935,6 +935,8 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
             : s?.platform === 'douyin' ? '抖音'
             : s?.platform === 'shipinhao' ? '视频号'
             : s?.platform === 'toutiao' ? '头条号'
+            : (s?.platform as string) === 'facebook' ? 'Facebook'
+            : (s?.platform as string) === 'reddit' ? 'Reddit'
             : (s?.platform || '');
           // Get this task's progress to know which step it's in
           const prog = await scenarioService.getRunProgress(id).catch(() => null);
@@ -971,7 +973,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       const p = s?.platform;
       // v2.4.61: 漏了 'binance' — 进币安任务详情然后返回会跳回小红书 tab
       // v6.x:  漏了 'video' — 翻译二创(scenario.platform='video')详情返回也会掉小红书 tab
-      if (p === 'xhs' || p === 'x' || p === 'binance' || p === 'douyin' || p === 'shipinhao' || p === 'toutiao' || p === 'kuaishou' || p === 'bilibili' || p === 'tiktok' || p === 'youtube' || p === 'video') return p;
+      if (p === 'xhs' || p === 'x' || p === 'binance' || p === 'douyin' || p === 'shipinhao' || p === 'toutiao' || p === 'kuaishou' || p === 'bilibili' || p === 'tiktok' || p === 'youtube' || (p as string) === 'facebook' || (p as string) === 'reddit' || p === 'video') return p as PlatformId;
       return 'xhs';
     }
     return 'xhs';
@@ -1273,6 +1275,8 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       : currentPlatform === 'toutiao' ? (isZh ? '头条号' : 'Toutiao')
       : currentPlatform === 'kuaishou' ? (isZh ? '快手' : 'Kuaishou')
       : currentPlatform === 'bilibili' ? (isZh ? '哔哩哔哩' : 'Bilibili')
+      : currentPlatform === 'facebook' ? 'Facebook'
+      : currentPlatform === 'reddit' ? 'Reddit'
       : currentPlatform;
 
     if (currentSection === 'tasks') {

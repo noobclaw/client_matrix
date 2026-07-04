@@ -66,6 +66,8 @@ export const LoginRequiredModal: React.FC<Props> = ({ mode, platform = 'xhs', se
     if (p === 'bilibili') return isZh ? '哔哩哔哩 (bilibili.com)' : 'Bilibili (bilibili.com)';
     if (p === 'shipinhao') return isZh ? '视频号助手 (channels.weixin.qq.com)' : 'WeChat Channels (channels.weixin.qq.com)';
     if (p === 'toutiao') return isZh ? '头条号后台 (mp.toutiao.com)' : 'Toutiao Backend (mp.toutiao.com)';
+    if (p === 'facebook') return 'Facebook (facebook.com)';
+    if (p === 'reddit') return 'Reddit (reddit.com)';
     return isZh ? '小红书' : 'Xiaohongshu';
   }
   function platformShortOf(p: LoginPlatform): string {
@@ -78,6 +80,8 @@ export const LoginRequiredModal: React.FC<Props> = ({ mode, platform = 'xhs', se
     if (p === 'bilibili') return isZh ? '哔哩哔哩' : 'Bilibili';
     if (p === 'shipinhao') return isZh ? '视频号' : 'WeChat Channels';
     if (p === 'toutiao') return isZh ? '头条号' : 'Toutiao';
+    if (p === 'facebook') return 'Facebook';
+    if (p === 'reddit') return 'Reddit';
     return isZh ? '小红书' : 'Xiaohongshu';
   }
   function platformUrlOf(p: LoginPlatform): string {
@@ -90,6 +94,8 @@ export const LoginRequiredModal: React.FC<Props> = ({ mode, platform = 'xhs', se
     if (p === 'bilibili') return 'https://www.bilibili.com';
     if (p === 'shipinhao') return 'https://channels.weixin.qq.com/platform';
     if (p === 'toutiao') return 'https://mp.toutiao.com/';
+    if (p === 'facebook') return 'https://www.facebook.com/';
+    if (p === 'reddit') return 'https://www.reddit.com/';
     return 'https://www.xiaohongshu.com';
   }
   // Back-compat aliases — primary platform's label/url, used by step ① UI
