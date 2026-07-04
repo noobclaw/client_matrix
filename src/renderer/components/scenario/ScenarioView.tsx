@@ -53,7 +53,7 @@ type PlatformId = 'xhs' | 'x' | 'binance' | 'douyin' | 'shipinhao' | 'toutiao' |
 const MATRIX_TAB_ORDER: PlatformId[] = ['video', 'douyin', 'xhs', 'kuaishou', 'bilibili', 'shipinhao', 'toutiao', 'x', 'binance', 'youtube', 'tiktok'];
 // 后端 backend/matrix/scenarios 有 <platform>_auto_engage 互动涨粉剧本的平台(共 8 个)。
 // 视频号/头条暂无 engage 剧本 → tab 仍展示(与账号页一致),但「开始创作」标注「即将上线」不放行,避免跑出错任务。
-const MATRIX_ENGAGE_PLATFORMS = new Set<PlatformId>(['douyin', 'xhs', 'kuaishou', 'bilibili', 'x', 'binance', 'youtube', 'tiktok']);
+const MATRIX_ENGAGE_PLATFORMS = new Set<PlatformId>(['douyin', 'xhs', 'kuaishou', 'bilibili', 'x', 'binance', 'youtube', 'tiktok', 'facebook']);
 // 后端 backend/matrix/scenarios 有 <platform>_reply_fans_comment「自动回复粉丝」剧本的平台。
 // 小红书(逐篇笔记进详情页回复,主站登录态即覆盖创作者中心)+ 快手(创作者中心评论管理,需
 // loginScope='creator' 账号)+ 哔哩哔哩(member.bilibili.com 创作中心评论管理,登录 cookie 挂
