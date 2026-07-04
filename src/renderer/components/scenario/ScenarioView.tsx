@@ -44,6 +44,7 @@ import MatrixVideoDownloadWizard from '../matrix/MatrixVideoDownloadWizard';
 import MatrixImageTextWizard, { type ImageTextWizardSave } from '../matrix/MatrixImageTextWizard';
 import MatrixTweetPostWizard, { type TweetPostWizardSave } from '../matrix/MatrixTweetPostWizard';
 import MatrixBinancePostWizard, { type BinancePostWizardSave } from '../matrix/MatrixBinancePostWizard';
+import MatrixFacebookPostWizard, { type FacebookPostWizardSave } from '../matrix/MatrixFacebookPostWizard';
 import MatrixBinanceRepostWizard, { type BinanceRepostWizardSave } from '../matrix/MatrixBinanceRepostWizard';
 import MatrixViralRewriteWizard, { type ViralRewriteWizardSave } from '../matrix/MatrixViralRewriteWizard';
 
@@ -80,6 +81,8 @@ const MATRIX_VIRAL_PLATFORMS = new Set<PlatformId>(['xhs']);
 const MATRIX_TWEET_POST_PLATFORMS = new Set<PlatformId>(['x']);
 // 后端 backend/matrix/scenarios 有 binance_post「币安广场自动发帖」剧本的平台(N 号各自抓 web3 资讯 AI 原创一条币安广场图文+可选配图→发币安广场)。目前仅币安。
 const MATRIX_BINANCE_POST_PLATFORMS = new Set<PlatformId>(['binance']);
+// 后端 backend/matrix/scenarios 有 facebook_post「Facebook 自动发帖」剧本的平台(N 号各自按人设从所选数据源取材 AI 原创一条帖 + 可选配图 → 发 FB)。目前仅 FB。
+const MATRIX_FB_POST_PLATFORMS = new Set<PlatformId>(['facebook']);
 // 「币安广场批量搬运」(binance_repost):1 个源平台采集号搜+下 → N 个币安号各领一条仿写发。发布目标=币安。
 const MATRIX_BINANCE_REPOST_PLATFORMS = new Set<PlatformId>(['binance']);
 
@@ -239,6 +242,11 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   const [matrixBinanceAccounts, setMatrixBinanceAccounts] = useState<WizardAccount[]>([]);
   const [matrixBinanceAccountsLoading, setMatrixBinanceAccountsLoading] = useState(false);
   const [matrixBinanceTask, setMatrixBinanceTask] = useState<any | null>(null);
+  // ── Facebook 自动发帖(facebook_post)向导状态 ──
+  const [matrixFacebookPlatform, setMatrixFacebookPlatform] = useState<string | null>(null);
+  const [matrixFacebookAccounts, setMatrixFacebookAccounts] = useState<WizardAccount[]>([]);
+  const [matrixFacebookAccountsLoading, setMatrixFacebookAccountsLoading] = useState(false);
+  const [matrixFacebookTask, setMatrixFacebookTask] = useState<any | null>(null);
   // ── 币安广场批量搬运(binance_repost)向导状态 ──
   const [matrixRepostPlatform, setMatrixRepostPlatform] = useState<string | null>(null);
   const [matrixRepostAccounts, setMatrixRepostAccounts] = useState<WizardAccount[]>([]);        // 币安发布号
@@ -633,6 +641,64 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     const plat = matrixBinancePlatform;
     setMatrixBinancePlatform(null);
     setMatrixBinanceTask(null);
+    await refreshAll();
+    if (!wasEdit) onSwitchToManage?.(plat as any);
+  };
+  // ── Facebook 自动发帖向导(复用 binancePostRunner + facebook_post 剧本) ──
+  const openMatrixFacebookWizard = async (platform: string) => {
+    if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; }
+    setMatrixFacebookAccounts([]);
+    setMatrixFacebookAccountsLoading(true);
+    setMatrixFacebookTask(null);
+    setMatrixFacebookPlatform(platform);
+    void ensureMatrixKernel();
+    try {
+      const r = await (window as any).electron?.matrix?.listAccounts?.();
+      const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
+      setMatrixFacebookAccounts(accs.filter((a) => replyAccountFilter(a, platform)).map(mapWizardAccount));
+    } catch { setMatrixFacebookAccounts([]); }
+    finally { setMatrixFacebookAccountsLoading(false); }
+  };
+  const openMatrixFacebookWizardEdit = async (task: any) => {
+    if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; }
+    const plat = (task?.platform as string) || currentPlatform || 'facebook';
+    setMatrixFacebookAccounts([]);
+    setMatrixFacebookAccountsLoading(true);
+    setMatrixFacebookTask({
+      id: task.id,
+      name: task.name,
+      accountIds: task.account_ids || [],
+      facebookPost: (task as any).facebookPost,
+      frequency: task.run_interval,
+    });
+    setMatrixFacebookPlatform(plat);
+    try {
+      const r = await (window as any).electron?.matrix?.listAccounts?.();
+      const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
+      setMatrixFacebookAccounts(accs.filter((a) => replyAccountFilter(a, plat)).map(mapWizardAccount));
+    } catch { setMatrixFacebookAccounts([]); }
+    finally { setMatrixFacebookAccountsLoading(false); }
+  };
+  const saveMatrixFacebookTask = async (input: FacebookPostWizardSave) => {
+    if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); throw new Error('请先登录 NoobClaw 账号'); }
+    const m = (window as any).electron?.matrix;
+    const facebookPost = {
+      withImage: input.withImage,
+      language: input.language,
+      autoPublish: input.autoPublish,
+      sourceKind: input.sourceKind,
+      source: input.source,
+      catKey: input.catKey,
+    };
+    const r = await m?.saveTask?.({ id: matrixFacebookTask?.id, platform: matrixFacebookPlatform, type: 'facebook_post', name: input.name, accountIds: input.accountIds, facebookPost, quota: {}, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
+    if (!r?.ok) {
+      if (r?.error === 'duplicate_type') { const dp = matrixFacebookPlatform; setMatrixFacebookPlatform(null); setMatrixFacebookTask(null); setDupNotice({ platform: dp as string, label: 'Facebook 发帖' }); return; }
+      throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限' } as any)[r?.error] || r?.error || '保存失败');
+    }
+    const wasEdit = !!matrixFacebookTask?.id;
+    const plat = matrixFacebookPlatform;
+    setMatrixFacebookPlatform(null);
+    setMatrixFacebookTask(null);
     await refreshAll();
     if (!wasEdit) onSwitchToManage?.(plat as any);
   };
@@ -1097,7 +1163,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
           scenario={scenario || null}
           onBack={goBack}
           /* 矩阵号:编辑打开账号多选向导(回填该任务的账号/配额/频率),不开原版 ConfigWizard */
-          onEdit={() => { if (matrixMode) { if (/_video_download$/.test(String(task.scenario_id || ''))) { void openMatrixDownloadWizardEdit(task); } else if (/_image_text$/.test(String(task.scenario_id || ''))) { void openMatrixImageTextWizardEdit(task); } else if (/_viral_production_career$/.test(String(task.scenario_id || ''))) { void openMatrixViralWizardEdit(task); } else if (String(task.scenario_id || '') === 'x_post') { void openMatrixTweetWizardEdit(task); } else if (String(task.scenario_id || '') === 'binance_post') { void openMatrixBinanceWizardEdit(task); } else if (String(task.scenario_id || '') === 'binance_repost') { void openMatrixRepostWizardEdit(task); } else if (/_reply_fans_comment$/.test(String(task.scenario_id || ''))) { void openMatrixReplyWizardEdit(task); } else { void openMatrixWizardEdit(task); } return; } if (scenario) openWizardEdit(task, scenario); }}
+          onEdit={() => { if (matrixMode) { if (/_video_download$/.test(String(task.scenario_id || ''))) { void openMatrixDownloadWizardEdit(task); } else if (/_image_text$/.test(String(task.scenario_id || ''))) { void openMatrixImageTextWizardEdit(task); } else if (/_viral_production_career$/.test(String(task.scenario_id || ''))) { void openMatrixViralWizardEdit(task); } else if (String(task.scenario_id || '') === 'x_post') { void openMatrixTweetWizardEdit(task); } else if (String(task.scenario_id || '') === 'binance_post') { void openMatrixBinanceWizardEdit(task); } else if (String(task.scenario_id || '') === 'facebook_post') { void openMatrixFacebookWizardEdit(task); } else if (String(task.scenario_id || '') === 'binance_repost') { void openMatrixRepostWizardEdit(task); } else if (/_reply_fans_comment$/.test(String(task.scenario_id || ''))) { void openMatrixReplyWizardEdit(task); } else { void openMatrixWizardEdit(task); } return; } if (scenario) openWizardEdit(task, scenario); }}
           onChanged={refreshAll}
           onOpenHistory={() => openHistoryForTask(task.id)}
         />
@@ -1340,6 +1406,36 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-500 text-white text-sm font-bold hover:bg-amber-600 shadow-sm shadow-amber-500/25 transition-all active:scale-95"
               >
                 📊 {i18nService.t('svStartBinancePost')}
+              </button>
+              <button
+                type="button"
+                onClick={() => onSwitchToManage?.(currentPlatform as any)}
+                className="ml-3 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+              >
+                {i18nService.t('svHasTasks')}
+              </button>
+              </div>
+            </div>
+          )}
+          {/* Facebook 自动发帖(矩阵多账号)—— N 个号各自按人设从所选数据源(web3/科技/各热榜)取材 AI 原创一条帖 + 可选配图 → 发 FB。 */}
+          {MATRIX_FB_POST_PLATFORMS.has(currentPlatform) && (
+            <div className="rounded-2xl border border-blue-500/30 bg-blue-500/5 dark:bg-blue-500/10 p-6 flex flex-col">
+              <div className="flex items-center gap-2 text-xs font-semibold text-blue-600 dark:text-blue-400 mb-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-500" /> {i18nService.currentLanguage === 'zh' ? 'Facebook 发帖' : 'Facebook Post'}
+              </div>
+              <div className="text-xl font-bold dark:text-white mb-1">👥 {platLabel} · {i18nService.currentLanguage === 'zh' ? '自动发帖' : 'Auto Post'}</div>
+              <div className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed mb-4">
+                {i18nService.currentLanguage === 'zh'
+                  ? <>N 个号各自按人设,从你选的数据源(Web3 / 科技 / 微博·抖音等热榜)取材,AI 原创一条 Facebook 图文,<strong>每号内容互不相同</strong>,可选配图 → 发到各自 Facebook(须挂 VPN)。</>
+                  : <>Each account posts one AI-original Facebook post from your chosen data source (Web3 / tech / trending boards), <strong>all different</strong>, optional image (VPN required).</>}
+              </div>
+              <div className="mt-auto flex items-center flex-wrap pt-1">
+              <button
+                type="button"
+                onClick={() => openMatrixFacebookWizard(currentPlatform)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-500 text-white text-sm font-bold hover:bg-blue-600 shadow-sm shadow-blue-500/25 transition-all active:scale-95"
+              >
+                👥 {i18nService.currentLanguage === 'zh' ? '开始发帖' : 'Start Posting'}
               </button>
               <button
                 type="button"
@@ -2003,6 +2099,22 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
               initialTask={matrixBinanceTask}
               onCancel={() => { setMatrixBinancePlatform(null); setMatrixBinanceTask(null); }}
               onSave={saveMatrixBinanceTask}
+            />
+          </div>
+        </div>
+      )}
+
+      {matrixFacebookPlatform && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-auto" onClick={() => { setMatrixFacebookPlatform(null); setMatrixFacebookTask(null); }}>
+          <div className="w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
+            <MatrixFacebookPostWizard
+              platformLabel={(() => { const p = matrixFacebookPlatform; return p === 'facebook' ? 'Facebook' : String(p); })()}
+              platform={matrixFacebookPlatform}
+              accounts={matrixFacebookAccounts}
+              accountsLoading={matrixFacebookAccountsLoading}
+              initialTask={matrixFacebookTask}
+              onCancel={() => { setMatrixFacebookPlatform(null); setMatrixFacebookTask(null); }}
+              onSave={saveMatrixFacebookTask}
             />
           </div>
         </div>

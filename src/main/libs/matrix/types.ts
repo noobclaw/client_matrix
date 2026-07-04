@@ -142,6 +142,21 @@ export interface BinancePostConfig {
 }
 
 /**
+ * 「Facebook 自动发帖」(facebook_post)任务配置。同 binance_post 骨架(N 号各自 AI 原创一条图文 + 可选配图 → 发布),
+ * 但 FB 不是 web3 专场 → 数据源可选:sourceKind 'news'(web3 深度资讯)/ 'category'(hotspot 分类如 tech)/
+ * 'hot'(微博/抖音/知乎/百度/B站/雪球/海外热榜)。source=hot 模式的热榜名;catKey=category 模式的分类键(web3/tech)。
+ * 复用 binancePostRunner(runBinancePostTask 按 ${platform}_post 解析剧本 = facebook_post)。
+ */
+export interface FacebookPostConfig {
+  withImage: boolean;
+  language: 'zh' | 'en' | 'mixed';
+  autoPublish: boolean;
+  sourceKind: 'news' | 'category' | 'hot';  // 数据源类型
+  source?: string;                          // hot 模式:热榜名(如 "微博热搜")
+  catKey?: string;                          // category 模式:分类键(web3 / tech)
+}
+
+/**
  * 「币安广场批量搬运」(binance_repost)任务配置。区别于其它矩阵任务:本任务有【两种账号角色】——
  *   · 1 个【采集号】(sourceAccountId,在 sourcePlatform 上已登录):按关键词搜索 → 筛选 → 下载,
  *     一次性采够 N 条候选素材(图文 / 视频);
@@ -169,7 +184,7 @@ export interface BinanceRepostConfig {
 // 自动发推 = x_post(N 个号各自按身份 AI 原创一条推文 + 可选配图 → 发到各自时间线,仅推特);
 // 币安广场自动发帖 = binance_post(N 个号各自抓 web3 资讯 AI 原创一条币安广场图文 + 可选配图 → 发币安广场,仅币安);
 // 币安广场批量搬运 = binance_repost(1 个采集号从源平台搜+下 N 条 → N 个币安号各领一条 AI 仿写 + 配图 → 发币安广场)。
-export type MatrixTaskType = 'engage' | 'reply_fan' | 'video_download' | 'image_text' | 'viral_rewrite' | 'x_post' | 'binance_post' | 'binance_repost';
+export type MatrixTaskType = 'engage' | 'reply_fan' | 'video_download' | 'image_text' | 'viral_rewrite' | 'x_post' | 'binance_post' | 'binance_repost' | 'facebook_post';
 // 频率枚举对齐老客户端 DouyinConfigWizard(便于复用频率算法/文案)。
 export type MatrixTaskFrequency = 'once' | '30min' | '1h' | '3h' | '6h' | 'daily_random';
 
@@ -190,6 +205,7 @@ export interface MatrixTask {
   viralRewrite?: ViralRewriteConfig; // 仅 viral_rewrite 用:爆款仿写配置
   tweetPost?: TweetPostConfig;     // 仅 x_post 用:自动发推配置
   binancePost?: BinancePostConfig; // 仅 binance_post 用:币安广场自动发帖配置
+  facebookPost?: FacebookPostConfig; // 仅 facebook_post 用:Facebook 自动发帖配置(含数据源)
   binanceRepost?: BinanceRepostConfig; // 仅 binance_repost 用:币安广场批量搬运配置
   urls?: string[];                 // 仅 video_download 用:用户粘贴的待下载视频链接清单
   concurrency?: number;            // 同时开窗数(video_download 固定 1,单账号顺序下载)

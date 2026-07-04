@@ -308,6 +308,7 @@ async function runMatrixTaskById(taskId: string, kernelPath?: string): Promise<{
     const isViralRewrite = task.type === 'viral_rewrite';
     const isTweetPost = task.type === 'x_post';
     const isBinancePost = task.type === 'binance_post';
+    const isFacebookPost = task.type === 'facebook_post';
     const isBinanceRepost = task.type === 'binance_repost';
     // 三个进度回调:image_text 与 engage 共用同款签名(EngageItemResult / EngageReport),闭包零改动复用。
     const cbOnLog = (accountId: string, msg: string) => { pushLog(accountId, msg); broadcastSSE('matrix:progress', { type: 'log', accountId, msg, taskId: task.id }); };
@@ -373,6 +374,12 @@ async function runMatrixTaskById(taskId: string, kernelPath?: string): Promise<{
           concurrency: task.concurrency, kernelPath, signal: abort.signal,
           onLog: cbOnLog, onTargets: cbOnTargets, onItem: cbOnItem,
         })
+      : isFacebookPost
+      ? runBinancePostTask({
+          platform: task.platform, taskId: task.id, accountIds: runIds, config: task.facebookPost as any,
+          concurrency: task.concurrency, kernelPath, signal: abort.signal,
+          onLog: cbOnLog, onTargets: cbOnTargets, onItem: cbOnItem,
+        })
       : isTweetPost
       ? runTweetPostTask({
           platform: task.platform, taskId: task.id, accountIds: runIds, config: task.tweetPost as any,
@@ -412,7 +419,7 @@ async function runMatrixTaskById(taskId: string, kernelPath?: string): Promise<{
         const totals: any = items.reduce((acc, it: any) => ({ like: acc.like + (it.counts?.like || 0), follow: acc.follow + (it.counts?.follow || 0), comment: acc.comment + (it.counts?.comment || 0) }), { like: 0, follow: 0, comment: 0 });
         // 非互动任务的完成维度:图文创作累计「发帖数」、视频下载累计「下载条数」。只给对应 type 加键,
         // 不污染 engage(否则累计/上次完成会多出 📤0/⬇️0)。
-        if (isImageText || isTweetPost || isBinancePost || isBinanceRepost) totals.post = items.reduce((s, it: any) => s + (it.counts?.post || 0), 0);
+        if (isImageText || isTweetPost || isBinancePost || isFacebookPost || isBinanceRepost) totals.post = items.reduce((s, it: any) => s + (it.counts?.post || 0), 0);
         if (isVideoDownload) totals.download = items.reduce((s, it: any) => s + (it.counts?.download || 0), 0);
         const cost = items.reduce((acc, it: any) => ({ credits: acc.credits + (it.chargedCredits || 0), usd: acc.usd + (it.chargedUsd || 0) }), { credits: 0, usd: 0 });
         addRun({ taskId: task.id, taskName: task.name, platform: task.platform, startedAt, finishedAt: Date.now(), success: report?.success ?? 0, failed: report?.failed ?? 0, skipped: report?.skipped ?? 0, totals, cost, items });
