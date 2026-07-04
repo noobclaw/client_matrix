@@ -4000,10 +4000,12 @@ const THEME_OPTIONS: Array<{ id: string; zh: string; en: string }> = [
   { id: 'midnight', zh: '🌌 暗色科技 · web3', en: '🌌 Midnight · web3' },
 ];
 
-// 模板速生「热榜做数据源」可选榜单 —— name 同时是 /api/web3/hot-search?sources= 的参数,
+// 模板速生「热榜做数据源」可选榜单 —— 无 catKey 的 name 同时是 /api/web3/hot-search?sources= 的参数,
 // 必须跟后端 HOT_SOURCE_ORDER / GlobalHotSearchPage TAB_GROUPS 的名字【精确一致】
 // (注意:不是 HOTSPOT_SOURCES 的 zh,后者把 Google/YouTube 写成「Google 趋势/YouTube 热门」对不上)。
-const TEMPLATE_HOTLISTS: Array<{ name: string; emoji: string }> = [
+// Web3 资讯 / 科技 —— 不是 hot_topics 榜单,而是按 category 聚合(同热搜成片),catKey 标记走
+// /api/video/hotspot/preview 取(items[catKey]),name 仅作展示。
+const TEMPLATE_HOTLISTS: Array<{ name: string; emoji: string; catKey?: 'web3' | 'tech' }> = [
   { name: '抖音热搜', emoji: '🎵' },
   { name: 'B站热搜', emoji: '📺' },
   { name: '微博热搜', emoji: '🔥' },
@@ -4014,6 +4016,8 @@ const TEMPLATE_HOTLISTS: Array<{ name: string; emoji: string }> = [
   { name: 'Reddit', emoji: '👽' },
   { name: 'Google Trends', emoji: '📊' },
   { name: 'YouTube Trending', emoji: '▶️' },
+  { name: 'Web3 资讯', emoji: '🌐', catKey: 'web3' },
+  { name: '科技 / AI', emoji: '🤖', catKey: 'tech' },
 ];
 /** 「热榜做数据源」取前 N 条标题拼成 dataText。 */
 const TEMPLATE_HOTLIST_TOPN = 12;
@@ -4719,13 +4723,26 @@ export const TemplateSpeedModal: React.FC<{ isZh: boolean; matrixMode?: boolean;
   const loadHotlist = async (name: string) => {
     setHotlistName(name); setHotlistItems([]); setHotlistError(''); setHotlistLoading(true);
     try {
-      const resp = await fetch(`${getBackendApiUrl()}/api/web3/hot-search?sources=${encodeURIComponent(name)}`);
-      if (!resp.ok) throw new Error('http ' + resp.status);
-      const json: any = await resp.json();
-      const src = Array.isArray(json?.sources)
-        ? (json.sources.find((s: any) => s?.source === name) || json.sources[0]) : null;
-      const items: string[] = Array.isArray(src?.items)
-        ? src.items.map((it: any) => String(it?.title || '').trim()).filter(Boolean).slice(0, TEMPLATE_HOTLIST_TOPN) : [];
+      const catKey = TEMPLATE_HOTLISTS.find((h) => h.name === name)?.catKey;
+      let items: string[];
+      if (catKey) {
+        // Web3 资讯 / 科技:按 category 聚合(非 hot_topics 榜单),复用热搜成片的 /hotspot/preview。
+        const resp = await fetch(`${getBackendApiUrl()}/api/video/hotspot/preview`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ perSource: TEMPLATE_HOTLIST_TOPN }),
+        });
+        if (!resp.ok) throw new Error('http ' + resp.status);
+        const json: any = await resp.json();
+        const arr = Array.isArray(json?.items?.[catKey]) ? json.items[catKey] : [];
+        items = arr.map((it: any) => String(it?.title || '').trim()).filter(Boolean).slice(0, TEMPLATE_HOTLIST_TOPN);
+      } else {
+        const resp = await fetch(`${getBackendApiUrl()}/api/web3/hot-search?sources=${encodeURIComponent(name)}`);
+        if (!resp.ok) throw new Error('http ' + resp.status);
+        const json: any = await resp.json();
+        const src = Array.isArray(json?.sources)
+          ? (json.sources.find((s: any) => s?.source === name) || json.sources[0]) : null;
+        items = Array.isArray(src?.items)
+          ? src.items.map((it: any) => String(it?.title || '').trim()).filter(Boolean).slice(0, TEMPLATE_HOTLIST_TOPN) : [];
+      }
       if (!items.length) throw new Error('empty');
       setHotlistItems(items);
     } catch {

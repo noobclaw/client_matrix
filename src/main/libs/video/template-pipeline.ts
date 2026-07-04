@@ -97,8 +97,18 @@ async function ttsWithFallback(
 const HOTLIST_TOPN = 12;
 
 /**
+ * hotlistSource 里 Web3 资讯 / 科技不是 hot_topics 榜单,而是按 category 聚合(同热搜成片),
+ * 走 /api/video/hotspot/preview 取 items[catKey]。key 须跟向导 TEMPLATE_HOTLISTS 的 name 精确一致。
+ */
+const HOTLIST_CATEGORY_KEYS: Record<string, 'web3' | 'tech'> = {
+  'Web3 资讯': 'web3',
+  '科技 / AI': 'tech',
+};
+
+/**
  * 实时抓某个热榜前 N 条标题,拼成逐行文本当 dataText。走公开接口 /api/web3/hot-search
- * (无需鉴权,同 GlobalHotSearchPage)。失败/空 → null,调用方退回快照。绝不抛。
+ * (无需鉴权,同 GlobalHotSearchPage);Web3 资讯 / 科技走 /hotspot/preview 按 category 聚合。
+ * 失败/空 → null,调用方退回快照。绝不抛。
  */
 async function fetchHotlistText(source: string): Promise<string | null> {
   try {
@@ -106,6 +116,18 @@ async function fetchHotlistText(source: string): Promise<string | null> {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 15000);
     try {
+      const catKey = HOTLIST_CATEGORY_KEYS[source];
+      if (catKey) {
+        const resp = await fetch(`${base}/api/video/hotspot/preview`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ perSource: HOTLIST_TOPN }), signal: ctrl.signal,
+        });
+        if (!resp.ok) return null;
+        const json: any = await resp.json();
+        const arr = Array.isArray(json?.items?.[catKey]) ? json.items[catKey] : [];
+        const items: string[] = arr.map((it: any) => String(it?.title || '').trim()).filter(Boolean).slice(0, HOTLIST_TOPN);
+        return items.length ? items.join('\n') : null;
+      }
       const resp = await fetch(`${base}/api/web3/hot-search?sources=${encodeURIComponent(source)}`, { signal: ctrl.signal });
       if (!resp.ok) return null;
       const json: any = await resp.json();
