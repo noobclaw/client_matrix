@@ -995,8 +995,9 @@ export async function checkKernelLogin(accountId: string, platform: string): Pro
       //   登录态没有登录表单。只判 0,否则 "?" 交回 cookie。待 VPN 真机确认正向标记(如导航头像)。
       probe = '(function(){try{if(document.querySelector(\'input[name="username"]\')||/\\/accounts\\/login/.test(location.pathname))return "0";return "?";}catch(e){return "?";}})()';
     } else if (platform === 'facebook') {
-      // FB:【语言无关】—— 登录墙有 email 输入框 / royal_login_form / 重定向到 /login。登录态没有。
-      probe = '(function(){try{if(document.querySelector(\'input[name="email"]\')||document.querySelector(\'[data-testid="royal_login_form"]\')||/\\/login/.test(location.pathname))return "0";return "?";}catch(e){return "?";}})()';
+      // FB(2026-07-03 真机验):登录墙有 email 输入框 / 重定向 /login → "0";登录态有 [role=navigation]
+      //   + c_user 明文 cookie → 明确 "1"(真机实测 onLogin:false/hasNav:true)。都不是则 "?"。语言无关。
+      probe = '(function(){try{if(document.querySelector(\'input[name="email"]\')||/\\/login/.test(location.pathname))return "0";if(document.querySelector(\'[role="navigation"]\')&&document.cookie.indexOf("c_user=")>=0)return "1";return "?";}catch(e){return "?";}})()';
     }
     if (probe) {
       try {
@@ -1064,7 +1065,10 @@ const IDENTITY_EXPR: Record<string, string> = {
   //   cookie 补(IG=ds_user_id、FB=c_user),所以即使这里抓不到昵称,账号也能建(uid 做去重键,昵称可手动改)。
   //   下面是【best-effort 占位】:IG 从导航头像 img.alt / og:title 试,FB 从 og:title / 头像试;抓不到回 {}。
   instagram: '(function(){try{var nick=null,av=null;var m=document.querySelector(\'meta[property="og:title"]\');if(m){nick=((m.getAttribute("content")||"").split("(")[0]||"").trim()||null;}var a=document.querySelector(\'header img\')||document.querySelector(\'nav img[alt]\');if(a)av=a.src||null;return JSON.stringify({nickname:nick,avatar:av});}catch(e){return "{}";}})()',
-  facebook: '(function(){try{var nick=null,av=null;var m=document.querySelector(\'meta[property="og:title"]\')||document.querySelector(\'meta[name="twitter:title"]\');if(m)nick=(m.getAttribute("content")||"").trim()||null;var a=document.querySelector(\'image[preserveAspectRatio]\')||document.querySelector(\'svg image\')||document.querySelector(\'a[href*="/me/"] img\');if(a)av=(a.getAttribute("xlink:href")||a.src)||null;return JSON.stringify({nickname:nick,avatar:av});}catch(e){return "{}";}})()',
+  // FB(2026-07-03 真机验):uid=c_user 明文 cookie;昵称在【自己主页 profile.php?id=<c_user>】的 og:title(首页 feed
+  //   ogTitle 为 null,故靠 IDENTITY_SELF_URL 先跳主页再读),兜底 h1 / document.title(去掉"(N)"和"| Facebook");
+  //   头像=fbcdn 里 t1.30497-1(FB 头像路径)的 <image xlink:href>(首页/主页都有,与 rsrc.php UI 精灵、t39 帖图区分)。
+  facebook: '(function(){try{var uid=(document.cookie.match(/c_user=(\\d+)/)||[])[1]||null;var nick=null;var ogt=document.querySelector(\'meta[property="og:title"]\');if(ogt)nick=(ogt.getAttribute("content")||"").trim()||null;if(!nick){var h1=document.querySelector("h1");if(h1)nick=((h1.textContent||"").trim().slice(0,40))||null;}if(!nick){nick=((document.title||"").replace(/^\\(\\d+\\)\\s*/,"").replace(/\\s*[|\\-]\\s*Facebook.*$/i,"").trim())||null;}var av=null,ims=document.querySelectorAll("image");for(var i=0;i<ims.length;i++){var h=ims[i].getAttribute("xlink:href")||ims[i].getAttribute("href")||"";if(/t1\\.30497/.test(h)){av=h;break;}}return JSON.stringify({nickname:nick,uid:uid,displayId:uid,avatar:av});}catch(e){return "{}";}})()',
 };
 // uid 在明文 cookie 里的平台(页面 expr 拿不到 uid 时,从 cookie 补)。
 const UID_COOKIE: Record<string, string> = { kuaishou: 'userId', toutiao: 'sso_uid_tt', bilibili: 'DedeUserID', instagram: 'ds_user_id', facebook: 'c_user' };
@@ -1075,6 +1079,8 @@ const UID_COOKIE: Record<string, string> = { kuaishou: 'userId', toutiao: 'sso_u
 // 快手 feed 不含本人 → 跳 profile/<uid>(cookie 有 uid);TikTok 首页 SSR 已空、昵称只在主页 DOM → 见 IDENTITY_NAV_HINT。
 const IDENTITY_SELF_URL: Record<string, (uid: string) => string> = {
   kuaishou: (uid) => `https://www.kuaishou.com/profile/${uid}`,
+  // FB 首页 feed 没本人昵称(og:title=null)→ 跳自己主页读(uid=c_user 明文 cookie)。真机验 2026-07-03。
+  facebook: (uid) => `https://www.facebook.com/profile.php?id=${uid}`,
 };
 
 // 同上,但「自己主页 URL」cookie 里没有、要【从当前页面读】出来(如 TikTok 的号在左侧导航栏链接里)。
