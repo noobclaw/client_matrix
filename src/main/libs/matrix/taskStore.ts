@@ -10,7 +10,7 @@ import os from 'os';
 import path from 'path';
 import { coworkLog } from '../coworkLogger';
 import { nextRunAt } from './matrixSchedule';
-import type { MatrixTask, EngageQuota, ReplyFanConfig, ImageTextConfig, ViralRewriteConfig, TweetPostConfig, BinancePostConfig, FacebookPostConfig, BinanceRepostConfig, MatrixTaskType, MatrixTaskFrequency } from './types';
+import type { MatrixTask, EngageQuota, ReplyFanConfig, ImageTextConfig, ViralRewriteConfig, TweetPostConfig, BinancePostConfig, FacebookPostConfig, RedditPostConfig, BinanceRepostConfig, MatrixTaskType, MatrixTaskFrequency } from './types';
 
 /** 任务启用且非 once 才排下次运行;否则清空(手动触发)。 */
 function planned(t: { enabled: boolean; frequency: MatrixTaskFrequency }, fromTs: number, isFirst: boolean): number | undefined {
@@ -64,6 +64,7 @@ export interface SaveTaskInput {
   tweetPost?: TweetPostConfig;     // x_post 用:自动发推配置
   binancePost?: BinancePostConfig; // binance_post 用:币安广场自动发帖配置
   facebookPost?: FacebookPostConfig; // facebook_post 用:Facebook 自动发帖配置(含数据源)
+  redditPost?: RedditPostConfig;   // reddit_post 用:Reddit 自动发帖配置(含数据源 + subreddit)
   binanceRepost?: BinanceRepostConfig; // binance_repost 用:币安广场批量搬运配置
   urls?: string[];                 // video_download 用:待下载视频链接清单
   concurrency?: number;
@@ -94,6 +95,7 @@ export function saveTask(input: SaveTaskInput): SaveTaskResult {
       tweetPost: input.tweetPost ?? tasks[i].tweetPost,
       binancePost: input.binancePost ?? tasks[i].binancePost,
       facebookPost: input.facebookPost ?? tasks[i].facebookPost,
+      redditPost: input.redditPost ?? tasks[i].redditPost,
       binanceRepost: input.binanceRepost ?? tasks[i].binanceRepost,
       urls: input.urls ?? tasks[i].urls,
       concurrency: input.concurrency,
@@ -122,6 +124,7 @@ export function saveTask(input: SaveTaskInput): SaveTaskResult {
     tweetPost: input.tweetPost,
     binancePost: input.binancePost,
     facebookPost: input.facebookPost,
+    redditPost: input.redditPost,
     binanceRepost: input.binanceRepost,
     urls: input.urls,
     concurrency: input.concurrency,

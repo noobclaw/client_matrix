@@ -166,12 +166,13 @@ async function runOne(opts: BinancePostTaskOptions, pack: any, accountId: string
       track: acc.track || '',
       keywords: accKeywords,
     };
-    // facebook_post 复用本 runner:cfg 带数据源字段(binance 无 → orchestrator 默认 news)。
+    // facebook_post / reddit_post 复用本 runner:cfg 带数据源字段(binance 无 → orchestrator 默认 news)。
     if ((cfg as any).sourceKind) {
       task.source_kind = (cfg as any).sourceKind;
       task.source = (cfg as any).source || '';
       task.cat_key = (cfg as any).catKey || '';
     }
+    if ((cfg as any).subreddit) task.subreddit = (cfg as any).subreddit; // reddit_post 目标 subreddit
 
     const onAiCost = (credits: number, usd: number) => {
       chargedCredits += credits; chargedUsd += usd;

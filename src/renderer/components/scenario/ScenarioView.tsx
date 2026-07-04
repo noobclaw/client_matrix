@@ -45,6 +45,7 @@ import MatrixImageTextWizard, { type ImageTextWizardSave } from '../matrix/Matri
 import MatrixTweetPostWizard, { type TweetPostWizardSave } from '../matrix/MatrixTweetPostWizard';
 import MatrixBinancePostWizard, { type BinancePostWizardSave } from '../matrix/MatrixBinancePostWizard';
 import MatrixFacebookPostWizard, { type FacebookPostWizardSave } from '../matrix/MatrixFacebookPostWizard';
+import MatrixRedditPostWizard, { type RedditPostWizardSave } from '../matrix/MatrixRedditPostWizard';
 import MatrixBinanceRepostWizard, { type BinanceRepostWizardSave } from '../matrix/MatrixBinanceRepostWizard';
 import MatrixViralRewriteWizard, { type ViralRewriteWizardSave } from '../matrix/MatrixViralRewriteWizard';
 
@@ -83,6 +84,8 @@ const MATRIX_TWEET_POST_PLATFORMS = new Set<PlatformId>(['x']);
 const MATRIX_BINANCE_POST_PLATFORMS = new Set<PlatformId>(['binance']);
 // 后端 backend/matrix/scenarios 有 facebook_post「Facebook 自动发帖」剧本的平台(N 号各自按人设从所选数据源取材 AI 原创一条帖 + 可选配图 → 发 FB)。目前仅 FB。
 const MATRIX_FB_POST_PLATFORMS = new Set<PlatformId>(['facebook']);
+// 后端有 reddit_post「Reddit 自动发帖」剧本的平台(取材可选源 + subreddit,API 发 self 帖)。目前仅 Reddit。
+const MATRIX_REDDIT_POST_PLATFORMS = new Set<PlatformId>(['reddit']);
 // 「币安广场批量搬运」(binance_repost):1 个源平台采集号搜+下 → N 个币安号各领一条仿写发。发布目标=币安。
 const MATRIX_BINANCE_REPOST_PLATFORMS = new Set<PlatformId>(['binance']);
 
@@ -247,6 +250,11 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   const [matrixFacebookAccounts, setMatrixFacebookAccounts] = useState<WizardAccount[]>([]);
   const [matrixFacebookAccountsLoading, setMatrixFacebookAccountsLoading] = useState(false);
   const [matrixFacebookTask, setMatrixFacebookTask] = useState<any | null>(null);
+  // ── Reddit 自动发帖(reddit_post)向导状态 ──
+  const [matrixRedditPlatform, setMatrixRedditPlatform] = useState<string | null>(null);
+  const [matrixRedditAccounts, setMatrixRedditAccounts] = useState<WizardAccount[]>([]);
+  const [matrixRedditAccountsLoading, setMatrixRedditAccountsLoading] = useState(false);
+  const [matrixRedditTask, setMatrixRedditTask] = useState<any | null>(null);
   // ── 币安广场批量搬运(binance_repost)向导状态 ──
   const [matrixRepostPlatform, setMatrixRepostPlatform] = useState<string | null>(null);
   const [matrixRepostAccounts, setMatrixRepostAccounts] = useState<WizardAccount[]>([]);        // 币安发布号
@@ -699,6 +707,64 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     const plat = matrixFacebookPlatform;
     setMatrixFacebookPlatform(null);
     setMatrixFacebookTask(null);
+    await refreshAll();
+    if (!wasEdit) onSwitchToManage?.(plat as any);
+  };
+  // ── Reddit 自动发帖向导(复用 binancePostRunner + reddit_post 剧本) ──
+  const openMatrixRedditWizard = async (platform: string) => {
+    if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; }
+    setMatrixRedditAccounts([]);
+    setMatrixRedditAccountsLoading(true);
+    setMatrixRedditTask(null);
+    setMatrixRedditPlatform(platform);
+    void ensureMatrixKernel();
+    try {
+      const r = await (window as any).electron?.matrix?.listAccounts?.();
+      const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
+      setMatrixRedditAccounts(accs.filter((a) => replyAccountFilter(a, platform)).map(mapWizardAccount));
+    } catch { setMatrixRedditAccounts([]); }
+    finally { setMatrixRedditAccountsLoading(false); }
+  };
+  const openMatrixRedditWizardEdit = async (task: any) => {
+    if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; }
+    const plat = (task?.platform as string) || currentPlatform || 'reddit';
+    setMatrixRedditAccounts([]);
+    setMatrixRedditAccountsLoading(true);
+    setMatrixRedditTask({
+      id: task.id,
+      name: task.name,
+      accountIds: task.account_ids || [],
+      redditPost: (task as any).redditPost,
+      frequency: task.run_interval,
+    });
+    setMatrixRedditPlatform(plat);
+    try {
+      const r = await (window as any).electron?.matrix?.listAccounts?.();
+      const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
+      setMatrixRedditAccounts(accs.filter((a) => replyAccountFilter(a, plat)).map(mapWizardAccount));
+    } catch { setMatrixRedditAccounts([]); }
+    finally { setMatrixRedditAccountsLoading(false); }
+  };
+  const saveMatrixRedditTask = async (input: RedditPostWizardSave) => {
+    if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); throw new Error('请先登录 NoobClaw 账号'); }
+    const m = (window as any).electron?.matrix;
+    const redditPost = {
+      language: input.language,
+      autoPublish: input.autoPublish,
+      sourceKind: input.sourceKind,
+      source: input.source,
+      catKey: input.catKey,
+      subreddit: input.subreddit,
+    };
+    const r = await m?.saveTask?.({ id: matrixRedditTask?.id, platform: matrixRedditPlatform, type: 'reddit_post', name: input.name, accountIds: input.accountIds, redditPost, quota: {}, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
+    if (!r?.ok) {
+      if (r?.error === 'duplicate_type') { const dp = matrixRedditPlatform; setMatrixRedditPlatform(null); setMatrixRedditTask(null); setDupNotice({ platform: dp as string, label: 'Reddit 发帖' }); return; }
+      throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限' } as any)[r?.error] || r?.error || '保存失败');
+    }
+    const wasEdit = !!matrixRedditTask?.id;
+    const plat = matrixRedditPlatform;
+    setMatrixRedditPlatform(null);
+    setMatrixRedditTask(null);
     await refreshAll();
     if (!wasEdit) onSwitchToManage?.(plat as any);
   };
@@ -1163,7 +1229,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
           scenario={scenario || null}
           onBack={goBack}
           /* 矩阵号:编辑打开账号多选向导(回填该任务的账号/配额/频率),不开原版 ConfigWizard */
-          onEdit={() => { if (matrixMode) { if (/_video_download$/.test(String(task.scenario_id || ''))) { void openMatrixDownloadWizardEdit(task); } else if (/_image_text$/.test(String(task.scenario_id || ''))) { void openMatrixImageTextWizardEdit(task); } else if (/_viral_production_career$/.test(String(task.scenario_id || ''))) { void openMatrixViralWizardEdit(task); } else if (String(task.scenario_id || '') === 'x_post') { void openMatrixTweetWizardEdit(task); } else if (String(task.scenario_id || '') === 'binance_post') { void openMatrixBinanceWizardEdit(task); } else if (String(task.scenario_id || '') === 'facebook_post') { void openMatrixFacebookWizardEdit(task); } else if (String(task.scenario_id || '') === 'binance_repost') { void openMatrixRepostWizardEdit(task); } else if (/_reply_fans_comment$/.test(String(task.scenario_id || ''))) { void openMatrixReplyWizardEdit(task); } else { void openMatrixWizardEdit(task); } return; } if (scenario) openWizardEdit(task, scenario); }}
+          onEdit={() => { if (matrixMode) { if (/_video_download$/.test(String(task.scenario_id || ''))) { void openMatrixDownloadWizardEdit(task); } else if (/_image_text$/.test(String(task.scenario_id || ''))) { void openMatrixImageTextWizardEdit(task); } else if (/_viral_production_career$/.test(String(task.scenario_id || ''))) { void openMatrixViralWizardEdit(task); } else if (String(task.scenario_id || '') === 'x_post') { void openMatrixTweetWizardEdit(task); } else if (String(task.scenario_id || '') === 'binance_post') { void openMatrixBinanceWizardEdit(task); } else if (String(task.scenario_id || '') === 'facebook_post') { void openMatrixFacebookWizardEdit(task); } else if (String(task.scenario_id || '') === 'reddit_post') { void openMatrixRedditWizardEdit(task); } else if (String(task.scenario_id || '') === 'binance_repost') { void openMatrixRepostWizardEdit(task); } else if (/_reply_fans_comment$/.test(String(task.scenario_id || ''))) { void openMatrixReplyWizardEdit(task); } else { void openMatrixWizardEdit(task); } return; } if (scenario) openWizardEdit(task, scenario); }}
           onChanged={refreshAll}
           onOpenHistory={() => openHistoryForTask(task.id)}
         />
@@ -1436,6 +1502,36 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-500 text-white text-sm font-bold hover:bg-blue-600 shadow-sm shadow-blue-500/25 transition-all active:scale-95"
               >
                 👥 {i18nService.currentLanguage === 'zh' ? '开始发帖' : 'Start Posting'}
+              </button>
+              <button
+                type="button"
+                onClick={() => onSwitchToManage?.(currentPlatform as any)}
+                className="ml-3 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+              >
+                {i18nService.t('svHasTasks')}
+              </button>
+              </div>
+            </div>
+          )}
+          {/* Reddit 自动发帖(矩阵多账号)—— N 个号各自按人设从所选数据源取材 AI 原创一条帖 → API 发到指定 subreddit。 */}
+          {MATRIX_REDDIT_POST_PLATFORMS.has(currentPlatform) && (
+            <div className="rounded-2xl border border-orange-500/30 bg-orange-500/5 dark:bg-orange-500/10 p-6 flex flex-col">
+              <div className="flex items-center gap-2 text-xs font-semibold text-orange-600 dark:text-orange-400 mb-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-orange-500" /> {i18nService.currentLanguage === 'zh' ? 'Reddit 发帖' : 'Reddit Post'}
+              </div>
+              <div className="text-xl font-bold dark:text-white mb-1">🟠 {platLabel} · {i18nService.currentLanguage === 'zh' ? '自动发帖' : 'Auto Post'}</div>
+              <div className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed mb-4">
+                {i18nService.currentLanguage === 'zh'
+                  ? <>N 个号各自按人设,从你选的数据源取材,AI 原创一条帖(标题+正文),<strong>每号内容互不相同</strong> → 发到你指定的 subreddit(须挂 VPN)。</>
+                  : <>Each account posts one AI-original post (title + body) from your chosen data source, <strong>all different</strong>, to your target subreddit (VPN required).</>}
+              </div>
+              <div className="mt-auto flex items-center flex-wrap pt-1">
+              <button
+                type="button"
+                onClick={() => openMatrixRedditWizard(currentPlatform)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-orange-500 text-white text-sm font-bold hover:bg-orange-600 shadow-sm shadow-orange-500/25 transition-all active:scale-95"
+              >
+                🟠 {i18nService.currentLanguage === 'zh' ? '开始发帖' : 'Start Posting'}
               </button>
               <button
                 type="button"
@@ -2115,6 +2211,22 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
               initialTask={matrixFacebookTask}
               onCancel={() => { setMatrixFacebookPlatform(null); setMatrixFacebookTask(null); }}
               onSave={saveMatrixFacebookTask}
+            />
+          </div>
+        </div>
+      )}
+
+      {matrixRedditPlatform && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-auto" onClick={() => { setMatrixRedditPlatform(null); setMatrixRedditTask(null); }}>
+          <div className="w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
+            <MatrixRedditPostWizard
+              platformLabel={(() => { const p = matrixRedditPlatform; return p === 'reddit' ? 'Reddit' : String(p); })()}
+              platform={matrixRedditPlatform}
+              accounts={matrixRedditAccounts}
+              accountsLoading={matrixRedditAccountsLoading}
+              initialTask={matrixRedditTask}
+              onCancel={() => { setMatrixRedditPlatform(null); setMatrixRedditTask(null); }}
+              onSave={saveMatrixRedditTask}
             />
           </div>
         </div>
