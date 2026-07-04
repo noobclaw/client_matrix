@@ -37,11 +37,11 @@ interface ItemResult { accountId: string; state: 'success' | 'failed' | 'skipped
 function parseKeywords(s: string): string[] { return s.split(/[\s,，、\n]+/).map((x) => x.trim()).filter(Boolean); }
 
 // 对齐支持「互动涨粉」的平台(与新建页一致)。
-const PLATFORMS = ['douyin', 'xhs', 'kuaishou', 'bilibili', 'shipinhao', 'toutiao', 'x', 'binance', 'youtube', 'tiktok', 'instagram', 'facebook'];
+const PLATFORMS = ['douyin', 'xhs', 'kuaishou', 'bilibili', 'shipinhao', 'toutiao', 'x', 'binance', 'youtube', 'tiktok', 'instagram', 'facebook', 'reddit'];
 // 每个平台最多添加的账号数:客户端兜底 10,服务端 /api/matrix/config 的 maxAccountsPerPlatform 可覆盖(admin 调,不打包)。
 const MAX_ACCOUNTS_PER_PLATFORM_FALLBACK = 10;
 const PLAT_KEY: Record<string, string> = { douyin: 'platDouyin', xhs: 'platXhs', bilibili: 'platBilibili', kuaishou: 'platKuaishou', x: 'platX', binance: 'platBinance', shipinhao: 'platShipinhao', toutiao: 'platToutiao' };
-const platLabel = (p: string): string => PLAT_KEY[p] ? i18nService.t(PLAT_KEY[p]) : (p === 'tiktok' ? 'TikTok' : p === 'youtube' ? 'YouTube' : p === 'instagram' ? 'Instagram' : p === 'facebook' ? 'Facebook' : p);
+const platLabel = (p: string): string => PLAT_KEY[p] ? i18nService.t(PLAT_KEY[p]) : (p === 'tiktok' ? 'TikTok' : p === 'youtube' ? 'YouTube' : p === 'instagram' ? 'Instagram' : p === 'facebook' ? 'Facebook' : p === 'reddit' ? 'Reddit' : p);
 // 平台号的标签:平台名已以「号」结尾(视频号)就不再加「号」,否则拼「号」(抖音号/快手号…)。
 const platformIdLabel = (p: string): string => platLabel(p) + i18nService.t('mvIdSuffix');
 const LOGIN_URL: Record<string, string> = {
@@ -49,7 +49,7 @@ const LOGIN_URL: Record<string, string> = {
   kuaishou: 'https://www.kuaishou.com/', tiktok: 'https://www.tiktok.com/login', x: 'https://x.com/login',
   binance: 'https://www.binance.com/zh-CN/square', youtube: 'https://www.youtube.com/',
   shipinhao: 'https://channels.weixin.qq.com/', toutiao: 'https://mp.toutiao.com/',
-  instagram: 'https://www.instagram.com/accounts/login/', facebook: 'https://www.facebook.com/login/',
+  instagram: 'https://www.instagram.com/accounts/login/', facebook: 'https://www.facebook.com/login/', reddit: 'https://www.reddit.com/login/',
 };
 // 登录/读身份导航 URL:快手按场景分流(创作端登 cp.kuaishou.com,主站登 www);其它平台用 LOGIN_URL。
 const loginUrlFor = (platform: string, loginScope?: string): string => {

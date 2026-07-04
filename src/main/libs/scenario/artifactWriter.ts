@@ -62,6 +62,7 @@ const PLATFORM_NAMES: Record<string, string> = {
   youtube: 'YouTube',
   instagram: 'Instagram',
   facebook: 'Facebook',
+  reddit: 'Reddit',
 };
 
 /**
@@ -88,6 +89,7 @@ function inferPlatformFromTask(task: ScenarioTask): string {
   if (sid.startsWith('bilibili_')) return 'bilibili';
   if (sid.startsWith('instagram_')) return 'instagram';
   if (sid.startsWith('facebook_')) return 'facebook';
+  if (sid.startsWith('reddit_')) return 'reddit';
   return 'xhs';
 }
 

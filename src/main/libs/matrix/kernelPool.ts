@@ -939,6 +939,8 @@ const LOGIN_COOKIES: Record<string, string[]> = {
   //   FB = c_user(明文=uid)+ xs。海外平台,须 VPN 真机核对 cookie 名。
   instagram: ['sessionid', 'ds_user_id'],
   facebook: ['c_user', 'xs'],
+  // Reddit 登录态:reddit_session(会话)+ token_v2(新版 JWT)。任一在即过快筛;活体/身份用 /api/me.json 确认。
+  reddit: ['reddit_session', 'token_v2'],
 };
 
 /** 该号当前【是否真的登录】对应平台 —— 统一活体校验(发布/涨粉/保活都调它)。分层:
@@ -998,6 +1000,10 @@ export async function checkKernelLogin(accountId: string, platform: string): Pro
       // FB(2026-07-03 真机验):登录墙有 email 输入框 / 重定向 /login → "0";登录态有 [role=navigation]
       //   + c_user 明文 cookie → 明确 "1"(真机实测 onLogin:false/hasNav:true)。都不是则 "?"。语言无关。
       probe = '(function(){try{if(document.querySelector(\'input[name="email"]\')||/\\/login/.test(location.pathname))return "0";if(document.querySelector(\'[role="navigation"]\')&&document.cookie.indexOf("c_user=")>=0)return "1";return "?";}catch(e){return "?";}})()';
+    } else if (platform === 'reddit') {
+      // Reddit:/api/me.json 是 cookie 鉴权的 JSON 接口(不需 oauth)。登录态返回 {data:{name,...}} 或 {name,...};
+      //   未登录返回空 / 无 name。最准,语言无关。异常落 "?" 交回 cookie 快筛。
+      probe = '(async function(){try{var r=await fetch("/api/me.json",{credentials:"include",headers:{accept:"application/json"}});var j=await r.json();var d=(j&&j.data)||j||{};if(d&&d.name)return "1";return "0";}catch(e){return "?";}})()';
     }
     if (probe) {
       try {
@@ -1069,6 +1075,9 @@ const IDENTITY_EXPR: Record<string, string> = {
   //   ogTitle 为 null,故靠 IDENTITY_SELF_URL 先跳主页再读),兜底 h1 / document.title(去掉"(N)"和"| Facebook");
   //   头像=fbcdn 里 t1.30497-1(FB 头像路径)的 <image xlink:href>(首页/主页都有,与 rsrc.php UI 精灵、t39 帖图区分)。
   facebook: '(function(){try{var uid=(document.cookie.match(/c_user=(\\d+)/)||[])[1]||null;var nick=null;var ogt=document.querySelector(\'meta[property="og:title"]\');if(ogt)nick=(ogt.getAttribute("content")||"").trim()||null;if(!nick){var h1=document.querySelector("h1");if(h1)nick=((h1.textContent||"").trim().slice(0,40))||null;}if(!nick){nick=((document.title||"").replace(/^\\(\\d+\\)\\s*/,"").replace(/\\s*[|\\-]\\s*Facebook.*$/i,"").trim())||null;}var av=null,ims=document.querySelectorAll("image");for(var i=0;i<ims.length;i++){var h=ims[i].getAttribute("xlink:href")||ims[i].getAttribute("href")||"";if(/t1\\.30497/.test(h)){av=h;break;}}return JSON.stringify({nickname:nick,uid:uid,displayId:uid,avatar:av});}catch(e){return "{}";}})()',
+  // Reddit:/api/me.json(cookie 鉴权)一把出 name(用户名)/ id(t2 uid)/ icon_img|snoovatar_img(头像)。
+  //   头像 URL 里的 &amp; 要还原成 &。displayId = u/<name>。同 xhs/B站 的「问接口」路子,最稳。
+  reddit: '(async function(){try{var r=await fetch("/api/me.json",{credentials:"include",headers:{accept:"application/json"}});var j=await r.json();var d=(j&&j.data)||j||{};if(!d.name)return "{}";var av=String(d.snoovatar_img||d.icon_img||"").replace(/&amp;/g,"&").split("?")[0];return JSON.stringify({nickname:d.name,displayId:"u/"+d.name,uid:d.id?("t2_"+d.id):d.name,avatar:av});}catch(e){return "{}";}})()',
 };
 // uid 在明文 cookie 里的平台(页面 expr 拿不到 uid 时,从 cookie 补)。
 const UID_COOKIE: Record<string, string> = { kuaishou: 'userId', toutiao: 'sso_uid_tt', bilibili: 'DedeUserID', instagram: 'ds_user_id', facebook: 'c_user' };

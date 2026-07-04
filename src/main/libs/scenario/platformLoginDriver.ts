@@ -39,6 +39,7 @@ const PLATFORM_TO_MAIN_SUBPLATFORM: Record<LoginPlatform, string> = {
   toutiao:    'toutiao_main',
   instagram:  'instagram_main',
   facebook:   'facebook_main',
+  reddit:     'reddit_main',
 };
 
 const PLATFORM_TO_CREATOR_SUBPLATFORM: Partial<Record<LoginPlatform, string>> = {
@@ -65,7 +66,7 @@ export interface PlatformLoginStatus {
 // use PlatformLoginStatus.
 export type XhsLoginStatus = PlatformLoginStatus;
 
-export type LoginPlatform = 'xhs' | 'x' | 'binance' | 'tiktok' | 'youtube' | 'douyin' | 'kuaishou' | 'bilibili' | 'shipinhao' | 'toutiao' | 'instagram' | 'facebook';
+export type LoginPlatform = 'xhs' | 'x' | 'binance' | 'tiktok' | 'youtube' | 'douyin' | 'kuaishou' | 'bilibili' | 'shipinhao' | 'toutiao' | 'instagram' | 'facebook' | 'reddit';
 
 const TAB_PATTERNS: Record<LoginPlatform, RegExp> = {
   // (?<!creator\.) 排除 creator.xiaohongshu.com 子域 —— 用户只打开
@@ -110,6 +111,7 @@ const TAB_PATTERNS: Record<LoginPlatform, RegExp> = {
   // Instagram / Facebook web 主站(海外,须 VPN)。
   instagram: /instagram\.com/i,
   facebook: /facebook\.com/i,
+  reddit: /reddit\.com/i,
 };
 
 const NOT_REACHABLE_REASON: Record<LoginPlatform, string> = {
@@ -125,6 +127,7 @@ const NOT_REACHABLE_REASON: Record<LoginPlatform, string> = {
   toutiao: 'toutiao_tab_not_reachable',
   instagram: 'instagram_tab_not_reachable',
   facebook: 'facebook_tab_not_reachable',
+  reddit: 'reddit_tab_not_reachable',
 };
 
 const PLATFORM_LOGIN_URL: Record<LoginPlatform, string> = {
@@ -140,6 +143,7 @@ const PLATFORM_LOGIN_URL: Record<LoginPlatform, string> = {
   toutiao: 'https://mp.toutiao.com/',
   instagram: 'https://www.instagram.com/',
   facebook: 'https://www.facebook.com/',
+  reddit: 'https://www.reddit.com/',
 };
 
 /** v2.6+: chrome-extension tab-group label/color per platform.
@@ -169,6 +173,7 @@ export const PLATFORM_TAB_GROUPS: Record<LoginPlatform, { title: string; color: 
   toutiao: { title: '🤖 头条号 · NoobClaw',  color: 'red'    },
   instagram:{title: '🤖 Instagram · NoobClaw', color: 'pink' },
   facebook: {title: '🤖 Facebook · NoobClaw',  color: 'blue' },
+  reddit:   {title: '🤖 Reddit · NoobClaw',    color: 'orange' },
 };
 
 /** Single source of truth for "which platform does this regex string target".
@@ -189,6 +194,7 @@ export function inferPlatformFromPattern(pattern: string | undefined): LoginPlat
   if (/toutiao/i.test(pattern)) return 'toutiao';
   if (/instagram/i.test(pattern)) return 'instagram';
   if (/facebook/i.test(pattern)) return 'facebook';
+  if (/reddit/i.test(pattern)) return 'reddit';
   if (/twitter|x\\?\.com/i.test(pattern)) return 'x';
   return undefined;
 }
