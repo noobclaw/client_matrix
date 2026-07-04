@@ -28,7 +28,7 @@ import { generateTemplateData, detectTemplateLang, type ContentLang } from './te
 import { getVideoConfig } from './videoConfig';
 import { renderTemplate, pageSizeFor, calcPageCount, calcPageRanges, type TemplateSpec } from './templateLibrary';
 import { renderHtmlToVideo, resolveHeadlessBrowser, auditHtml } from './htmlVideoRenderer';
-import { generateFreeformScene, type FreeformResult } from './freeformWriter';
+import { generateFreeformScene, deterministicFallbackScene, type FreeformResult } from './freeformWriter';
 import { wrapTemplateHtml } from './templateAnim';
 import { loadFontFaceCss } from './fontAsset';
 import { loadGsapSource } from './gsapAsset';
@@ -175,6 +175,26 @@ async function produceFreeformHtml(
   let prev: FreeformResult | null = null;
   let lastIssues: string[] = [];
   let lastHtml = '';
+  let safeHtml: string | null = null;   // 最近一版【结构化安全排版】HTML(物理上不重叠),末端保底用。
+  // 严重排版问题 = 交付即废片:重叠 / 超出画布 / 文字被裁 / 侵入字幕区 / 画面空白。
+  //   「内容推进太靠前 / 后半段静止 / 没有动画」属轻微瑕疵,可容忍(不重叠但推进略早,远好过重叠废片)。
+  const SEVERE = /重叠|超出画布|被裁|裁切|字幕区|空白/;
+  // 把一版排版结果包成完整可渲染 HTML(loop 与末端安全网共用)。
+  const wrap = (scene: FreeformResult): string => {
+    const useGsap = !!scene.setupScript && gsapAvailable;
+    return wrapTemplateHtml({
+      bodyHtml: scene.bodyHtml,
+      css: scene.css,
+      brandColor: args.brandColor,
+      durationSec: args.durationSec,
+      fps: args.fps,
+      captionCues: args.captionCues,
+      watermark: args.watermark,
+      fontFaceCss: loadFontFaceCss(),
+      gsapSource: useGsap ? gsapSource! : undefined,
+      setupScript: useGsap ? scene.setupScript : undefined,
+    });
+  };
   for (let attempt = 1; attempt <= MAX_FREEFORM_ATTEMPTS; attempt++) {
     tracker.progress(attempt === 1
       ? `🎨 AI 自由排版生成中${gsapAvailable ? '(GSAP 可用)' : ''}…`
@@ -196,29 +216,26 @@ async function produceFreeformHtml(
         : undefined,
     }, (m) => tracker.progress(m)); // 把模型尝试/超时/降级的细分进度透出来,别让用户对着一句话干等
     onCost(scene.tokens, scene.costUsd);
-    const useGsap = !!scene.setupScript && gsapAvailable;
-    const html = wrapTemplateHtml({
-      bodyHtml: scene.bodyHtml,
-      css: scene.css,
-      brandColor: args.brandColor,
-      durationSec: args.durationSec,
-      fps: args.fps,
-      captionCues: args.captionCues,
-      watermark: args.watermark,
-      fontFaceCss: loadFontFaceCss(),
-      gsapSource: useGsap ? gsapSource! : undefined,
-      setupScript: useGsap ? scene.setupScript : undefined,
-    });
+    const html = wrap(scene);
     lastHtml = html;
     tracker.progress('🔎 正在无头浏览器体检排版(抽帧检查溢出/重叠/动画/内容推进)…');
     const audit = await auditHtml(html, { narrationOn: args.narrationOn });
-    const modelTag = scene.source === 'fallback' ? '兜底版' : (scene.model === 'noobclawai-chat' ? 'flash 降级' : 'Pro');
+    const modelTag = scene.source === 'fallback' ? '兜底版' : scene.structured ? '结构化安全版' : (scene.model === 'noobclawai-chat' ? 'flash 降级' : 'Pro');
+    const hasSevere = audit.issues.some((x) => SEVERE.test(x));
+    // 结构化/兜底版物理上不重叠 → 只要无严重问题就记为「安全兜底版」,轮次耗尽时优先它。
+    if (scene.structured && !hasSevere) safeHtml = html;
     if (audit.ok) {
-      tracker.progress(`✅ 自由排版体检通过(第 ${attempt} 轮 · ${modelTag})${useGsap ? ' · GSAP' : ''}`);
+      tracker.progress(`✅ 自由排版体检通过(第 ${attempt} 轮 · ${modelTag})`);
       return html;
     }
     tracker.progress(`🔎 体检发现 ${audit.issues.length} 个问题:${audit.issues.slice(0, 3).join(' / ')}${audit.issues.length > 3 ? ' …' : ''}`);
-    // AI 整个挂了(两个模型都失败 → 走了纯代码兜底)→ 再循环也没意义,直接用兜底版出片。
+    // 结构化安全版只剩【轻微】瑕疵(内容推进/静止等,无重叠溢出)→ 直接采用:别为小瑕疵再耗轮次,
+    //   更别倒退回会重叠的原始整页 HTML。这正是过去「小瑕疵→切原始HTML→重叠废片」的病根。
+    if (scene.structured && !hasSevere) {
+      tracker.progress(`✅ 结构化安全排版采用(第 ${attempt} 轮 · 容忍 ${audit.issues.length} 个非严重项)`);
+      return html;
+    }
+    // AI 整个挂了(两个模型都失败 → 走了纯代码兜底)→ 再循环也没意义,兜底版本身不重叠,直接出片。
     // 把失败原因 log 出来(产物只看得到「又是绿条兜底」,看不到为什么 —— 靠这行定位是截断/解析/超时)。
     if (scene.source === 'fallback') {
       tracker.progress(`⚠️ AI 自由排版失败,采用纯代码兜底排版${scene.failReason ? ` · 原因:${scene.failReason}` : ''}`);
@@ -227,8 +244,23 @@ async function produceFreeformHtml(
     prev = scene;
     lastIssues = audit.issues;
   }
-  tracker.progress(`⚠️ 自由排版体检 ${MAX_FREEFORM_ATTEMPTS} 轮仍有小瑕疵,采用最后一版出片`);
-  return lastHtml;
+  // ── 轮次耗尽 ──【绝不交付带重叠/溢出的原始整页 HTML】:
+  //   末版无严重问题 → 用末版;否则优先记录的结构化安全版;都没有 → 产确定性兜底排版(永不重叠)。
+  if (!lastIssues.some((x) => SEVERE.test(x))) {
+    tracker.progress(`⚠️ 自由排版体检 ${MAX_FREEFORM_ATTEMPTS} 轮仍有小瑕疵(无严重项),采用最后一版出片`);
+    return lastHtml;
+  }
+  if (safeHtml) {
+    tracker.progress('⚠️ 末版仍有严重排版问题(重叠/溢出),改用结构化安全版出片');
+    return safeHtml;
+  }
+  tracker.progress('⚠️ 末版仍有严重排版问题,改用确定性兜底排版出片(保证不重叠)');
+  return wrap(deterministicFallbackScene({
+    dataText: args.dataText, title: args.title, lang: args.lang,
+    brandColor: args.brandColor, accentColor: args.accentColor || '#0ecb81',
+    durationSec: args.durationSec, narrationOn: args.narrationOn, captionsOn,
+    gsapAvailable,
+  }));
 }
 
 export async function runTemplatePipeline(
