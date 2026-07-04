@@ -915,6 +915,34 @@ export async function kernelClearCookies(accountId: string): Promise<void> {
   try { await send(s, 'Network.clearBrowserCookies', {}); } catch { /* ignore */ }
 }
 
+// ── 导入 cookie 登录:把外部(普通浏览器 Cookie-Editor 导出)的登录 cookie 灌进本号 profile ──
+//   行业标准做法:海外号(Google/Apple 登录)、买来的 cookie 号,不在指纹内核里跑 OAuth,而是注入已登录 cookie。
+//   cookie 项对齐 Cookie-Editor 导出格式({name,value,domain,path,secure,httpOnly,sameSite,expirationDate})。
+//   走 CDP Network.setCookie(与 checkKernelLogin 的 getAllCookies 同一套通道)。
+export async function kernelSetCookies(accountId: string, cookies: any[]): Promise<{ set: number; failed: number }> {
+  const s = await getPage(accountId);
+  let set = 0, failed = 0;
+  for (const c of (Array.isArray(cookies) ? cookies : [])) {
+    try {
+      const name = String((c && c.name) || '').trim();
+      if (!name) { failed++; continue; }
+      const p: any = { name, value: String((c && c.value) != null ? c.value : ''), path: (c && c.path) || '/', httpOnly: !!(c && c.httpOnly), secure: (c && c.secure) !== false };
+      const domain = String((c && c.domain) || '').trim();
+      if (domain) p.domain = domain; else if (c && c.url) p.url = c.url;
+      const ss = String((c && c.sameSite) || '').toLowerCase();
+      if (ss === 'no_restriction' || ss === 'none') p.sameSite = 'None';
+      else if (ss === 'lax') p.sameSite = 'Lax';
+      else if (ss === 'strict') p.sameSite = 'Strict';
+      if (typeof (c && c.expirationDate) === 'number') p.expires = c.expirationDate;
+      else if (typeof (c && c.expires) === 'number') p.expires = c.expires;
+      if (p.sameSite === 'None') p.secure = true; // SameSite=None 必须 Secure,否则被拒
+      const r = await send(s, 'Network.setCookie', p);
+      if (r && r.success === false) failed++; else set++;
+    } catch { failed++; }
+  }
+  return { set, failed };
+}
+
 // ── 登录态检测(读 cookie;httpOnly 也能经 CDP 读到,document.cookie 读不到) ──
 
 // 各平台「已登录」的标志性 cookie(命中任一即视为已登录)。2026-06-21 全平台真机 CDP 实测核对:

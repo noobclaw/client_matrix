@@ -459,6 +459,21 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
     }
     await doCreate(null);
   };
+  // 导入 cookie 登录:海外号(Google/Apple 登录)、买来的 cookie 号——不在指纹内核里跑 OAuth,注入已登录 cookie(行业标准)。
+  const [cookieImport, setCookieImport] = useState<{ accountId: string; plat: string; displayName: string; loginScope?: string } | null>(null);
+  const [cookieText, setCookieText] = useState('');
+  const [cookieBusy, setCookieBusy] = useState(false);
+  const doCookieImport = async () => {
+    if (!cookieImport || cookieBusy) return;
+    if (!requireKernel()) return;
+    setCookieBusy(true);
+    try {
+      const r = await M()?.importCookieLogin?.({ accountId: cookieImport.accountId, cookiesRaw: cookieText, navUrl: loginUrlFor(cookieImport.plat, cookieImport.loginScope), kernelPath });
+      if (r?.ok) { setCookieImport(null); setCookieText(''); await reload(); setNotice((i18nService.currentLanguage === 'zh' ? '✅ cookie 导入成功:' : '✅ Cookie imported: ') + (cookieImport.displayName)); }
+      else setNotice((i18nService.currentLanguage === 'zh' ? '❌ 导入失败:' : '❌ Import failed: ') + (r?.error || ''));
+    } catch (e: any) { setNotice((i18nService.currentLanguage === 'zh' ? '❌ 导入异常:' : '❌ Import error: ') + (e?.message || String(e))); }
+    finally { setCookieBusy(false); }
+  };
   // 扫码登录二次确认:点「好的,我已知晓」才真正打开指纹浏览器导航到平台登录页(避免「一点就开浏览器」的突兀)。
   const promptScanLogin = (accountId: string, plat: string, displayName: string, loginScope?: string) => {
     if (!requireLogin()) return;
@@ -806,6 +821,8 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
                             {/* 尚未连接:只给「扫码连接」。它本身会开窗轮询登录态——若已在浏览器手动登录/扫码轮询超时,
                                 点它会立刻检测到并翻成已连接(不必真重扫),所以无需单独的「刷新信息」(那是给已连接的号刷身份用的)。 */}
                             <button onClick={() => promptScanLogin(a.id, a.platform, a.displayName, a.loginScope)} className="text-xs px-2.5 py-1 rounded-lg bg-violet-500 text-white hover:bg-violet-600">{i18nService.t('mvScanConnect')}</button>
+                            {/* 导入 cookie 登录:海外号(Google/Apple 登录,内核里 OAuth 走不通)、买来的 cookie 号走这条。 */}
+                            <button onClick={() => { setCookieText(''); setCookieImport({ accountId: a.id, plat: a.platform, displayName: a.displayName, loginScope: a.loginScope }); }} className="text-xs px-2.5 py-1 rounded-lg border border-violet-500 text-violet-500 hover:bg-violet-500/10">{i18nService.currentLanguage === 'zh' ? '导入 cookie' : 'Import cookie'}</button>
                           </>)
                         : (<>
                             {/* 已连接:读真实身份 / 断开(清登录,保留配置) */}
@@ -1063,6 +1080,25 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
             <div className="flex justify-end gap-2.5">
               <button onClick={() => setConfirmDlg(null)} className="px-4 py-2 text-sm rounded-lg border dark:border-white/15 border-black/15">{i18nService.t('mvCancel')}</button>
               <button onClick={() => confirmDlg.onYes()} className={`px-4 py-2 text-sm rounded-lg text-white ${confirmDlg.danger ? 'bg-red-500 hover:bg-red-600' : 'bg-orange-500 hover:bg-orange-600'}`}>{confirmDlg.okText || i18nService.t('mvOk')}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 导入 cookie 登录弹窗 */}
+      {cookieImport && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={() => !cookieBusy && setCookieImport(null)}>
+          <div className="w-full max-w-lg rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="text-base font-semibold mb-1 dark:text-white">🍪 {i18nService.currentLanguage === 'zh' ? '导入 cookie 登录' : 'Import cookie login'} · {platLabel(cookieImport.plat)}</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400 mb-3 leading-relaxed">
+              {i18nService.currentLanguage === 'zh'
+                ? <>海外号(Google/Apple 登录)、买来的 cookie 号用这个:在<strong>普通浏览器</strong>登好该号 → 用 <strong>Cookie-Editor</strong> 扩展导出该站点 cookie(Export → JSON)→ 粘贴到下面。不在指纹内核里跑 OAuth。</>
+                : <>For accounts that log in via Google/Apple, or bought cookie accounts: log in on a <strong>normal browser</strong>, export the site's cookies with the <strong>Cookie-Editor</strong> extension (Export → JSON), and paste below.</>}
+            </div>
+            <textarea value={cookieText} onChange={(e) => setCookieText(e.target.value)} disabled={cookieBusy} placeholder={'[{"name":"reddit_session","value":"...","domain":".reddit.com","path":"/","secure":true,...}, ...]'} rows={7} className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-xs font-mono dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500/40 resize-y" />
+            <div className="flex items-center justify-end gap-2 mt-4">
+              <button onClick={() => setCookieImport(null)} disabled={cookieBusy} className="px-4 py-2 text-sm rounded-lg border dark:border-white/15 border-black/15 disabled:opacity-50">{i18nService.t('mvCancel')}</button>
+              <button onClick={() => doCookieImport()} disabled={cookieBusy || !cookieText.trim()} className="px-4 py-2 text-sm rounded-lg text-white bg-violet-500 hover:bg-violet-600 disabled:opacity-50">{cookieBusy ? (i18nService.currentLanguage === 'zh' ? '导入中…' : 'Importing…') : (i18nService.currentLanguage === 'zh' ? '导入并验证' : 'Import & verify')}</button>
             </div>
           </div>
         </div>

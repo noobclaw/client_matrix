@@ -1496,6 +1496,53 @@ const server = http.createServer(async (req, res) => {
               return writeJSON(res, 200, { ok: false, error: e?.message || String(e) });
             }
           }
+          case 'matrix:importCookieLogin': {
+            // 导入 cookie 登录:把外部导出的登录 cookie 灌进本号 profile → 导航验活体 → 读身份 → 关联。
+            //   海外 Google/Apple 登录号、买来的 cookie 号走这条(不在指纹内核里跑 OAuth,行业标准做法)。
+            try {
+              const { getAccount, setAccountStatus, accountBadgeLabel, platformKey, setAccountIdentity, findAccountByUid } = await import('./libs/matrix/accountManager');
+              const { launchKernel, kernelNavigate, checkKernelLogin, kernelReadIdentity, kernelSetCookies, kernelClearCookies } = await import('./libs/matrix/kernelPool');
+              const a = args[0] as any;
+              const acc = getAccount(a?.accountId);
+              if (!acc) return writeJSON(res, 200, { ok: false, error: 'account_not_found' });
+              let cookies: any[] = [];
+              try { cookies = Array.isArray(a?.cookies) ? a.cookies : JSON.parse(String(a?.cookiesRaw || '[]')); }
+              catch { return writeJSON(res, 200, { ok: false, error: 'cookie 解析失败:请粘贴 Cookie-Editor 导出的 JSON 数组' }); }
+              if (!Array.isArray(cookies) || !cookies.length) return writeJSON(res, 200, { ok: false, error: 'cookie 为空或格式不对' });
+              const pk = platformKey(acc);
+              await launchKernel({
+                accountId: acc.id, kernelPath: a?.kernelPath, kernelVersion: acc.kernelVersion,
+                userDataDir: acc.userDataDir, fingerprint: acc.fingerprint, proxy: acc.proxy,
+                label: accountBadgeLabel(acc), skipLease: true,
+              });
+              const inj = await kernelSetCookies(acc.id, cookies);
+              try { await kernelNavigate(acc.id, a?.navUrl || 'about:blank'); } catch { /* ignore */ }
+              await new Promise((r) => setTimeout(r, 2500));
+              let ok = false;
+              try { ok = await checkKernelLogin(acc.id, pk); } catch { ok = false; }
+              if (!ok) {
+                setAccountStatus(acc.id, 'login_required');
+                broadcastSSE('matrix:account', { id: acc.id, status: 'login_required', error: `cookie 无效或非该平台登录态(注入 ${inj.set} 条/失败 ${inj.failed})。请确认导出的是该号在 ${pk} 已登录的 cookie` });
+                return writeJSON(res, 200, { ok: false, error: `cookie 未通过活体校验(注入 ${inj.set}/失败 ${inj.failed})` });
+              }
+              let ident: any = {};
+              try { ident = await kernelReadIdentity(acc.id, pk); } catch { /* 身份读取失败不影响登录 */ }
+              const dup = ident.uid ? findAccountByUid(pk, String(ident.uid), acc.id) : undefined;
+              if (dup) {
+                try { await kernelClearCookies(acc.id); } catch { /* ignore */ }
+                setAccountStatus(acc.id, 'login_required');
+                broadcastSSE('matrix:account', { id: acc.id, status: 'login_required', error: `该账号已被「${dup.displayName}」关联,一个真实账号只能关联一个矩阵号` });
+                return writeJSON(res, 200, { ok: false, error: `该账号已被「${dup.displayName}」关联` });
+              }
+              setAccountStatus(acc.id, 'idle');
+              try { setAccountIdentity(acc.id, { nickname: ident.nickname, displayId: ident.displayId, avatar: ident.avatar, boundUid: ident.uid }); } catch { /* ignore */ }
+              try { const { probeAndSaveHealth } = await import('./libs/matrix/proxyBridge'); await probeAndSaveHealth(acc); } catch { /* ignore */ }
+              broadcastSSE('matrix:account', { id: acc.id, status: 'idle', nickname: ident.nickname, displayId: ident.displayId, avatar: ident.avatar, boundUid: ident.uid });
+              return writeJSON(res, 200, { ok: true, account: getAccount(acc.id) });
+            } catch (e: any) {
+              return writeJSON(res, 200, { ok: false, error: e?.message || String(e) });
+            }
+          }
           case 'matrix:checkLogin': {
             // 手动「刷新登录态」:立即查一次 cookie,登了就翻 idle + 推 SSE。
             try {
