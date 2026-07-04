@@ -1090,11 +1090,20 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={() => !cookieBusy && setCookieImport(null)}>
           <div className="w-full max-w-lg rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="text-base font-semibold mb-1 dark:text-white">🍪 {i18nService.currentLanguage === 'zh' ? '导入 cookie 登录' : 'Import cookie login'} · {platLabel(cookieImport.plat)}</div>
-            <div className="text-xs text-gray-500 dark:text-gray-400 mb-3 leading-relaxed">
-              {i18nService.currentLanguage === 'zh'
-                ? <>海外号(Google/Apple 登录)、买来的 cookie 号用这个:在<strong>普通浏览器</strong>登好该号 → 用 <strong>Cookie-Editor</strong> 扩展导出该站点 cookie(Export → JSON)→ 粘贴到下面。不在指纹内核里跑 OAuth。</>
-                : <>For accounts that log in via Google/Apple, or bought cookie accounts: log in on a <strong>normal browser</strong>, export the site's cookies with the <strong>Cookie-Editor</strong> extension (Export → JSON), and paste below.</>}
-            </div>
+            {(() => {
+              const site = (loginUrlFor(cookieImport.plat, cookieImport.loginScope) || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '') || platLabel(cookieImport.plat);
+              const zh = i18nService.currentLanguage === 'zh';
+              return (
+                <div className="text-xs text-gray-600 dark:text-gray-300 mb-3 leading-relaxed rounded-lg border border-violet-500/30 bg-violet-500/5 px-3 py-2 space-y-1">
+                  <div className="font-medium">{zh ? '海外号(Google/Apple 登录)/ 买来的 cookie 号用这个 —— 3 步:' : 'For Google/Apple-login or bought accounts — 3 steps:'}</div>
+                  <div>{zh ? '① 给你的' : '① Install '}<strong>{zh ? '普通浏览器(Chrome/Edge)装扩展 ' : 'Cookie-Editor'}</strong>
+                    <a href={`https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm`} target="_blank" rel="noreferrer" className="text-violet-500 underline mx-0.5">Cookie-Editor</a>
+                    {zh ? '(Chrome 应用商店免费)' : ' from the Chrome Web Store'}</div>
+                  <div>{zh ? <>② 在那个浏览器打开 <strong>{site}</strong> 并<strong>登录好这个号</strong>(Google 一键登也行,普通浏览器能登)</> : <>② Open <strong>{site}</strong> there and <strong>log into this account</strong> (Google login works in a normal browser)</>}</div>
+                  <div>{zh ? <>③ 点扩展图标 → <strong>Export(导出)</strong> → 选 <strong>JSON</strong>(会自动复制)→ 粘到下面框里</> : <>③ Click the extension icon → <strong>Export</strong> → <strong>JSON</strong> (auto-copied) → paste below</>}</div>
+                </div>
+              );
+            })()}
             <textarea value={cookieText} onChange={(e) => setCookieText(e.target.value)} disabled={cookieBusy} placeholder={'[{"name":"reddit_session","value":"...","domain":".reddit.com","path":"/","secure":true,...}, ...]'} rows={7} className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-xs font-mono dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-500/40 resize-y" />
             <div className="flex items-center justify-end gap-2 mt-4">
               <button onClick={() => setCookieImport(null)} disabled={cookieBusy} className="px-4 py-2 text-sm rounded-lg border dark:border-white/15 border-black/15 disabled:opacity-50">{i18nService.t('mvCancel')}</button>
