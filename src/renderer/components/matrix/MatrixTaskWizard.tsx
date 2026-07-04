@@ -75,6 +75,8 @@ const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, platform, accounts, 
   );
 
   const [runInterval, setRunInterval] = useState<string>(initialTask?.frequency || 'daily_random');
+  // 评论语言:auto(跟帖子语言)+ 9 种 UI 语言;强制模式。默认 auto。
+  const [commentLang, setCommentLang] = useState<string>(initialTask?.quota?.comment_lang || 'auto');
   const [termsAccepted, setTermsAccepted] = useState<boolean[]>([true, true]);
   const allTermsAccepted = termsAccepted.every(Boolean);
   const [saving, setSaving] = useState(false);
@@ -101,7 +103,7 @@ const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, platform, accounts, 
         accountIds: [...selected],
         concurrency: selected.size,   // 选几个号就同时开几个窗(runner 内部有安全上限兜底)
         frequency: runInterval,
-        quota: { daily_like_min: likeMin, daily_like_max: likeMax, daily_follow_min: folMin, daily_follow_max: folMax, daily_comment_min: cmtMin, daily_comment_max: cmtMax },
+        quota: { daily_like_min: likeMin, daily_like_max: likeMax, daily_follow_min: folMin, daily_follow_max: folMax, daily_comment_min: cmtMin, daily_comment_max: cmtMax, comment_lang: commentLang },
         // 引流:评论时按概率把引流文案融进 AI 评论。留空/平台不支持 → funnel_probability=0 → 视作未配,纯 AI 评论。
         funnel: (funnelSupported && hasFunnel) ? { funnel_phrase: funnelPhrase.trim(), funnel_probability: funnelProb } : { funnel_phrase: '', funnel_probability: 0 },
       });
@@ -186,6 +188,24 @@ const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, platform, accounts, 
             <RangeSlider label={i18nService.t('wzEngageLikeLabel')} min={likeMin} max={likeMax} setMin={setLikeMin} setMax={setLikeMax} hardCap={LIKE_HARDCAP} hint={i18nService.t('wzEngageLikeHint').replace('{min}', String(likeMin)).replace('{max}', String(likeMax)).replace('{cap}', String(LIKE_HARDCAP))} disabled={saving} />
             <RangeSlider label={i18nService.t('wzEngageFollowLabel')} min={folMin} max={folMax} setMin={setFolMin} setMax={setFolMax} hardCap={FOLLOW_HARDCAP} hint={i18nService.t('wzEngageFollowHint').replace('{min}', String(folMin)).replace('{max}', String(folMax)).replace('{cap}', String(FOLLOW_HARDCAP))} disabled={saving} />
             <RangeSlider label={i18nService.t('wzEngageCommentLabel')} min={cmtMin} max={cmtMax} setMin={setCmtMin} setMax={setCmtMax} hardCap={COMMENT_HARDCAP} hint={i18nService.t('wzEngageCommentHint').replace('{min}', String(cmtMin)).replace('{max}', String(cmtMax)).replace('{cap}', String(COMMENT_HARDCAP))} disabled={saving} />
+
+            {/* 评论语言(评论 max>0 才显示):auto=跟帖子语言;选具体语言=强制用该语言写评论。 */}
+            {cmtMax > 0 && (
+              <div>
+                <label className="text-sm font-medium dark:text-gray-200 mb-1.5 block">
+                  {i18nService.currentLanguage === 'zh' ? '评论语言' : 'Comment language'}
+                  <span className="text-xs text-gray-400 font-normal ml-1">{i18nService.currentLanguage === 'zh' ? '选具体语言=强制用它写;自动=跟帖子语言' : 'a specific language forces it; Auto follows the post'}</span>
+                </label>
+                <select value={commentLang} onChange={(e) => setCommentLang(e.target.value)} disabled={saving} className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/40">
+                  {[
+                    { code: 'auto', label: i18nService.currentLanguage === 'zh' ? '自动(跟帖子语言)' : 'Auto (follow post)' },
+                    { code: 'zh', label: '简体中文' }, { code: 'zh-TW', label: '繁體中文' }, { code: 'en', label: 'English' },
+                    { code: 'ja', label: '日本語' }, { code: 'ko', label: '한국어' }, { code: 'ru', label: 'Русский' },
+                    { code: 'fr', label: 'Français' }, { code: 'de', label: 'Deutsch' }, { code: 'vi', label: 'Tiếng Việt' },
+                  ].map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
+                </select>
+              </div>
+            )}
 
             {/* 引流(评论 max>0 且平台支持时显示):评论时 AI 按概率把引流文案自然融进评论。留空=纯 AI 评论,老任务不受影响。 */}
             {showFunnel && (
