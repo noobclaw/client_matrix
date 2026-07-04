@@ -670,7 +670,7 @@ export async function kernelWheel(accountId: string, x: number, y: number, delta
  * accept 含 video/mp4/空)→ 给所有命中的都 setFileInputFiles(多候选不确定哪个真,全设最稳)。
  */
 export async function kernelSetFileInput(
-  accountId: string, selector: string, filePaths: string[], opts?: { deep?: boolean },
+  accountId: string, selector: string, filePaths: string[], opts?: { deep?: boolean; single?: boolean },
 ): Promise<{ ok: boolean; reason?: string; found: number; attached: number }> {
   // 0) 本地文件先校验存在(对齐旧 uploadFileToInput 的 fs.existsSync 前置):路径错时给明确
   //    file_not_found,而不是笼统的 set_file_input_failed —— 否则成片路径/合成失败也只会显示同一个错。
@@ -682,9 +682,13 @@ export async function kernelSetFileInput(
   const s = await getPage(accountId);
   const sel = selector || '';
   const deep = !!opts?.deep;
+  const single = !!opts?.single;
   // 1) 深遍历收集候选 input 到 window.__mtxFI,返回数量。
   //    ⚠️ 旧版只穿 shadowRoot 漏了同源 iframe;对齐旧客户端 uploadVideoToInputDeep 的三层深遍历,补 iframe.contentDocument。
-  const collectExpr = `(function(sel, deep){
+  //    single=true(图文上传用):最终只灌【一个】input(优先 accept 含 image 的),对齐扩展 uploadFileFromUrl 的
+  //    querySelector 单设 —— 否则"全设"把图也灌进图文页「添加文件」附件 input(accept 空/*),帖子冒出多余
+  //    nbmx_img.jpg 文件(图片本身 4 张仍正常)。视频上传不传 single,多候选仍"全设最稳"。
+  const collectExpr = `(function(sel, deep, single){
     function collect(root, out){
       try { root.querySelectorAll('input[type=file]').forEach(function(el){ out.push(el); }); } catch(e){}
       var nodes=[]; try { nodes = root.querySelectorAll('*'); } catch(e){}
@@ -697,9 +701,13 @@ export async function kernelSetFileInput(
     if(sel){ for(var i=0;i<all.length;i++){ try{ if(all[i].matches(sel)) pick.push(all[i]); }catch(e){} } }
     if(!pick.length && (deep || !sel)){ pick = all.filter(function(el){ var a=(el.accept||'').toLowerCase(); return a.indexOf('video')>=0||a.indexOf('mp4')>=0||a===''; }); }
     if(!pick.length && deep) pick = all;
+    if(single && pick.length > 1){
+      var imgs = pick.filter(function(el){ return (el.accept||'').toLowerCase().indexOf('image')>=0; });
+      pick = [ imgs.length ? imgs[0] : pick[0] ];
+    }
     window.__mtxFI = pick;
     return pick.length;
-  })(${JSON.stringify(sel)}, ${deep})`;
+  })(${JSON.stringify(sel)}, ${deep}, ${single})`;
   const cnt: any = await send(s, 'Runtime.evaluate', { expression: collectExpr, returnByValue: true });
   const n = Number(cnt?.result?.value || 0);
   if (!n) return { ok: false, reason: 'no_input_matched(sel=' + (sel || '∅') + ',deep=' + deep + ')', found: 0, attached: 0 };
@@ -927,6 +935,10 @@ const LOGIN_COOKIES: Record<string, string[]> = {
   x: ['auth_token'],
   binance: ['logined', 'p20t'],                          // 新增(实测)
   youtube: ['SID', 'SAPISID', 'LOGIN_INFO'],             // 新增(实测)
+  // ⚠️ 待 VPN 真机确认(2026-07-03 加):IG 登录态标志 cookie = sessionid + ds_user_id(后者明文=uid);
+  //   FB = c_user(明文=uid)+ xs。海外平台,须 VPN 真机核对 cookie 名。
+  instagram: ['sessionid', 'ds_user_id'],
+  facebook: ['c_user', 'xs'],
 };
 
 /** 该号当前【是否真的登录】对应平台 —— 统一活体校验(发布/涨粉/保活都调它)。分层:
@@ -978,6 +990,13 @@ export async function checkKernelLogin(accountId: string, platform: string): Pro
       // 币安广场:照抖音思路用【登录墙文字检测】+ 顶部 login/register CTA 双保险。未登录的广场登录墙才有这些文案/按钮;
       //   登录态是头像、看到的是 feed,没有。只在检到才判未登录,否则 "?" → 绝不误判好号。
       probe = '(function(){try{var t=(document.body&&document.body.innerText)||"";if(/Sign up to earn rewards|Join global crypto users|Discover real insights from verified|Log in to Binance|登录后即可|扫码登录/i.test(t))return "0";var ns=document.querySelectorAll("a,button,[role=button]");for(var i=0;i<ns.length;i++){var el=ns[i];var rc=el.getBoundingClientRect();if(!(rc.width>0&&rc.height>0))continue;if(rc.top<0||rc.top>200)continue;var hf=((el.getAttribute&&el.getAttribute("href"))||"").toLowerCase();var tx=(el.textContent||"").replace(/\\s+/g,"").toLowerCase();if(hf.indexOf("/login")>=0||hf.indexOf("/register")>=0)return "0";if(tx==="signup"||tx==="login"||tx==="登录"||tx==="注册")return "0";}return "?";}catch(e){return "?";}})()';
+    } else if (platform === 'instagram') {
+      // IG:【语言无关】判据(UI 随 locale 变,不能靠文字)—— 登录墙有 username 输入框 / 或重定向到 /accounts/login。
+      //   登录态没有登录表单。只判 0,否则 "?" 交回 cookie。待 VPN 真机确认正向标记(如导航头像)。
+      probe = '(function(){try{if(document.querySelector(\'input[name="username"]\')||/\\/accounts\\/login/.test(location.pathname))return "0";return "?";}catch(e){return "?";}})()';
+    } else if (platform === 'facebook') {
+      // FB:【语言无关】—— 登录墙有 email 输入框 / royal_login_form / 重定向到 /login。登录态没有。
+      probe = '(function(){try{if(document.querySelector(\'input[name="email"]\')||document.querySelector(\'[data-testid="royal_login_form"]\')||/\\/login/.test(location.pathname))return "0";return "?";}catch(e){return "?";}})()';
     }
     if (probe) {
       try {
@@ -1041,9 +1060,14 @@ const IDENTITY_EXPR: Record<string, string> = {
   // YouTube:innertube account_menu 接口(和 YouTube 自家 JS 一样,SAPISID cookie 算 SAPISIDHASH 鉴权)。
   // activeAccountHeaderRenderer 里有 频道名(accountName)/handle(channelHandle,@xx)/头像;接口失败回落 masthead 头像。
   youtube: '(async function(){try{function gc(n){var m=document.cookie.match(new RegExp("(^|; )"+n+"=([^;]+)"));return m?decodeURIComponent(m[2]):null;}var cfg=(window.ytcfg&&ytcfg.data_)||{};var out={};var apiKey=cfg.INNERTUBE_API_KEY,ctx=cfg.INNERTUBE_CONTEXT;if(apiKey&&ctx){var origin="https://www.youtube.com";var hdr={"Content-Type":"application/json"};var sapisid=gc("SAPISID")||gc("__Secure-3PAPISID")||gc("__Secure-1PAPISID");if(sapisid){var t=Math.floor(Date.now()/1000);var buf=await crypto.subtle.digest("SHA-1",new TextEncoder().encode(t+" "+sapisid+" "+origin));var hex=Array.from(new Uint8Array(buf)).map(function(b){return b.toString(16).padStart(2,"0");}).join("");hdr["Authorization"]="SAPISIDHASH "+t+"_"+hex;hdr["X-Origin"]=origin;hdr["X-Goog-AuthUser"]="0";}var r=await fetch(origin+"/youtubei/v1/account/account_menu?prettyPrint=false",{method:"POST",credentials:"include",headers:hdr,body:JSON.stringify({context:ctx})});var j=await r.json();var acts=(j&&j.actions)||[],h=null;for(var i=0;i<acts.length;i++){var p=acts[i]&&acts[i].openPopupAction&&acts[i].openPopupAction.popup&&acts[i].openPopupAction.popup.multiPageMenuRenderer;if(p&&p.header&&p.header.activeAccountHeaderRenderer){h=p.header.activeAccountHeaderRenderer;break;}}if(h){out.nickname=(h.accountName&&h.accountName.simpleText)||null;out.displayId=(h.channelHandle&&h.channelHandle.simpleText)||null;var th=h.accountPhoto&&h.accountPhoto.thumbnails;out.avatar=(th&&th.length&&th[th.length-1].url)||null;}}if(!out.avatar){var img=document.querySelector("#avatar-btn img, button#avatar-btn img, ytd-topbar-menu-button-renderer img");out.avatar=(img&&img.src)||out.avatar||null;}return JSON.stringify(out);}catch(e){return "{}";}})()',
+  // ⚠️ TODO(VPN 真机调):IG/FB 昵称/头像的确切来源要登录态 DOM 才能定。uid 已由 UID_COOKIE 从明文
+  //   cookie 补(IG=ds_user_id、FB=c_user),所以即使这里抓不到昵称,账号也能建(uid 做去重键,昵称可手动改)。
+  //   下面是【best-effort 占位】:IG 从导航头像 img.alt / og:title 试,FB 从 og:title / 头像试;抓不到回 {}。
+  instagram: '(function(){try{var nick=null,av=null;var m=document.querySelector(\'meta[property="og:title"]\');if(m){nick=((m.getAttribute("content")||"").split("(")[0]||"").trim()||null;}var a=document.querySelector(\'header img\')||document.querySelector(\'nav img[alt]\');if(a)av=a.src||null;return JSON.stringify({nickname:nick,avatar:av});}catch(e){return "{}";}})()',
+  facebook: '(function(){try{var nick=null,av=null;var m=document.querySelector(\'meta[property="og:title"]\')||document.querySelector(\'meta[name="twitter:title"]\');if(m)nick=(m.getAttribute("content")||"").trim()||null;var a=document.querySelector(\'image[preserveAspectRatio]\')||document.querySelector(\'svg image\')||document.querySelector(\'a[href*="/me/"] img\');if(a)av=(a.getAttribute("xlink:href")||a.src)||null;return JSON.stringify({nickname:nick,avatar:av});}catch(e){return "{}";}})()',
 };
 // uid 在明文 cookie 里的平台(页面 expr 拿不到 uid 时,从 cookie 补)。
-const UID_COOKIE: Record<string, string> = { kuaishou: 'userId', toutiao: 'sso_uid_tt', bilibili: 'DedeUserID' };
+const UID_COOKIE: Record<string, string> = { kuaishou: 'userId', toutiao: 'sso_uid_tt', bilibili: 'DedeUserID', instagram: 'ds_user_id', facebook: 'c_user' };
 
 // 有些平台首页 feed 上【没有本人信息】(乱扫 nickname 会抓到推荐流里别人的号 → 见 reference 的血泪教训),
 // 必须先导航到「自己主页」再读身份。URL 用明文 cookie 里的 uid 拼。这是对齐抖音「在带本人 SSR 的页面读」
