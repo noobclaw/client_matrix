@@ -446,7 +446,8 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
         try { await m.setAccountProxy({ id: r.account.id, proxy: proxyOut }); } catch { /* 代理存失败不挡建号 */ }
       }
       setShowAdd(false); setProxyMsg(null);
-      if (r?.ok) { await reload(); setNotice(i18nService.t('mvAccountCreated').replace('{name}', name)); if (thenLogin && r.account) promptScanLogin(r.account.id, platform, name, platform === 'kuaishou' ? newScope : undefined); }
+      // 建号后不再直接扫码,而是弹【连接方式选择】(扫码 / 导入 cookie),跟账号卡「连接账号」按钮一致。
+      if (r?.ok) { await reload(); setNotice(i18nService.t('mvAccountCreated').replace('{name}', name)); if (thenLogin && r.account) setConnectChoice({ accountId: r.account.id, plat: platform, displayName: name, loginScope: platform === 'kuaishou' ? newScope : undefined }); }
       else setNotice(i18nService.t('mvCreateFailed') + (r?.error || i18nService.t('mvIpcNoResponse')));
     };
     // 第 2 步配了代理 → 先校验(撞IP/连通),有问题给「仍然保存」;没配代理(走本机)直接建。
