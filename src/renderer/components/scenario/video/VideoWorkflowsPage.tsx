@@ -2069,8 +2069,15 @@ const VOICE_GROUPS: { groupZh: string; groupEn: string; voices: VoiceOpt[] }[] =
       { id: 'en-US-BrianNeural',   zh: 'Brian · 英文男声(轻快)',  en: 'Brian · EN male (bright)' },
     ],
   },
-  // —— 其他语种按【亚洲(韩) → 东南亚(印尼/越) → 拉美(西/葡) → 欧洲(法) → 中东(阿)】排,
+  // —— 其他语种按【亚洲(日/韩) → 东南亚(印尼/越) → 拉美(西/葡) → 欧洲(法) → 中东(阿)】排,
   //   按华人圈出海短视频 + Binance 重点市场用户密度递减。
+  {
+    groupZh: '日语', groupEn: 'Japanese',
+    voices: [
+      { id: 'ja-JP-NanamiNeural',  zh: '七海 · 日语女声', en: 'Nanami · JA female' },
+      { id: 'ja-JP-KeitaNeural',   zh: '圭太 · 日语男声', en: 'Keita · JA male' },
+    ],
+  },
   {
     groupZh: '韩语', groupEn: 'Korean',
     voices: [
@@ -2120,6 +2127,23 @@ const VOICE_GROUPS: { groupZh: string; groupEn: string; voices: VoiceOpt[] }[] =
       { id: 'ar-SA-HamedNeural',   zh: 'Hamed · 阿拉伯语男声',   en: 'Hamed · AR-SA male' },
     ],
   },
+];
+
+// 在线素材「创作语言」:决定 AI 口播稿(及字幕)语言;auto = 按文案/关键词自动探测(原行为)。
+// 码值 = 主进程 scriptWriter.ContentLang;选项只列有配音音色的语种(阿拉伯语 RTL 字幕未验,先不放)。
+// voicePrefixes 用于「选了语言后音色不匹配 → 自动切到该语种默认音色」的联动。
+const SCRIPT_LANGS: { code: string; zh: string; en: string; voicePrefixes: string[]; defaultVoice: string }[] = [
+  { code: 'auto',  zh: '自动(按文案/关键词)', en: 'Auto (detect)', voicePrefixes: [], defaultVoice: '' },
+  { code: 'zh',    zh: '简体中文', en: 'Chinese (Simplified)',  voicePrefixes: ['zh-'], defaultVoice: 'zh-CN-YunjianNeural' },
+  { code: 'zh-TW', zh: '繁體中文', en: 'Chinese (Traditional)', voicePrefixes: ['zh-TW', 'zh-HK'], defaultVoice: 'zh-TW-HsiaoChenNeural' },
+  { code: 'en',    zh: 'English',  en: 'English',    voicePrefixes: ['en-'], defaultVoice: 'en-US-JennyNeural' },
+  { code: 'ja',    zh: '日本語',   en: 'Japanese',   voicePrefixes: ['ja-'], defaultVoice: 'ja-JP-NanamiNeural' },
+  { code: 'ko',    zh: '한국어',   en: 'Korean',     voicePrefixes: ['ko-'], defaultVoice: 'ko-KR-SunHiNeural' },
+  { code: 'id',    zh: 'Bahasa Indonesia', en: 'Indonesian', voicePrefixes: ['id-'], defaultVoice: 'id-ID-GadisNeural' },
+  { code: 'vi',    zh: 'Tiếng Việt', en: 'Vietnamese', voicePrefixes: ['vi-'], defaultVoice: 'vi-VN-HoaiMyNeural' },
+  { code: 'es',    zh: 'Español',  en: 'Spanish',    voicePrefixes: ['es-'], defaultVoice: 'es-MX-DaliaNeural' },
+  { code: 'pt',    zh: 'Português', en: 'Portuguese', voicePrefixes: ['pt-'], defaultVoice: 'pt-BR-FranciscaNeural' },
+  { code: 'fr',    zh: 'Français', en: 'French',     voicePrefixes: ['fr-'], defaultVoice: 'fr-FR-DeniseNeural' },
 ];
 
 // 本地内置背景音乐(随包 bundle 在 resources/bgm/,来源 MoneyPrinterTurbo 免版税曲库)。
@@ -2360,8 +2384,18 @@ const VideoConfigModal: React.FC<{
   const [aspect, setAspect] = useState<VideoAspect>(editTask?.input.aspect || '9:16');
   const [maxClipSeconds, setMaxClipSeconds] = useState<number>(editTask?.input.maxClipSeconds ?? 4);
 
-  // 步骤 3:音频(音色 / 语速 / 背景音乐 / BGM 音量)
+  // 步骤 3:音频(创作语言 / 音色 / 语速 / 背景音乐 / BGM 音量)
+  // 创作语言(仅在线素材/本地素材模式):决定 AI 口播稿语言;'auto' = 按文案/关键词探测(老行为,老任务无此字段也走它)。
+  const [scriptLang, setScriptLang] = useState<string>(editTask?.input.scriptLang || 'auto');
   const [voice, setVoice] = useState<string>(editTask?.input.voice || 'zh-CN-YunjianNeural');
+  // 选定语言后,若当前音色语种不匹配 → 自动切到该语言默认音色(仍可手动改回)。
+  const pickScriptLang = (code: string) => {
+    setScriptLang(code);
+    const opt = SCRIPT_LANGS.find((l) => l.code === code);
+    if (opt && opt.code !== 'auto' && opt.voicePrefixes.length && !opt.voicePrefixes.some((p) => voice.startsWith(p))) {
+      setVoice(opt.defaultVoice);
+    }
+  };
   const [voiceRate, setVoiceRate] = useState<number>(editTask?.input.voiceRate ?? 0);
   // BGM 默认选中第 1 首内置曲目(新建任务);编辑老任务时沿用其已存值(空也保留空)。
   const [bgmPath, setBgmPath] = useState<string>(
@@ -2616,6 +2650,8 @@ const VideoConfigModal: React.FC<{
     targetSeconds: mode === 'pure_ai' ? Math.min(targetSeconds, AI_MAX_SECONDS) : targetSeconds,
     // 在线来源 = 搜在线素材库(收平台费);本地/AI = 不搜在线。AI 的钱在服务端逐片段扣。
     useStockVideo: mode === 'stock' && materialSource === 'stock',
+    // 创作语言:仅 stock 模式生效;'auto' 不传 = 主进程按文案/关键词探测(老行为)。
+    scriptLang: mode === 'stock' && scriptLang !== 'auto' ? scriptLang : undefined,
     voice,
     voiceRate,
     // Seedance(pure_ai):默认纯画面(关旁白 + 不烧字幕);用户在「音频」步开了「AI 配音」
@@ -3211,6 +3247,28 @@ const VideoConfigModal: React.FC<{
                     <p className="mt-1.5 text-xs text-gray-400">{isZh ? '纯画面只需(选填)挑首背景音乐,下一步直接出片。' : 'Visual-only: optionally pick BGM, then output.'}</p>
                   )}
                 </Field>
+              )}
+
+              {/* 创作语言 —— 仅在线/本地素材模式(决定 AI 口播稿语言;纯 AI 暂不放,Seedance 线另议)。
+                  逐字朗读(strict)模式稿子就是用户原文,选语言不生效 → 禁用并说明。 */}
+              {mode === 'stock' && (
+              <Field
+                label={isZh ? '创作语言' : 'Script language'}
+                hint={scriptMode === 'strict'
+                  ? (isZh ? '逐字朗读模式:按你文案的原文语言,此项不生效' : 'Verbatim mode follows your script text; this has no effect')
+                  : (isZh ? '决定 AI 口播稿和字幕的语言' : 'Language of the AI narration & subtitles')}
+              >
+                <select
+                  value={scriptLang}
+                  onChange={(e) => pickScriptLang(e.target.value)}
+                  disabled={scriptMode === 'strict'}
+                  className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm dark:text-white focus:outline-none focus:ring-2 focus:ring-rose-500/50 disabled:opacity-50"
+                >
+                  {SCRIPT_LANGS.map((l) => (
+                    <option key={l.code} value={l.code}>{isZh ? l.zh : l.en}</option>
+                  ))}
+                </select>
+              </Field>
               )}
 
               {/* 配音音色 + 语速 —— 普通模式恒显示;Seedance 仅在开了「AI 配音」时显示 */}

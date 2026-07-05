@@ -130,6 +130,8 @@ export interface VideoCreationInput {
   targetSeconds?: number;
   /** 是否优先用在线素材【视频】(否则只用图片)。默认 true。 */
   useStockVideo?: boolean;
+  /** 口播稿语言(创作语言,如 'zh'/'zh-TW'/'en'/'ja'/'vi'…)。空/'auto' = 按文案/关键词自动探测。 */
+  scriptLang?: string;
   /** edge-tts 音色,空 = 用默认(zh-CN-XiaoxiaoNeural)。 */
   voice?: string;
   /** 语速档(-50~+50,单位%),0/空 = 正常语速。 */
