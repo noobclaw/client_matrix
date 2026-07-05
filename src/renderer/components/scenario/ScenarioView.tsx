@@ -2067,7 +2067,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
 
       {/* 指纹浏览器未安装 → 去下载弹窗(没内核不创建/不运行矩阵任务) */}
       {matrixKernelMissing && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={() => { if (!matrixKernelBusy) setMatrixKernelMissing(false); }}>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
           <div className="w-[28rem] max-w-full rounded-2xl p-6 dark:bg-claude-darkBg bg-white border dark:border-white/10 border-black/10 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="text-base font-semibold mb-2 dark:text-white">🧬 {i18nService.t('svKernelTitle')}</div>
             <div className="text-sm text-gray-600 dark:text-gray-300 mb-5 leading-relaxed">{i18nService.t('svKernelBody')}</div>
@@ -2081,7 +2081,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
 
       {/* 重复任务提示:某平台已有同类型任务 → 关掉向导并弹此提示,给「去查看 / 编辑」入口跳对应管理 tab */}
       {dupNotice && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" onClick={() => setDupNotice(null)}>
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-2xl p-5" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start gap-3">
               <span className="text-xl leading-none">⚠️</span>
@@ -2099,7 +2099,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
 
       {/* 矩阵号互动涨粉向导(选账号 + 配额 + 频率) */}
       {matrixWizardPlatform && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => { setMatrixWizardPlatform(null); setMatrixWizardTask(null); }}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
             <MatrixTaskWizard
               platformLabel={(() => {
@@ -2121,7 +2121,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
 
       {/* 矩阵号自动回复粉丝向导(选创作者中心账号 + 引流尾巴 + 频率) */}
       {matrixReplyPlatform && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-auto" onClick={() => { setMatrixReplyPlatform(null); setMatrixReplyTask(null); }}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-auto">
           <div className="w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
             <MatrixReplyFansWizard
               platformLabel={(() => {
@@ -2142,7 +2142,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
 
       {/* 矩阵号视频无水印下载向导(单账号 + 粘贴链接 + 频率) */}
       {matrixDownloadPlatform && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-auto" onClick={() => { setMatrixDownloadPlatform(null); setMatrixDownloadTask(null); }}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-auto">
           <div className="w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
             <MatrixVideoDownloadWizard
               platformLabel={(() => { const p = matrixDownloadPlatform; return p === 'douyin' ? '抖音' : p === 'kuaishou' ? '快手' : p === 'bilibili' ? '哔哩哔哩' : p === 'tiktok' ? 'TikTok' : p === 'xhs' ? '小红书' : String(p); })()}
@@ -2158,7 +2158,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       )}
 
       {matrixImageTextPlatform && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-auto" onClick={() => { setMatrixImageTextPlatform(null); setMatrixImageTextTask(null); }}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-auto">
           <div className="w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
             <MatrixImageTextWizard
               platformLabel={(() => { const p = matrixImageTextPlatform; return p === 'douyin' ? '抖音' : p === 'xhs' ? '小红书' : p === 'shipinhao' ? '视频号' : p === 'toutiao' ? '头条号' : String(p); })()}
@@ -2175,7 +2175,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       )}
 
       {matrixTweetPlatform && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-auto" onClick={() => { setMatrixTweetPlatform(null); setMatrixTweetTask(null); }}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-auto">
           <div className="w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
             <MatrixTweetPostWizard
               platformLabel={(() => { const p = matrixTweetPlatform; return p === 'x' ? '推特' : String(p); })()}
@@ -2191,7 +2191,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       )}
 
       {matrixBinancePlatform && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-auto" onClick={() => { setMatrixBinancePlatform(null); setMatrixBinanceTask(null); }}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-auto">
           <div className="w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
             <MatrixBinancePostWizard
               platformLabel={(() => { const p = matrixBinancePlatform; return p === 'binance' ? '币安广场' : String(p); })()}
@@ -2207,7 +2207,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       )}
 
       {matrixFacebookPlatform && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-auto" onClick={() => { setMatrixFacebookPlatform(null); setMatrixFacebookTask(null); }}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-auto">
           <div className="w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
             <MatrixFacebookPostWizard
               platformLabel={(() => { const p = matrixFacebookPlatform; return p === 'facebook' ? 'Facebook' : String(p); })()}
@@ -2223,7 +2223,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       )}
 
       {matrixRedditPlatform && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-auto" onClick={() => { setMatrixRedditPlatform(null); setMatrixRedditTask(null); }}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-auto">
           <div className="w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
             <MatrixRedditPostWizard
               platformLabel={(() => { const p = matrixRedditPlatform; return p === 'reddit' ? 'Reddit' : String(p); })()}
@@ -2239,7 +2239,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       )}
 
       {matrixRepostPlatform && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-auto" onClick={() => { setMatrixRepostPlatform(null); setMatrixRepostTask(null); }}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-auto">
           <div className="w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
             <MatrixBinanceRepostWizard
               platformLabel={(() => { const p = matrixRepostPlatform; return p === 'binance' ? '币安广场' : String(p); })()}
@@ -2256,7 +2256,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       )}
 
       {matrixViralPlatform && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-auto" onClick={() => { setMatrixViralPlatform(null); setMatrixViralTask(null); }}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-auto">
           <div className="w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
             <MatrixViralRewriteWizard
               platformLabel={(() => { const p = matrixViralPlatform; return p === 'xhs' ? '小红书' : String(p); })()}

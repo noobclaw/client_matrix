@@ -1063,7 +1063,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
 
       {/* 应用内确认弹窗(断开 / 移除)—— 不用 window.confirm(Tauri ACL 拦) */}
       {confirmDlg && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={() => setConfirmDlg(null)}>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
           <div className="w-[34rem] max-w-full rounded-2xl p-7 dark:bg-claude-darkBg bg-white border dark:border-white/10 border-black/10 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="text-lg font-semibold mb-3 dark:text-white">{confirmDlg.title}</div>
             <div className="text-sm text-gray-600 dark:text-gray-300 mb-6 leading-relaxed">{confirmDlg.body}</div>
@@ -1077,7 +1077,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
 
       {/* 「连接账号」方式选择弹窗:扫码连接 / 导入 cookie,点后关本弹窗并走各自流程。 */}
       {connectChoice && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={() => setConnectChoice(null)}>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-md rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="text-base font-semibold mb-1 dark:text-white">🔗 {i18nService.currentLanguage === 'zh' ? '连接账号' : 'Connect account'} · {platLabel(connectChoice.plat)}</div>
             <div className="text-xs text-gray-500 dark:text-gray-400 mb-4">{i18nService.currentLanguage === 'zh' ? '选择连接方式' : 'Choose a connection method'}</div>
@@ -1109,7 +1109,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
 
       {/* 导入 cookie 登录弹窗 */}
       {cookieImport && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={() => !cookieBusy && setCookieImport(null)}>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-lg rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="text-base font-semibold mb-1 dark:text-white">🍪 {i18nService.currentLanguage === 'zh' ? '导入 cookie 登录' : 'Import cookie login'} · {platLabel(cookieImport.plat)}</div>
             {(() => {
