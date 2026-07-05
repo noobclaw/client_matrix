@@ -459,6 +459,8 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
     }
     await doCreate(null);
   };
+  // 「连接账号」统一入口:点开先弹窗选连接方式(扫码 / 导入 cookie),再走各自流程。持有待连接的账号信息。
+  const [connectChoice, setConnectChoice] = useState<{ accountId: string; plat: string; displayName: string; loginScope?: string } | null>(null);
   // 导入 cookie 登录:海外号(Google/Apple 登录)、买来的 cookie 号——不在指纹内核里跑 OAuth,注入已登录 cookie(行业标准)。
   const [cookieImport, setCookieImport] = useState<{ accountId: string; plat: string; displayName: string; loginScope?: string } | null>(null);
   const [cookieText, setCookieText] = useState('');
@@ -818,11 +820,8 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
                       <button onClick={() => openEdit(a)} className={`text-xs px-2.5 py-1 rounded-lg text-white ${a.status === 'login_required' ? 'bg-violet-500 hover:bg-violet-600' : 'bg-emerald-600 hover:bg-emerald-700'}`}>{i18nService.t('mvEdit')}</button>
                       {a.status === 'login_required'
                         ? (<>
-                            {/* 尚未连接:只给「扫码连接」。它本身会开窗轮询登录态——若已在浏览器手动登录/扫码轮询超时,
-                                点它会立刻检测到并翻成已连接(不必真重扫),所以无需单独的「刷新信息」(那是给已连接的号刷身份用的)。 */}
-                            <button onClick={() => promptScanLogin(a.id, a.platform, a.displayName, a.loginScope)} className="text-xs px-2.5 py-1 rounded-lg bg-violet-500 text-white hover:bg-violet-600">{i18nService.t('mvScanConnect')}</button>
-                            {/* 导入 cookie 登录:海外号(Google/Apple 登录,内核里 OAuth 走不通)、买来的 cookie 号走这条。 */}
-                            <button onClick={() => { setCookieText(''); setCookieImport({ accountId: a.id, plat: a.platform, displayName: a.displayName, loginScope: a.loginScope }); }} className="text-xs px-2.5 py-1 rounded-lg border border-violet-500 text-violet-500 hover:bg-violet-500/10">{i18nService.currentLanguage === 'zh' ? '导入 cookie' : 'Import cookie'}</button>
+                            {/* 尚未连接:统一入口「连接账号」→ 弹窗选【扫码连接 / 导入 cookie】,各走各流程(把原来并排两颗按钮收成一个)。 */}
+                            <button onClick={() => setConnectChoice({ accountId: a.id, plat: a.platform, displayName: a.displayName, loginScope: a.loginScope })} className="text-xs px-2.5 py-1 rounded-lg bg-violet-500 text-white hover:bg-violet-600">{i18nService.currentLanguage === 'zh' ? '连接账号' : 'Connect account'}</button>
                           </>)
                         : (<>
                             {/* 已连接:读真实身份 / 断开(清登录,保留配置) */}
@@ -1085,6 +1084,35 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
         </div>
       )}
 
+      {/* 「连接账号」方式选择弹窗:扫码连接 / 导入 cookie,点后关本弹窗并走各自流程。 */}
+      {connectChoice && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={() => setConnectChoice(null)}>
+          <div className="w-full max-w-md rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="text-base font-semibold mb-1 dark:text-white">🔗 {i18nService.currentLanguage === 'zh' ? '连接账号' : 'Connect account'} · {platLabel(connectChoice.plat)}</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400 mb-4">{i18nService.currentLanguage === 'zh' ? '选择连接方式' : 'Choose a connection method'}</div>
+            <div className="grid grid-cols-1 gap-3">
+              {/* 扫码连接:开指纹浏览器扫码/手动登录,轮询转「已连接」。 */}
+              <button
+                onClick={() => { const c = connectChoice; setConnectChoice(null); promptScanLogin(c.accountId, c.plat, c.displayName, c.loginScope); }}
+                className="text-left rounded-xl border border-violet-500/40 bg-violet-500/5 hover:bg-violet-500/10 px-4 py-3">
+                <div className="text-sm font-semibold text-violet-600 dark:text-violet-400">📷 {i18nService.t('mvScanConnect')}</div>
+                <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{i18nService.currentLanguage === 'zh' ? '打开指纹浏览器,扫码或手动登录' : 'Open the fingerprint browser and scan / log in'}</div>
+              </button>
+              {/* 导入 cookie:海外号(Google/Apple 登录,内核里 OAuth 走不通)、买来的 cookie 号走这条。 */}
+              <button
+                onClick={() => { const c = connectChoice; setConnectChoice(null); setCookieText(''); setCookieImport({ accountId: c.accountId, plat: c.plat, displayName: c.displayName, loginScope: c.loginScope }); }}
+                className="text-left rounded-xl border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 px-4 py-3">
+                <div className="text-sm font-semibold dark:text-gray-200">🍪 {i18nService.currentLanguage === 'zh' ? '导入 cookie' : 'Import cookie'}</div>
+                <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{i18nService.currentLanguage === 'zh' ? '海外号(Google/Apple 登录)/ 买来的 cookie 号' : 'Google/Apple-login or bought accounts'}</div>
+              </button>
+            </div>
+            <div className="mt-4 flex justify-end">
+              <button onClick={() => setConnectChoice(null)} className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800">{i18nService.t('mvCancel')}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 导入 cookie 登录弹窗 */}
       {cookieImport && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={() => !cookieBusy && setCookieImport(null)}>
@@ -1095,7 +1123,6 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
               const zh = i18nService.currentLanguage === 'zh';
               return (
                 <div className="text-xs text-gray-600 dark:text-gray-300 mb-3 leading-relaxed rounded-lg border border-violet-500/30 bg-violet-500/5 px-3 py-2 space-y-1">
-                  <div className="font-medium">{zh ? '海外号(Google/Apple 登录)/ 买来的 cookie 号用这个 —— 3 步:' : 'For Google/Apple-login or bought accounts — 3 steps:'}</div>
                   <div>{zh ? '① 给你的' : '① Install '}<strong>{zh ? '普通浏览器(Chrome/Edge)装扩展 ' : 'Cookie-Editor'}</strong>
                     <a href={`https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm`} target="_blank" rel="noreferrer" className="text-violet-500 underline mx-0.5">Cookie-Editor</a>
                     {zh ? '(Chrome 应用商店免费)' : ' from the Chrome Web Store'}</div>
