@@ -46,16 +46,17 @@ import MatrixTweetPostWizard, { type TweetPostWizardSave } from '../matrix/Matri
 import MatrixBinancePostWizard, { type BinancePostWizardSave } from '../matrix/MatrixBinancePostWizard';
 import MatrixFacebookPostWizard, { type FacebookPostWizardSave } from '../matrix/MatrixFacebookPostWizard';
 import MatrixRedditPostWizard, { type RedditPostWizardSave } from '../matrix/MatrixRedditPostWizard';
+import MatrixInstagramPostWizard, { type InstagramPostWizardSave } from '../matrix/MatrixInstagramPostWizard';
 import MatrixBinanceRepostWizard, { type BinanceRepostWizardSave } from '../matrix/MatrixBinanceRepostWizard';
 import MatrixViralRewriteWizard, { type ViralRewriteWizardSave } from '../matrix/MatrixViralRewriteWizard';
 
 type PlatformId = 'xhs' | 'x' | 'binance' | 'douyin' | 'shipinhao' | 'toutiao' | 'kuaishou' | 'bilibili' | 'tiktok' | 'youtube' | 'instagram' | 'facebook' | 'reddit' | 'video';
 
 // 矩阵 tab 顺序:多平台视频创作放最前(用户要求),其后与「我的矩阵账号」平台顺序一致(含视频号/头条)。
-const MATRIX_TAB_ORDER: PlatformId[] = ['video', 'douyin', 'xhs', 'kuaishou', 'bilibili', 'shipinhao', 'toutiao', 'x', 'binance', 'youtube', 'tiktok', 'facebook', 'reddit'];
+const MATRIX_TAB_ORDER: PlatformId[] = ['video', 'douyin', 'xhs', 'kuaishou', 'bilibili', 'shipinhao', 'toutiao', 'x', 'binance', 'youtube', 'tiktok', 'facebook', 'reddit', 'instagram'];
 // 后端 backend/matrix/scenarios 有 <platform>_auto_engage 互动涨粉剧本的平台(共 8 个)。
 // 视频号/头条暂无 engage 剧本 → tab 仍展示(与账号页一致),但「开始创作」标注「即将上线」不放行,避免跑出错任务。
-const MATRIX_ENGAGE_PLATFORMS = new Set<PlatformId>(['douyin', 'xhs', 'kuaishou', 'bilibili', 'x', 'binance', 'youtube', 'tiktok', 'facebook', 'reddit']);
+const MATRIX_ENGAGE_PLATFORMS = new Set<PlatformId>(['douyin', 'xhs', 'kuaishou', 'bilibili', 'x', 'binance', 'youtube', 'tiktok', 'facebook', 'reddit', 'instagram']);
 // 后端 backend/matrix/scenarios 有 <platform>_reply_fans_comment「自动回复粉丝」剧本的平台。
 // 小红书(逐篇笔记进详情页回复,主站登录态即覆盖创作者中心)+ 快手(创作者中心评论管理,需
 // loginScope='creator' 账号)+ 哔哩哔哩(member.bilibili.com 创作中心评论管理,登录 cookie 挂
@@ -86,6 +87,8 @@ const MATRIX_BINANCE_POST_PLATFORMS = new Set<PlatformId>(['binance']);
 const MATRIX_FB_POST_PLATFORMS = new Set<PlatformId>(['facebook']);
 // 后端有 reddit_post「Reddit 自动发帖」剧本的平台(取材可选源 + subreddit,API 发 self 帖)。目前仅 Reddit。
 const MATRIX_REDDIT_POST_PLATFORMS = new Set<PlatformId>(['reddit']);
+// 后端有 instagram_post「Instagram 自动发帖」剧本的平台(取材可选源,IG「新建帖子」多步弹窗发图文,图必带)。目前仅 Instagram。
+const MATRIX_IG_POST_PLATFORMS = new Set<PlatformId>(['instagram']);
 // 「币安广场批量搬运」(binance_repost):1 个源平台采集号搜+下 → N 个币安号各领一条仿写发。发布目标=币安。
 const MATRIX_BINANCE_REPOST_PLATFORMS = new Set<PlatformId>(['binance']);
 
@@ -151,6 +154,7 @@ const PLATFORM_TABS: Array<{ id: PlatformId; labelKey: string; icon: string; ena
   { id: 'tiktok', labelKey: 'scenarioPlatformTiktok', icon: '🎵', enabled: true },
   { id: 'facebook', labelKey: 'scenarioPlatformFacebook', icon: '👥', enabled: true },
   { id: 'reddit', labelKey: 'scenarioPlatformReddit', icon: '🟠', enabled: true },
+  { id: 'instagram', labelKey: 'scenarioPlatformInstagram', icon: '📷', enabled: true },
   // 国内平台:接在后面同一行排,放不下由容器(flex-wrap)自然换行,不再写死断行。
   { id: 'xhs', labelKey: 'scenarioPlatformXhs', icon: '📕', enabled: true },
   { id: 'douyin', labelKey: 'scenarioPlatformDouyin', icon: '🎶', enabled: true },
@@ -257,6 +261,11 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   const [matrixRedditAccounts, setMatrixRedditAccounts] = useState<WizardAccount[]>([]);
   const [matrixRedditAccountsLoading, setMatrixRedditAccountsLoading] = useState(false);
   const [matrixRedditTask, setMatrixRedditTask] = useState<any | null>(null);
+  // ── Instagram 自动发帖(instagram_post)向导状态 ──
+  const [matrixInstagramPlatform, setMatrixInstagramPlatform] = useState<string | null>(null);
+  const [matrixInstagramAccounts, setMatrixInstagramAccounts] = useState<WizardAccount[]>([]);
+  const [matrixInstagramAccountsLoading, setMatrixInstagramAccountsLoading] = useState(false);
+  const [matrixInstagramTask, setMatrixInstagramTask] = useState<any | null>(null);
   // ── 币安广场批量搬运(binance_repost)向导状态 ──
   const [matrixRepostPlatform, setMatrixRepostPlatform] = useState<string | null>(null);
   const [matrixRepostAccounts, setMatrixRepostAccounts] = useState<WizardAccount[]>([]);        // 币安发布号
@@ -770,6 +779,64 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     await refreshAll();
     if (!wasEdit) onSwitchToManage?.(plat as any);
   };
+  // ── Instagram 自动发帖向导(复用 binancePostRunner + instagram_post 剧本) ──
+  const openMatrixInstagramWizard = async (platform: string) => {
+    if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; }
+    setMatrixInstagramAccounts([]);
+    setMatrixInstagramAccountsLoading(true);
+    setMatrixInstagramTask(null);
+    setMatrixInstagramPlatform(platform);
+    void ensureMatrixKernel();
+    try {
+      const r = await (window as any).electron?.matrix?.listAccounts?.();
+      const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
+      setMatrixInstagramAccounts(accs.filter((a) => replyAccountFilter(a, platform)).map(mapWizardAccount));
+    } catch { setMatrixInstagramAccounts([]); }
+    finally { setMatrixInstagramAccountsLoading(false); }
+  };
+  const openMatrixInstagramWizardEdit = async (task: any) => {
+    if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); return; }
+    const plat = (task?.platform as string) || currentPlatform || 'instagram';
+    setMatrixInstagramAccounts([]);
+    setMatrixInstagramAccountsLoading(true);
+    setMatrixInstagramTask({
+      id: task.id,
+      name: task.name,
+      accountIds: task.account_ids || [],
+      instagramPost: (task as any).instagramPost,
+      frequency: task.run_interval,
+    });
+    setMatrixInstagramPlatform(plat);
+    try {
+      const r = await (window as any).electron?.matrix?.listAccounts?.();
+      const accs: any[] = r?.ok && Array.isArray(r.accounts) ? r.accounts : [];
+      setMatrixInstagramAccounts(accs.filter((a) => replyAccountFilter(a, plat)).map(mapWizardAccount));
+    } catch { setMatrixInstagramAccounts([]); }
+    finally { setMatrixInstagramAccountsLoading(false); }
+  };
+  const saveMatrixInstagramTask = async (input: InstagramPostWizardSave) => {
+    if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); throw new Error('请先登录 NoobClaw 账号'); }
+    const m = (window as any).electron?.matrix;
+    const instagramPost = {
+      withImage: true,
+      language: input.language,
+      autoPublish: input.autoPublish,
+      sourceKind: input.sourceKind,
+      source: input.source,
+      catKey: input.catKey,
+    };
+    const r = await m?.saveTask?.({ id: matrixInstagramTask?.id, platform: matrixInstagramPlatform, type: 'instagram_post', name: input.name, accountIds: input.accountIds, instagramPost, quota: {}, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
+    if (!r?.ok) {
+      if (r?.error === 'duplicate_type') { const dp = matrixInstagramPlatform; setMatrixInstagramPlatform(null); setMatrixInstagramTask(null); setDupNotice({ platform: dp as string, label: 'Instagram 发帖' }); return; }
+      throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限' } as any)[r?.error] || r?.error || '保存失败');
+    }
+    const wasEdit = !!matrixInstagramTask?.id;
+    const plat = matrixInstagramPlatform;
+    setMatrixInstagramPlatform(null);
+    setMatrixInstagramTask(null);
+    await refreshAll();
+    if (!wasEdit) onSwitchToManage?.(plat as any);
+  };
   // ── 币安广场批量搬运向导:发布号取币安(replyAccountFilter),采集号取【全部账号】(按所选源平台过滤在 wizard 内做)。 ──
   const loadRepostAccounts = async (plat: string) => {
     try {
@@ -937,6 +1004,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
             : s?.platform === 'toutiao' ? '头条号'
             : (s?.platform as string) === 'facebook' ? 'Facebook'
             : (s?.platform as string) === 'reddit' ? 'Reddit'
+            : (s?.platform as string) === 'instagram' ? 'Instagram'
             : (s?.platform || '');
           // Get this task's progress to know which step it's in
           const prog = await scenarioService.getRunProgress(id).catch(() => null);
@@ -973,7 +1041,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       const p = s?.platform;
       // v2.4.61: 漏了 'binance' — 进币安任务详情然后返回会跳回小红书 tab
       // v6.x:  漏了 'video' — 翻译二创(scenario.platform='video')详情返回也会掉小红书 tab
-      if (p === 'xhs' || p === 'x' || p === 'binance' || p === 'douyin' || p === 'shipinhao' || p === 'toutiao' || p === 'kuaishou' || p === 'bilibili' || p === 'tiktok' || p === 'youtube' || (p as string) === 'facebook' || (p as string) === 'reddit' || p === 'video') return p as PlatformId;
+      if (p === 'xhs' || p === 'x' || p === 'binance' || p === 'douyin' || p === 'shipinhao' || p === 'toutiao' || p === 'kuaishou' || p === 'bilibili' || p === 'tiktok' || p === 'youtube' || (p as string) === 'facebook' || (p as string) === 'reddit' || (p as string) === 'instagram' || p === 'video') return p as PlatformId;
       return 'xhs';
     }
     return 'xhs';
@@ -1233,7 +1301,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
           scenario={scenario || null}
           onBack={goBack}
           /* 矩阵号:编辑打开账号多选向导(回填该任务的账号/配额/频率),不开原版 ConfigWizard */
-          onEdit={() => { if (matrixMode) { if (/_video_download$/.test(String(task.scenario_id || ''))) { void openMatrixDownloadWizardEdit(task); } else if (/_image_text$/.test(String(task.scenario_id || ''))) { void openMatrixImageTextWizardEdit(task); } else if (/_viral_production_career$/.test(String(task.scenario_id || ''))) { void openMatrixViralWizardEdit(task); } else if (String(task.scenario_id || '') === 'x_post') { void openMatrixTweetWizardEdit(task); } else if (String(task.scenario_id || '') === 'binance_post') { void openMatrixBinanceWizardEdit(task); } else if (String(task.scenario_id || '') === 'facebook_post') { void openMatrixFacebookWizardEdit(task); } else if (String(task.scenario_id || '') === 'reddit_post') { void openMatrixRedditWizardEdit(task); } else if (String(task.scenario_id || '') === 'binance_repost') { void openMatrixRepostWizardEdit(task); } else if (/_reply_fans_comment$/.test(String(task.scenario_id || ''))) { void openMatrixReplyWizardEdit(task); } else { void openMatrixWizardEdit(task); } return; } if (scenario) openWizardEdit(task, scenario); }}
+          onEdit={() => { if (matrixMode) { if (/_video_download$/.test(String(task.scenario_id || ''))) { void openMatrixDownloadWizardEdit(task); } else if (/_image_text$/.test(String(task.scenario_id || ''))) { void openMatrixImageTextWizardEdit(task); } else if (/_viral_production_career$/.test(String(task.scenario_id || ''))) { void openMatrixViralWizardEdit(task); } else if (String(task.scenario_id || '') === 'x_post') { void openMatrixTweetWizardEdit(task); } else if (String(task.scenario_id || '') === 'binance_post') { void openMatrixBinanceWizardEdit(task); } else if (String(task.scenario_id || '') === 'facebook_post') { void openMatrixFacebookWizardEdit(task); } else if (String(task.scenario_id || '') === 'reddit_post') { void openMatrixRedditWizardEdit(task); } else if (String(task.scenario_id || '') === 'instagram_post') { void openMatrixInstagramWizardEdit(task); } else if (String(task.scenario_id || '') === 'binance_repost') { void openMatrixRepostWizardEdit(task); } else if (/_reply_fans_comment$/.test(String(task.scenario_id || ''))) { void openMatrixReplyWizardEdit(task); } else { void openMatrixWizardEdit(task); } return; } if (scenario) openWizardEdit(task, scenario); }}
           onChanged={refreshAll}
           onOpenHistory={() => openHistoryForTask(task.id)}
         />
@@ -1277,6 +1345,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       : currentPlatform === 'bilibili' ? (isZh ? '哔哩哔哩' : 'Bilibili')
       : currentPlatform === 'facebook' ? 'Facebook'
       : currentPlatform === 'reddit' ? 'Reddit'
+      : currentPlatform === 'instagram' ? 'Instagram'
       : currentPlatform;
 
     if (currentSection === 'tasks') {
@@ -1538,6 +1607,36 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-orange-500 text-white text-sm font-bold hover:bg-orange-600 shadow-sm shadow-orange-500/25 transition-all active:scale-95"
               >
                 🟠 {i18nService.currentLanguage === 'zh' ? '开始发帖' : 'Start Posting'}
+              </button>
+              <button
+                type="button"
+                onClick={() => onSwitchToManage?.(currentPlatform as any)}
+                className="ml-3 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+              >
+                {i18nService.t('svHasTasks')}
+              </button>
+              </div>
+            </div>
+          )}
+          {/* Instagram 自动发帖(矩阵多账号)—— N 个号各自按人设从所选数据源取材 AI 原创一条图文 + 配图 → 走「新建帖子」发到各自 IG(图必带)。 */}
+          {MATRIX_IG_POST_PLATFORMS.has(currentPlatform) && (
+            <div className="rounded-2xl border border-pink-500/30 bg-pink-500/5 dark:bg-pink-500/10 p-6 flex flex-col">
+              <div className="flex items-center gap-2 text-xs font-semibold text-pink-600 dark:text-pink-400 mb-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-pink-500" /> {i18nService.currentLanguage === 'zh' ? 'Instagram 发帖' : 'Instagram Post'}
+              </div>
+              <div className="text-xl font-bold dark:text-white mb-1">📷 {platLabel} · {i18nService.currentLanguage === 'zh' ? '自动发帖' : 'Auto Post'}</div>
+              <div className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed mb-4">
+                {i18nService.currentLanguage === 'zh'
+                  ? <>N 个号各自按人设,从你选的数据源(Web3 / 科技 / 微博·抖音等热榜)取材,AI 原创一条 Instagram 图文,<strong>每号内容互不相同</strong>,恒配图 → 发到各自 Instagram(须挂 VPN)。</>
+                  : <>Each account posts one AI-original Instagram post from your chosen data source (Web3 / tech / trending boards), <strong>all different</strong>, always with an image (VPN required).</>}
+              </div>
+              <div className="mt-auto flex items-center flex-wrap pt-1">
+              <button
+                type="button"
+                onClick={() => openMatrixInstagramWizard(currentPlatform)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-pink-500 text-white text-sm font-bold hover:bg-pink-600 shadow-sm shadow-pink-500/25 transition-all active:scale-95"
+              >
+                📷 {i18nService.currentLanguage === 'zh' ? '开始发帖' : 'Start Posting'}
               </button>
               <button
                 type="button"
@@ -2233,6 +2332,22 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
               initialTask={matrixRedditTask}
               onCancel={() => { setMatrixRedditPlatform(null); setMatrixRedditTask(null); }}
               onSave={saveMatrixRedditTask}
+            />
+          </div>
+        </div>
+      )}
+
+      {matrixInstagramPlatform && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-auto">
+          <div className="w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
+            <MatrixInstagramPostWizard
+              platformLabel={(() => { const p = matrixInstagramPlatform; return p === 'instagram' ? 'Instagram' : String(p); })()}
+              platform={matrixInstagramPlatform}
+              accounts={matrixInstagramAccounts}
+              accountsLoading={matrixInstagramAccountsLoading}
+              initialTask={matrixInstagramTask}
+              onCancel={() => { setMatrixInstagramPlatform(null); setMatrixInstagramTask(null); }}
+              onSave={saveMatrixInstagramTask}
             />
           </div>
         </div>

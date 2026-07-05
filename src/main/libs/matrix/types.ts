@@ -171,6 +171,20 @@ export interface RedditPostConfig {
 }
 
 /**
+ * 「Instagram 自动发帖」(instagram_post)任务配置。同 facebook_post 的可选数据源,但发布走 IG「新建帖子」
+ * 多步弹窗(上传图 → 下一步 → 写文案 → 分享)。**Instagram 网页帖必须带图** → withImage 恒 true(拿不到图判失败)。
+ * 复用 binancePostRunner(scenarioId = instagram_post)。
+ */
+export interface InstagramPostConfig {
+  withImage: boolean; // 恒 true(IG 帖必带图);保留字段与 facebook 对齐
+  language: string;   // 'mixed'/'auto'=跟随账号;或 9 种语言码之一(见 postLangs.ts)
+  autoPublish: boolean;
+  sourceKind: 'news' | 'category' | 'hot';
+  source?: string;
+  catKey?: string;
+}
+
+/**
  * 「币安广场批量搬运」(binance_repost)任务配置。区别于其它矩阵任务:本任务有【两种账号角色】——
  *   · 1 个【采集号】(sourceAccountId,在 sourcePlatform 上已登录):按关键词搜索 → 筛选 → 下载,
  *     一次性采够 N 条候选素材(图文 / 视频);
@@ -198,7 +212,7 @@ export interface BinanceRepostConfig {
 // 自动发推 = x_post(N 个号各自按身份 AI 原创一条推文 + 可选配图 → 发到各自时间线,仅推特);
 // 币安广场自动发帖 = binance_post(N 个号各自抓 web3 资讯 AI 原创一条币安广场图文 + 可选配图 → 发币安广场,仅币安);
 // 币安广场批量搬运 = binance_repost(1 个采集号从源平台搜+下 N 条 → N 个币安号各领一条 AI 仿写 + 配图 → 发币安广场)。
-export type MatrixTaskType = 'engage' | 'reply_fan' | 'video_download' | 'image_text' | 'viral_rewrite' | 'x_post' | 'binance_post' | 'binance_repost' | 'facebook_post' | 'reddit_post';
+export type MatrixTaskType = 'engage' | 'reply_fan' | 'video_download' | 'image_text' | 'viral_rewrite' | 'x_post' | 'binance_post' | 'binance_repost' | 'facebook_post' | 'reddit_post' | 'instagram_post';
 // 频率枚举对齐老客户端 DouyinConfigWizard(便于复用频率算法/文案)。
 export type MatrixTaskFrequency = 'once' | '30min' | '1h' | '3h' | '6h' | 'daily_random';
 
@@ -221,6 +235,7 @@ export interface MatrixTask {
   binancePost?: BinancePostConfig; // 仅 binance_post 用:币安广场自动发帖配置
   facebookPost?: FacebookPostConfig; // 仅 facebook_post 用:Facebook 自动发帖配置(含数据源)
   redditPost?: RedditPostConfig;   // 仅 reddit_post 用:Reddit 自动发帖配置(含数据源 + subreddit)
+  instagramPost?: InstagramPostConfig; // 仅 instagram_post 用:Instagram 自动发帖配置(含数据源,图必带)
   binanceRepost?: BinanceRepostConfig; // 仅 binance_repost 用:币安广场批量搬运配置
   urls?: string[];                 // 仅 video_download 用:用户粘贴的待下载视频链接清单
   concurrency?: number;            // 同时开窗数(video_download 固定 1,单账号顺序下载)
