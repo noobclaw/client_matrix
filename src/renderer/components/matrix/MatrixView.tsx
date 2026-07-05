@@ -1095,9 +1095,12 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
               {/* 扫码连接:开指纹浏览器扫码/手动登录,轮询转「已连接」。 */}
               <button
                 onClick={() => { const c = connectChoice; setConnectChoice(null); promptScanLogin(c.accountId, c.plat, c.displayName, c.loginScope); }}
-                className="text-left rounded-xl border border-violet-500/40 bg-violet-500/5 hover:bg-violet-500/10 px-4 py-3">
-                <div className="text-sm font-semibold text-violet-600 dark:text-violet-400">📷 {i18nService.t('mvScanConnect')}</div>
-                <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{i18nService.currentLanguage === 'zh' ? '打开指纹浏览器,扫码或手动登录' : 'Open the fingerprint browser and scan / log in'}</div>
+                className="text-left rounded-xl border-2 border-violet-500 bg-violet-500/10 hover:bg-violet-500/15 px-4 py-3 ring-1 ring-violet-500/20 shadow-sm shadow-violet-500/10">
+                <div className="flex items-center gap-2">
+                  <div className="text-sm font-semibold text-violet-600 dark:text-violet-400">📷 {i18nService.t('mvScanConnect')}</div>
+                  <span className="text-[10px] leading-none px-1.5 py-0.5 rounded-full bg-violet-500 text-white font-medium">{i18nService.currentLanguage === 'zh' ? '推荐' : 'Recommended'}</span>
+                </div>
+                <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{i18nService.currentLanguage === 'zh' ? '打开指纹浏览器,扫码或手动登录(最稳,首选)' : 'Open the fingerprint browser and scan / log in (most reliable)'}</div>
               </button>
               {/* 导入 cookie:海外号(Google/Apple 登录,内核里 OAuth 走不通)、买来的 cookie 号走这条。 */}
               <button
