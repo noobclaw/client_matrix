@@ -477,22 +477,12 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
     } catch (e: any) { setNotice((i18nService.currentLanguage === 'zh' ? '❌ 导入异常:' : '❌ Import error: ') + (e?.message || String(e))); }
     finally { setCookieBusy(false); }
   };
-  // 扫码登录二次确认:点「好的,我已知晓」才真正打开指纹浏览器导航到平台登录页(避免「一点就开浏览器」的突兀)。
-  const promptScanLogin = (accountId: string, plat: string, displayName: string, loginScope?: string) => {
+  // 扫码连接:直接开指纹浏览器导航到平台登录页(连接方式选择弹窗已确认过,不再二次弹「即将打开浏览器」)。
+  const promptScanLogin = async (accountId: string, plat: string, displayName: string, loginScope?: string) => {
     if (!requireLogin()) return;
-    const platName = platLabel(plat) || i18nService.t('mvThisPlatform');
-    const scopeName = plat === 'kuaishou' ? (loginScope === 'creator' ? i18nService.t('mvKsCreatorFull') : i18nService.t('mvKsMainFull')) : '';
-    setConfirmDlg({
-      title: i18nService.t('mvScanConnectTitle').replace('{platform}', platName).replace('{scope}', scopeName ? ' · ' + scopeName : ''),
-      body: i18nService.t('mvScanConnectBody').replace('{platform}', platName).replace('{scope}', scopeName ? scopeName : ''),
-      okText: i18nService.t('mvOpenBrowserLogin'),
-      onYes: async () => {
-        setConfirmDlg(null);
-        if (!requireKernel()) return;
-        setNotice(i18nService.t('mvOpeningBrowserFor').replace('{name}', displayName));
-        await M()?.openLogin({ accountId, kernelPath, loginUrl: loginUrlFor(plat, loginScope) });
-      },
-    });
+    if (!requireKernel()) return;
+    setNotice(i18nService.t('mvOpeningBrowserFor').replace('{name}', displayName));
+    await M()?.openLogin({ accountId, kernelPath, loginUrl: loginUrlFor(plat, loginScope) });
   };
   // 刷新信息:对任意账号拉起内核读 昵称/平台号/头像(已登录但没读过身份的号用这个)。
   const refreshIdentity = async (a: MatrixAccount) => {
@@ -1100,7 +1090,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
                   <div className="text-sm font-semibold text-violet-600 dark:text-violet-400">📷 {i18nService.t('mvScanConnect')}</div>
                   <span className="text-[10px] leading-none px-1.5 py-0.5 rounded-full bg-violet-500 text-white font-medium">{i18nService.currentLanguage === 'zh' ? '推荐' : 'Recommended'}</span>
                 </div>
-                <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{i18nService.currentLanguage === 'zh' ? '打开指纹浏览器,扫码或手动登录(最稳,首选)' : 'Open the fingerprint browser and scan / log in (most reliable)'}</div>
+                <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{i18nService.currentLanguage === 'zh' ? '打开指纹浏览器,需要您完成登录。成功后状态会自动变「已连接」。' : 'Opens the fingerprint browser for you to log in. Status turns "Connected" automatically once done.'}</div>
               </button>
               {/* 导入 cookie:海外号(Google/Apple 登录,内核里 OAuth 走不通)、买来的 cookie 号走这条。 */}
               <button
