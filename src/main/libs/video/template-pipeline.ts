@@ -25,6 +25,7 @@ import {
   type VideoCreationInput, type VideoCreationResult, type ProgressEmitter,
 } from './pipeline';
 import { generateTemplateData, detectTemplateLang, type ContentLang } from './templateHtmlWriter';
+import { contentLangName } from './scriptWriter';
 import { getVideoConfig } from './videoConfig';
 import { renderTemplate, pageSizeFor, calcPageCount, calcPageRanges, type TemplateSpec } from './templateLibrary';
 import { renderHtmlToVideo, resolveHeadlessBrowser, auditHtml } from './htmlVideoRenderer';
@@ -147,6 +148,8 @@ interface FreeformHtmlArgs {
   dataText: string;
   title?: string;
   lang: ContentLang;
+  /** 用户显式选的生成语言名(如 'Japanese'):画面文字强制该语言(AI 翻译)。undefined = 跟内容语言。 */
+  forceLangName?: string;
   brandColor: string;
   accentColor?: string;
   durationSec: number;
@@ -203,6 +206,7 @@ async function produceFreeformHtml(
       dataText: args.dataText,
       title: args.title,
       lang: args.lang,
+      forceLangName: args.forceLangName,
       brandColor: args.brandColor,
       accentColor: args.accentColor,
       durationSec: args.durationSec,
@@ -314,7 +318,13 @@ export async function runTemplatePipeline(
         tracker.progress(`⚠️ 实时榜单「${tpl.hotlistSource}」抓取失败,用已保存的快照`);
       }
     }
-    const lang = detectTemplateLang(`${dataText} ${tpl.title || ''}`);
+    // 生成语言:用户在向导显式选了(tpl.lang 非空非 auto)就用它,画面文字 + 口播稿都强制该语言
+    // (AI 负责翻译);否则按内容自动探测(老行为)。
+    const langSel = String(tpl.lang || '').trim();
+    const langExplicit = !!(langSel && langSel !== 'auto');
+    const lang: ContentLang = langExplicit ? (langSel as ContentLang) : detectTemplateLang(`${dataText} ${tpl.title || ''}`);
+    const forceLangName = langExplicit ? contentLangName(lang) : undefined;
+    if (langExplicit) tracker.progress(`🌐 生成语言:${forceLangName}(画面文字 + 口播稿)`);
     const wantNarration = tpl.narration === true;
     // 「AI 自由排版」:AI 写整页 HTML(freeformWriter + 体检闭环),不走固定模板渲染、不分页。
     const isFreeform = tpl.style === 'ai_freeform';
@@ -340,6 +350,7 @@ export async function runTemplatePipeline(
           // 编辑老任务时 input.track 可能还在,但生成不参考。
           dataText,
           lang,
+          forceLangName,
           needVoiceScript: wantNarration,
           // 开了配音才传 pageMeta(让 AI 按页切分 voiceSegments);纯视觉/自由排版不需要
           pageMeta: (wantNarration && !isFreeform) ? { pageCount: estPageCount, pageRanges } : undefined,
@@ -450,6 +461,7 @@ export async function runTemplatePipeline(
         dataText,
         title: data.title || tpl.title,
         lang,
+        forceLangName,
         brandColor,
         accentColor: tpl.accentColor,
         durationSec,

@@ -212,6 +212,11 @@ export function detectLang(text: string): ContentLang {
   return 'en';
 }
 
+/** 语言代码 → 给 LLM 用的英文语言名(供模板速生等外部消费方复用同一套名称)。 */
+export function contentLangName(l: ContentLang): string {
+  return langName(l);
+}
+
 /** 语言代码 → 给 LLM 用的英文语言名。 */
 function langName(l: ContentLang): string {
   const M: Record<string, string> = {

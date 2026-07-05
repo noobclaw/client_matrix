@@ -4827,6 +4827,15 @@ export const TemplateSpeedModal: React.FC<{ isZh: boolean; matrixMode?: boolean;
   // 编辑:保留任务现有设置(et?.narration === true 才认为开过)。
   const [narration, setNarration] = useState<boolean>(isEdit ? et?.narration === true : true);
   const [voice, setVoice] = useState<string>(et?.voice || editTask?.input?.voice || 'zh-CN-YunjianNeural');
+  // 生成语言:画面文字 + AI 口播稿都用它('auto' = 按内容探测,老行为)。选定后音色语种不匹配 → 自动切默认音色。
+  const [tplLang, setTplLang] = useState<string>(et?.lang || 'auto');
+  const pickTplLang = (code: string) => {
+    setTplLang(code);
+    const opt = SCRIPT_LANGS.find((l) => l.code === code);
+    if (opt && opt.code !== 'auto' && opt.voicePrefixes.length && !opt.voicePrefixes.some((p) => voice.startsWith(p))) {
+      setVoice(opt.defaultVoice);
+    }
+  };
   const [voiceRate, setVoiceRate] = useState<number>(typeof et?.voiceRate === 'number' ? et.voiceRate : 0);
   const [voiceScript, setVoiceScript] = useState<string>(et?.voiceScript || '');
   const [subtitleEnabled, setSubtitleEnabled] = useState<boolean>(isEdit ? et?.subtitleEnabled !== false : true);
@@ -4985,6 +4994,8 @@ export const TemplateSpeedModal: React.FC<{ isZh: boolean; matrixMode?: boolean;
           // 热榜数据源:存榜名 → 出片时主进程实时抓最新榜单(定时任务天天更新);
           // dataText 同时存了选榜时的快照,实时抓失败时兜底。
           hotlistSource: dataSourceMode === 'hotlist' && hotlistName ? hotlistName : undefined,
+          // 生成语言:'auto' 不传 = 主进程按内容探测(老行为)。
+          lang: tplLang !== 'auto' ? tplLang : undefined,
         },
       };
       const schedule: VideoSchedule = { runInterval };
@@ -5146,6 +5157,18 @@ export const TemplateSpeedModal: React.FC<{ isZh: boolean; matrixMode?: boolean;
           )}
           {step === 2 && (
             <>
+              {/* 生成语言:画面文字 + AI 口播稿都用它(纯视觉也影响画面文字),所以放在配音开关外面。 */}
+              <Field label={isZh ? '生成语言' : 'Output language'} hint={isZh ? '画面文字和 AI 口播稿都用该语言;内容是其它语言时 AI 自动翻译。自动 = 跟你给的内容' : 'Page text & AI narration language; AI translates if the content differs. Auto = follow your content'}>
+                <select
+                  value={tplLang}
+                  onChange={(e) => pickTplLang(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm dark:text-white"
+                >
+                  {SCRIPT_LANGS.map((l) => (
+                    <option key={l.code} value={l.code}>{isZh ? l.zh : l.en}</option>
+                  ))}
+                </select>
+              </Field>
               <Field label={isZh ? 'AI 配音 + 字幕' : 'AI voice-over + subs'} hint={isZh ? '开了会按你的数据 AI 写口播稿、念出来、烧字幕。关 = 纯视觉。' : 'On: AI writes a script, narrates, and burns subs.'}>
                 <div className="flex items-center justify-between rounded-lg border border-gray-300 dark:border-gray-700 px-3 py-2.5">
                   <span className="text-sm dark:text-gray-200">{isZh ? '生成配音 + 字幕' : 'Generate voice-over + subs'}</span>

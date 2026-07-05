@@ -50,6 +50,9 @@ export interface VideoTemplateOptions {
    *  非空 = 出片时主进程实时抓该榜前 N 条标题当内容(定时任务每次跑都是最新榜单);
    *  抓失败退回 dataText(向导选榜时存的快照)。空 = 用 dataText(粘贴模式)。 */
   hotlistSource?: string;
+  /** 生成语言(如 'zh'/'zh-TW'/'en'/'ja'…):画面文字 + AI 口播稿都用该语言(内容是其它语言时 AI 翻译)。
+   *  空/'auto' = 按内容自动探测。 */
+  lang?: string;
 }
 
 export interface VideoCreationInput {

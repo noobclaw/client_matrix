@@ -30,6 +30,8 @@ export interface FreeformInput {
   dataText: string;
   title?: string;
   lang: ContentLang;
+  /** 用户显式选的生成语言名(如 'Japanese'):画面文字强制该语言(AI 翻译)。undefined = 跟内容语言。 */
+  forceLangName?: string;
   brandColor: string;
   accentColor?: string;
   durationSec: number;
@@ -111,7 +113,7 @@ export async function generateFreeformScene(
   onProgress?: (msg: string) => void,
 ): Promise<FreeformResult> {
   const scene = await composeSceneFromAI({
-    dataText: input.dataText, title: input.title, brief: input.brief, lang: input.lang, themeId: input.themeId,
+    dataText: input.dataText, title: input.title, brief: input.brief, lang: input.lang, forceLangName: input.forceLangName, themeId: input.themeId,
     brandColor: input.brandColor, accentColor: input.accentColor || '#0ecb81',
     durationSec: input.durationSec, narrationOn: input.narrationOn, captionsOn: input.captionsOn,
     issues: input.fixHint?.issues,
