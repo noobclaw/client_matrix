@@ -1321,8 +1321,10 @@ async function runVideoPipeline(
       if (wantImages && media.images.length > 0) {
         const imgs = media.images;
         tracker.progress(`使用本地图片素材 ${imgs.length} 张,逐镜缓慢运镜合成…`);
-        assignVisuals = (videoIdx: number) => {
-          const pool = videoIdx === 0 ? imgs : shuffled(imgs);
+        assignVisuals = () => {
+          // 每次都洗牌:本引擎 batch 恒 1 条(videoIdx 恒 0),定时任务反复跑同一文件夹,
+          // 不洗牌会每天铺出一模一样的组合(strict 文案下=重复视频,易被平台判重)。
+          const pool = shuffled(imgs);
           const imageByScene = new Map<number, string>();
           sentences.forEach((_, i) => imageByScene.set(i, pool[i % pool.length]));
           return { sceneClips: sentences.map(() => [] as string[]), imagePool: pool, imageByScene };
@@ -1331,9 +1333,9 @@ async function runVideoPipeline(
       } else if (!wantImages && media.videos.length > 0) {
         const vids = media.videos;
         tracker.progress(`使用本地视频素材 ${vids.length} 个,按换镜节奏循环混剪…`);
-        assignVisuals = (videoIdx: number) => {
-          // 第 0 条按稳定顺序,后续条洗牌 → 同素材不同组合(对齐 stock 批量口径)。
-          const pool = videoIdx === 0 ? vids : shuffled(vids);
+        assignVisuals = () => {
+          // 每次都洗牌(理由同上:batch 恒 1,靠洗牌让定时重复跑的每条组合各不相同)。
+          const pool = shuffled(vids);
           let cur = 0;
           const sceneClips = sentences.map((_, i) => {
             const dur = Math.max(1.2, sceneDurations[i]);

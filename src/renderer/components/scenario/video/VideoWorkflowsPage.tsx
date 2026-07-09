@@ -593,15 +593,18 @@ const VideoTaskCard: React.FC<{ isZh: boolean; task: VideoTask; onClick: () => v
           const isAi = task.input.engine === 'ai';
           const isTemplate = task.input.engine === 'template';
           const isHotspot = task.input.engine === 'hotspot';
-          const isLocal = !isAi && !isTemplate && !isHotspot && Array.isArray(task.input.localVideos) && task.input.localVideos.length > 0;
+          const isLocalMix = task.input.engine === 'localmix';
+          const isLocal = !isAi && !isTemplate && !isHotspot && !isLocalMix && Array.isArray(task.input.localVideos) && task.input.localVideos.length > 0;
           const label = isHotspot ? (isZh ? '🔥 热搜成片' : '🔥 Hotspot')
             : isTemplate ? (isZh ? '⚡ 模板速生' : '⚡ Template')
             : isAi ? (isZh ? '✨ 纯AI生成' : '✨ Pure AI')
+            : isLocalMix ? i18nService.t('vmixTaskName')
             : isLocal ? (isZh ? '📁 本地素材' : '📁 Local')
             : (isZh ? '🎞️ 在线素材' : '🎞️ Stock');
           const color = isHotspot ? 'text-rose-500 bg-rose-500/10 border-rose-500/30'
             : isTemplate ? 'text-fuchsia-500 bg-fuchsia-500/10 border-fuchsia-500/30'
             : isAi ? 'text-violet-500 bg-violet-500/10 border-violet-500/30'
+            : isLocalMix ? 'text-emerald-500 bg-emerald-500/10 border-emerald-500/30'
             : 'text-sky-500 bg-sky-500/10 border-sky-500/30';
           return <span className={`shrink-0 inline-flex items-center gap-1 text-[11px] px-2 py-0.5 font-semibold rounded-full border ${color}`}>{label}</span>;
         })()}
@@ -626,6 +629,25 @@ const VideoTaskCard: React.FC<{ isZh: boolean; task: VideoTask; onClick: () => v
               <div className="flex items-start gap-1.5">
                 <span className="text-gray-400 shrink-0">⏱️ {isZh ? '时长' : 'Length'}</span>
                 <span className="truncate">{task.input.targetSeconds || 60}s</span>
+              </div>
+              <div className="flex items-start gap-1.5">
+                <span className="text-gray-400 shrink-0">🚀 {isZh ? '发布' : 'Publish'}</span>
+                <span className="truncate">{pubN > 0 ? (isZh ? `${pubN} 个平台` : `${pubN} platforms`) : (isZh ? '仅存本地' : 'Local only')}</span>
+              </div>
+            </>
+          );
+        })() : task.input.engine === 'localmix' ? (() => {
+          const pubN = Array.isArray(task.input.publishPlatforms) ? task.input.publishPlatforms.length : 0;
+          const inp: any = task.input;
+          return (
+            <>
+              <div className="flex items-start gap-1.5">
+                <span className="text-gray-400 shrink-0">📂 {i18nService.t('vmixStepMaterial')}</span>
+                <span className="truncate" title={inp.localMixFolder || ''}>{(inp.localMixMediaType === 'image' ? i18nService.t('vmixMediaImage') : i18nService.t('vmixMediaVideo')) + ' · ' + (inp.localMixFolder || '-')}</span>
+              </div>
+              <div className="flex items-start gap-1.5">
+                <span className="text-gray-400 shrink-0">📝 {i18nService.t('vmixStepScript')}</span>
+                <span className="truncate">{task.input.scriptMode === 'ai' ? i18nService.t('vmixScriptAi') : i18nService.t('vmixScriptStrict')}</span>
               </div>
               <div className="flex items-start gap-1.5">
                 <span className="text-gray-400 shrink-0">🚀 {isZh ? '发布' : 'Publish'}</span>
