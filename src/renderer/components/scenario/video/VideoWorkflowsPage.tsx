@@ -988,6 +988,20 @@ const ConfigCard: React.FC<{ isZh: boolean; input: VideoCreationInput }> = ({ is
       </div>
     );
   }
+  // 本地混剪:素材文件夹/形态/文案模式/配音/BGM/发布(赛道/人设/关键词对它无意义)。
+  if (input.engine === 'localmix') {
+    const inp: any = input;
+    return (
+      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-3 space-y-2 text-xs">
+        <Row label={`📂 ${i18nService.t('vmixFolderLabel')}`}>{inp.localMixFolder || '-'}</Row>
+        <Row label={`🎞️ ${i18nService.t('vmixMediaTypeLabel')}`}>{inp.localMixMediaType === 'image' ? i18nService.t('vmixMediaImage') : i18nService.t('vmixMediaVideo')}</Row>
+        <Row label={`📝 ${i18nService.t('vmixScriptModeLabel')}`}>{input.scriptMode === 'ai' ? i18nService.t('vmixScriptAi') : i18nService.t('vmixScriptStrict')}</Row>
+        <Row label={`🎤 ${i18nService.t('vmixVoiceLabel')}`}>{input.voice ? `${voiceDisplayLabel(input.voice, isZh)}${input.subtitleEnabled !== false ? (isZh ? ' · 烧字幕' : ' · subtitles') : ''}` : (isZh ? '无配音' : 'No voice-over')}</Row>
+        <Row label={`🎵 ${i18nService.t('vmixBgmLabel')}`}>{templateBgmSummary(input, isZh)}</Row>
+        <Row label={`🚀 ${isZh ? '发布' : 'Publish'}`}>{publishSummary(input, isZh)}</Row>
+      </div>
+    );
+  }
   // 其它 engine(stock / pure_ai / 本地素材)走老的赛道/人设/关键词/文案布局。
   return (
     <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-3 space-y-2 text-xs">
