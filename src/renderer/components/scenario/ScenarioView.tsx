@@ -737,6 +737,8 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       withImage: input.withImage,
       language: input.language,
       autoPublish: input.autoPublish,
+      contentSource: input.contentSource,   // 内容来源二选一:reference=参考文案 / sources=数据源
+      references: input.references,          // 仅 reference 模式:各号参考文案
       sources: input.sources,   // 多选源(每轮随机挑 1 个);旧单选字段=第一个选中源,兼容旧 orchestrator
       sourceTrackMatch: input.sourceTrackMatch,   // 仅账号赛道相关(默认开)
       sourceKind: input.sourceKind,
@@ -797,6 +799,8 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     const redditPost = {
       language: input.language,
       autoPublish: input.autoPublish,
+      contentSource: input.contentSource,   // 内容来源二选一:reference=参考文案 / sources=数据源
+      references: input.references,          // 仅 reference 模式:各号参考文案
       sources: input.sources,   // 多选源(每轮随机挑 1 个);旧单选字段=第一个选中源,兼容旧 orchestrator
       sourceTrackMatch: input.sourceTrackMatch,   // 仅账号赛道相关(默认开)
       sourceKind: input.sourceKind,
@@ -859,6 +863,8 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       withImage: true,
       language: input.language,
       autoPublish: input.autoPublish,
+      contentSource: input.contentSource,   // 内容来源二选一:reference=参考文案 / sources=数据源
+      references: input.references,          // 仅 reference 模式:各号参考文案
       sources: input.sources,   // 多选源(每轮随机挑 1 个);旧单选字段=第一个选中源,兼容旧 orchestrator
       sourceTrackMatch: input.sourceTrackMatch,   // 仅账号赛道相关(默认开)
       sourceKind: input.sourceKind,
