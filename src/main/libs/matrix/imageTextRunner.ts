@@ -172,8 +172,10 @@ async function runOne(opts: ImageTextTaskOptions, pack: any, accountId: string, 
   if (acc.platform !== opts.platform) { log('❌ 跳过:账号平台与任务不符'); return { accountId, state: 'skipped', reason: 'platform_mismatch' }; }
   if (acc.status === 'banned' || acc.status === 'limited') { log('❌ 跳过:账号状态为 ' + acc.status); return { accountId, state: 'skipped', reason: 'account_' + acc.status }; }
   // 网络图模式靠本号关键词搜实景图 —— 没关键词且没填参考文案就没法搜,跳过(AI 生图模式不强制)。
+  // v7:数据源模式下网络图搜图词跟【数据源标题】走(orchestrator 用标题覆盖搜索词),所以不再要求本号关键词。
   const accKeywords = effectiveKeywords(acc); // 原始 + AI 衍生池
-  if (cfg.useRealPhotos && accKeywords.length === 0) {
+  const usingSourcesForRealPhotos = cfg.contentSource === 'sources' && Array.isArray(cfg.sources) && cfg.sources.length > 0;
+  if (cfg.useRealPhotos && accKeywords.length === 0 && !usingSourcesForRealPhotos) {
     log('❌ 跳过:网络图模式需要本号关键词(到「我的矩阵账号」编辑里添加)');
     return { accountId, state: 'skipped', reason: 'no_keywords_for_real_photos' };
   }
