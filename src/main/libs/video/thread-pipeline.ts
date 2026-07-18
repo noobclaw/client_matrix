@@ -542,6 +542,14 @@ export async function runThreadPipeline(
     }
     const voice = input.voice || LANG_DEFAULT_VOICE[lang];
     const rate = typeof input.voiceRate === 'number' ? input.voiceRate : 0;
+    // 评论多音色(2026-07-18,对标 RedditVideoMakerBot 的招牌效果):标题/正文用主音色,
+    // 每条评论从池里轮换一个不同音色 —— 听感像不同楼层的人在说话。池按语言给;
+    // 没配池的语言回落主音色(行为不变)。
+    const COMMENT_VOICE_POOL: Record<string, string[]> = {
+      zh: ['zh-CN-XiaoxiaoNeural', 'zh-CN-YunxiNeural', 'zh-CN-XiaoyiNeural', 'zh-CN-YunyangNeural'],
+      en: ['en-US-JennyNeural', 'en-US-GuyNeural', 'en-US-AriaNeural', 'en-US-DavisNeural'],
+    };
+    const commentPool = (COMMENT_VOICE_POOL[lang] || []).filter((v) => v !== voice);
 
     const segs: CardSeg[] = [];
     let acc = 0;
@@ -572,7 +580,8 @@ export async function runThreadPipeline(
       throwIfAborted(signal);
       const text = (trBodies[c.id] || c.body).trim();
       if (!text) continue;
-      const r = await ttsSeg(text, voice, path.join(assetDir, `seg-${c.id}.mp3`), rate);
+      const segVoice = commentPool.length ? commentPool[segs.length % commentPool.length] : voice;
+      const r = await ttsSeg(text, segVoice, path.join(assetDir, `seg-${c.id}.mp3`), rate);
       if (!r) { tracker.progress(`⚠️ 评论 ${c.id} 配音失败,跳过`); continue; }
       segs.push({ key: c.id, text, audioPath: r.audioPath, durationSec: r.durationSec, cues: r.cues });
       acc += r.durationSec + GAP_SEC;

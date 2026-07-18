@@ -6161,7 +6161,11 @@ export const TemplateSpeedModal: React.FC<{ isZh: boolean; matrixMode?: boolean;
   const MAX_STEP = 5;
   // ── Step 1:内容 ──
   // 版式步已砍掉 —— 新建一律 AI 自由排版(它最灵活、能涵盖固定版式);编辑老任务保留它原版式。
-  const [style, setStyle] = useState<VideoTemplateStyle>(et?.style || 'ai_freeform');
+  // 新任务默认从「适合榜单的精品模板」里随机挑一套(音画同步/质感稳),不再固定 ai_freeform
+  // (老任务保留其已存风格)。用户仍可在版式网格里自由改。
+  const [style, setStyle] = useState<VideoTemplateStyle>(
+    et?.style || (['rank_list', 'news_cards', 'billboard'] as VideoTemplateStyle[])[Math.floor(Math.random() * 3)],
+  );
   const [title, setTitle] = useState<string>(et?.title || '');
   const [dataText, setDataText] = useState<string>(et?.dataText || '');
   // 数据源二选一:'paste' 粘贴任意内容(老路) / 'hotlist' 选一个热榜取前 N 条当内容。
