@@ -103,10 +103,11 @@ async function translateThread(
     '1. 口语化、地道、保留原梗和语气(吐槽/反讽/玩笑要传神),不是生硬直译。',
     '2. 每条译文长度与原文相当,不添油加醋、不合并、不遗漏。',
     '3. 俚语/缩写(AITA、TIFU、OP 等)转成目标语言观众能懂的说法。',
-    '4. 只输出严格 JSON(json):{"title":"译文","comments":{"<id>":"译文",...}},id 原样保留。',
+    '4. 只输出严格 JSON(json):{"title":"译文","postBody":"帖子正文译文(无则空串)","comments":{"<id>":"译文",...}},id 原样保留。',
   ].join('\n');
   const user = JSON.stringify({
     title: post.title,
+    postBody: String(post.selftext || '').slice(0, 1500),
     comments: comments.map((c) => ({ id: c.id, text: c.body })),
   });
   try {
@@ -121,7 +122,8 @@ async function translateThread(
       }
     }
     if (!title && Object.keys(bodies).length === 0) return null;
-    return { title: title || post.title, bodies };
+    const postBody = typeof parsed?.postBody === 'string' ? parsed.postBody.trim() : '';
+    return { title: title || post.title, bodies, postBody };
   } catch {
     return null;
   }
@@ -526,11 +528,13 @@ export async function runThreadPipeline(
     const translateCandidates = rawComments.slice(0, 14);
     let trTitle = post.title;
     let trBodies: Record<string, string> = {};
+    let trPostBody = '';
     if (lang !== 'en') {
       const tr = await translateThread(post, translateCandidates, lang, (tk, usd) => tracker.addTokens(tk, usd));
       if (tr) {
         trTitle = tr.title;
         trBodies = tr.bodies;
+        trPostBody = tr.postBody || '';
         tracker.progress(`✅ 翻译改写完成(标题 + ${Object.keys(tr.bodies).length} 条评论)`);
       } else {
         tracker.progress('⚠️ 翻译改写失败,本条用英文原文出片');
@@ -549,6 +553,11 @@ export async function runThreadPipeline(
       tracker.progress(`🪝 开头钩子:「${hooked.slice(0, 40)}」`);
       titleText = hooked;
     }
+    // 帖子正文(selftext)以前被整个跳过 —— 故事型帖(TIFU/AITA 等)正文才是主菜,只念评论
+    // 观众不知所云(2026-07-18 用户反馈,对标 RedditVideoMakerBot 它是念正文的)。正文跟在
+    // 标题后同段朗读(画面即帖子卡);截 900 字防吃光片长,评论仍按剩余时长逐条截断。
+    const postBodyText = (trPostBody || String(post.selftext || '')).trim().slice(0, 900);
+    if (postBodyText) titleText = titleText + '。' + postBodyText;
     const t0 = await ttsSeg(titleText, voice, path.join(assetDir, 'seg-title.mp3'), rate);
     if (!t0) {
       const why = getLastTtsError() || '请稍后再试';
