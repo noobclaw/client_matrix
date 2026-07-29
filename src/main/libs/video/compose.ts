@@ -155,20 +155,27 @@ function resolveScriptFont(sample: string): string | null {
   return null;
 }
 
-/** 把一句话按 ~maxPerLine 个字符折行(中文友好)。 */
+/** 把一句话按【可视宽度】折行:中文=1 字宽(行为不变)、拉丁/数字/空格≈0.5 字宽,英文优先在
+ *  空格处断词(真机反馈:英文每个字母被当全宽算 → 行只用一半宽还从单词中间劈开)。 */
 function wrapSubtitle(text: string, maxPerLine = 14): string {
   const clean = text.replace(/\s+/g, ' ').trim();
   if (!clean) return '';
+  const isWide = (ch: string) => /[ᄀ-ᇿ⺀-鿿ꥠ-꥿가-퟿豈-﫿＀-￯]/.test(ch);
+  const unit = (ch: string) => (isWide(ch) ? 1 : 0.5);
   const lines: string[] = [];
-  let cur = '';
-  for (const ch of clean) {
-    cur += ch;
-    if (cur.length >= maxPerLine) {
-      lines.push(cur);
-      cur = '';
+  let cur = ''; let units = 0; let lastSpace = -1;
+  for (const ch of Array.from(clean)) {
+    cur += ch; units += unit(ch);
+    if (ch === ' ') lastSpace = cur.length;
+    if (units >= maxPerLine) {
+      const cut = (lastSpace > 0 && lastSpace < cur.length) ? lastSpace : cur.length;
+      lines.push(cur.slice(0, cut).trimEnd());
+      cur = cur.slice(cut);
+      units = 0; for (const c of Array.from(cur)) units += unit(c);
+      lastSpace = cur.lastIndexOf(' ') >= 0 ? cur.lastIndexOf(' ') + 1 : -1;
     }
   }
-  if (cur) lines.push(cur);
+  if (cur.trim()) lines.push(cur.trim());
   return lines.slice(0, 3).join('\n'); // 最多 3 行,别糊满屏
 }
 
