@@ -2395,6 +2395,28 @@ const ASPECT_OPTIONS: { id: VideoAspect; zh: string; en: string; icon: string }[
 // ⚠️ 改这里的 id 时,同步检查 src/main/libs/video/tts.ts 的 getVoiceFallbacks 表
 //   (后台失败救场链);否则改名后失败 voice 没救场直接退费。
 type VoiceOpt = { id: string; zh: string; en: string };
+// 豆包(火山)真人音色:服务端 admin 下发,进程内缓存一次。配置了就排在最前(默认音色),
+// 合成失败自动回退 Edge(见 main/libs/video/tts.ts)。没配置 → 只有 Edge,行为同以前。
+let _doubaoCache: { enabled: boolean; voices: Array<{ id: string; zh?: string; en?: string; lang?: string }> } | null = null;
+function useVoiceGroups(): { groups: typeof VOICE_GROUPS; doubaoEnabled: boolean; defaultVoice: string } {
+  const [db, setDb] = React.useState(_doubaoCache);
+  React.useEffect(() => {
+    if (_doubaoCache) return;
+    let alive = true;
+    videoCreationService.fetchDoubaoVoices().then((r) => {
+      _doubaoCache = { enabled: r.enabled, voices: r.voices };
+      if (alive) setDb(_doubaoCache);
+    }).catch(() => { _doubaoCache = { enabled: false, voices: [] }; });
+    return () => { alive = false; };
+  }, []);
+  if (!db?.enabled || db.voices.length === 0) return { groups: VOICE_GROUPS, doubaoEnabled: false, defaultVoice: '' };
+  const grp = {
+    groupZh: '🔥 豆包真人语音(推荐)', groupEn: '🔥 Doubao lifelike (recommended)',
+    voices: db.voices.map((v) => ({ id: v.id, zh: v.zh || v.id, en: v.en || v.zh || v.id })) as VoiceOpt[],
+  };
+  return { groups: [grp, ...VOICE_GROUPS], doubaoEnabled: true, defaultVoice: db.voices[0].id };
+}
+
 const VOICE_GROUPS: { groupZh: string; groupEn: string; voices: VoiceOpt[] }[] = [
   {
     groupZh: '中文 · 普通话', groupEn: 'Chinese · Mandarin',
@@ -2708,6 +2730,7 @@ const VideoConfigModal: React.FC<{
   /** 矩阵号 edition:发布平台下多一步「选账号」,发布走指纹内核 CDP。 */
   matrixMode?: boolean;
 }> = ({ isZh, onClose, onCreated, editTask, onSaved, forcedMode, matrixMode }) => {
+  const { groups: voiceGroups } = useVoiceGroups(); // 豆包音色组(服务端下发)+ Edge;未配置则只有 Edge
   const isEdit = !!editTask;
   // forcedMode(从「电影级 / 在线素材」card 进来)锁定模式 → 跳过 step1 模式选择,从 step2(赛道)起。
   // 矩阵号在「出片(7)」后多插一步「账号(8)」。
@@ -3716,7 +3739,7 @@ const VideoConfigModal: React.FC<{
                   onChange={(e) => setVoice(e.target.value)}
                   className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm dark:text-white focus:outline-none focus:ring-2 focus:ring-rose-500/50"
                 >
-                  {VOICE_GROUPS.map((g) => (
+                  {voiceGroups.map((g) => (
                     <optgroup key={g.groupZh} label={isZh ? g.groupZh : g.groupEn}>
                       {g.voices.map((v) => (
                         <option key={v.id} value={v.id}>{isZh ? v.zh : v.en}</option>
@@ -4598,6 +4621,7 @@ export const HotspotVideoModal: React.FC<{
   editTask?: any;
   onSaved?: () => void;
 }> = ({ isZh, matrixMode, onClose, onCreated, editTask, onSaved }) => {
+  const { groups: voiceGroups } = useVoiceGroups(); // 豆包音色组(服务端下发)+ Edge;未配置则只有 Edge
   const isEdit = !!editTask;
   const ei = editTask?.input || {};
   // 任务名不再让用户填:沿用编辑态旧名,新建固定「热搜成片」(见 buildTitle)。
@@ -5156,7 +5180,7 @@ export const HotspotVideoModal: React.FC<{
               <Field label={isZh ? '配音音色' : 'Voice'}>
                 <select value={voice} onChange={(e) => setVoice(e.target.value)}
                   className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50">
-                  {VOICE_GROUPS.map((g) => (
+                  {voiceGroups.map((g) => (
                     <optgroup key={g.groupZh} label={isZh ? g.groupZh : g.groupEn}>
                       {g.voices.map((v) => (<option key={v.id} value={v.id}>{isZh ? v.zh : v.en}</option>))}
                     </optgroup>
@@ -5397,6 +5421,7 @@ export const ThreadVideoModal: React.FC<{
   editTask?: any;
   onSaved?: () => void;
 }> = ({ isZh, matrixMode, onClose, onCreated, editTask, onSaved }) => {
+  const { groups: voiceGroups } = useVoiceGroups(); // 豆包音色组(服务端下发)+ Edge;未配置则只有 Edge
   const isEdit = !!editTask;
   const ei = editTask?.input || {};
   const [title] = useState<string>(editTask?.title || '');
@@ -5759,7 +5784,7 @@ export const ThreadVideoModal: React.FC<{
                 <select value={voice} onChange={(e) => setVoice(e.target.value)}
                   className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500/50">
                   {!voiceInGroups && <option value={voice}>{voice}</option>}
-                  {VOICE_GROUPS.map((g) => (
+                  {voiceGroups.map((g) => (
                     <optgroup key={g.groupZh} label={isZh ? g.groupZh : g.groupEn}>
                       {g.voices.map((v) => (<option key={v.id} value={v.id}>{isZh ? v.zh : v.en}</option>))}
                     </optgroup>
@@ -5922,6 +5947,7 @@ export const ThreadVideoModal: React.FC<{
 // ── 翻译搬运(engine='repost'):源视频(链接/本地)→ 转写 → 翻译 → 换配音 + 字幕 → 发布 ──
 // 3 步向导:源与语言 / 配音字幕 / 出片发布。文案 i18n 前缀 rpst(9 语)。
 export const RepostVideoModal: React.FC<{ isZh: boolean; matrixMode?: boolean; onClose: () => void; onCreated?: (id: string) => void; editTask?: any; onSaved?: () => void }> = ({ isZh, matrixMode, onClose, onCreated, editTask, onSaved }) => {
+  const { groups: voiceGroups } = useVoiceGroups(); // 豆包音色组(服务端下发)+ Edge;未配置则只有 Edge
   const t = (k: string) => i18nService.t(k);
   const isEdit = !!editTask;
   const ei = editTask?.input as VideoCreationInput | undefined;
@@ -6177,7 +6203,7 @@ export const RepostVideoModal: React.FC<{ isZh: boolean; matrixMode?: boolean; o
             <>
               <Field label={isZh ? '配音音色' : 'Voice'} hint={isZh ? 'edge-tts 在线合成,免费' : 'edge-tts, free'}>
                 <select value={voice} onChange={(e) => setVoice(e.target.value)} className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm dark:text-white">
-                  {VOICE_GROUPS.map((g) => (
+                  {voiceGroups.map((g) => (
                     <optgroup key={g.groupZh} label={isZh ? g.groupZh : g.groupEn}>
                       {g.voices.map((v) => (<option key={v.id} value={v.id}>{isZh ? v.zh : v.en}</option>))}
                     </optgroup>
@@ -6300,6 +6326,7 @@ export const RepostVideoModal: React.FC<{ isZh: boolean; matrixMode?: boolean; o
 // ── 本地混剪(engine='localmix'):本地视频/图片文件夹 → 智能混剪/图片合成 + 配音 + 字幕 + BGM → 本地/发布 ──
 // 与其它视频向导同壳(StepDot/Field/发布步),文案走 i18nService(9 语言,key 前缀 vmix)。
 export const LocalMixVideoModal: React.FC<{ isZh: boolean; matrixMode?: boolean; onClose: () => void; onCreated?: (id: string) => void; editTask?: any; onSaved?: () => void; presetUploadOnly?: boolean }> = ({ isZh, matrixMode, onClose, onCreated, editTask, onSaved, presetUploadOnly }) => {
+  const { groups: voiceGroups } = useVoiceGroups(); // 豆包音色组(服务端下发)+ Edge;未配置则只有 Edge
   const t = (k: string) => i18nService.t(k);
   const isEdit = !!editTask;
   const ei = editTask?.input as VideoCreationInput | undefined;
@@ -6700,7 +6727,7 @@ export const LocalMixVideoModal: React.FC<{ isZh: boolean; matrixMode?: boolean;
                   </Field>
                   <Field label={isZh ? '配音音色' : 'Voice'} hint={isZh ? 'edge-tts 在线合成,免费' : 'edge-tts, free'}>
                     <select value={voice} onChange={(e) => setVoice(e.target.value)} className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm dark:text-white">
-                      {VOICE_GROUPS.map((g) => (
+                      {voiceGroups.map((g) => (
                         <optgroup key={g.groupZh} label={isZh ? g.groupZh : g.groupEn}>
                           {g.voices.map((v) => (<option key={v.id} value={v.id}>{isZh ? v.zh : v.en}</option>))}
                         </optgroup>
@@ -6912,6 +6939,7 @@ export const LocalMixVideoModal: React.FC<{ isZh: boolean; matrixMode?: boolean;
 };
 
 export const TemplateSpeedModal: React.FC<{ isZh: boolean; matrixMode?: boolean; onClose: () => void; onCreated?: (id: string) => void; editTask?: any; onSaved?: () => void }> = ({ isZh, matrixMode, onClose, onCreated, editTask, onSaved }) => {
+  const { groups: voiceGroups } = useVoiceGroups(); // 豆包音色组(服务端下发)+ Edge;未配置则只有 Edge
   // 编辑态:用任务现有模板配置回填(新建/编辑共用同一向导,只是数据预填)。
   const isEdit = !!editTask;
   const et = editTask?.input?.template;
@@ -7360,7 +7388,7 @@ export const TemplateSpeedModal: React.FC<{ isZh: boolean; matrixMode?: boolean;
                   <Field label={isZh ? '配音音色' : 'Voice'}>
                     <select value={voice} onChange={(e) => setVoice(e.target.value)}
                       className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm dark:text-white">
-                      {VOICE_GROUPS.map((g) => (
+                      {voiceGroups.map((g) => (
                         <optgroup key={g.groupZh} label={isZh ? g.groupZh : g.groupEn}>
                           {g.voices.map((v) => (
                             <option key={v.id} value={v.id}>{isZh ? v.zh : v.en}</option>
