@@ -63,16 +63,16 @@ async function synthDoubao(text: string, outPath: string, voice: string, rate?: 
     });
     if (!resp.ok) {
       const j: any = await resp.json().catch(() => ({}));
-      _lastTtsError = `豆包配音失败(${resp.status}):${String(j?.message || j?.error || '').slice(0, 120)} → 已回退 Edge 语音`;
+      _lastTtsError = `豆包配音失败(${resp.status}):${String(j?.message || j?.error || '').slice(0, 120)}`;
       return null;
     }
     const j: any = await resp.json();
     const b64 = typeof j?.audioBase64 === 'string' ? j.audioBase64 : '';
-    if (!b64) { _lastTtsError = '豆包配音返回空音频 → 已回退 Edge 语音'; return null; }
+    if (!b64) { _lastTtsError = '豆包配音返回空音频'; return null; }
     fs.writeFileSync(outPath, Buffer.from(b64, 'base64'));
     return { ok: true, tokens: Number(j?.chargedTokens) || 0, costUsd: Number(j?.costUsd) || 0 };
   } catch (e) {
-    _lastTtsError = `豆包配音异常:${String((e as Error)?.message || e).slice(0, 100)} → 已回退 Edge 语音`;
+    _lastTtsError = `豆包配音异常:${String((e as Error)?.message || e).slice(0, 100)}`;
     return null;
   }
 }
