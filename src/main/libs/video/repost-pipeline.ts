@@ -22,7 +22,7 @@ import { runFfmpeg, probeDuration, probeImageSize, isFfmpegAvailable, getFfmpegP
 import { getYtdlpPath, detectSystemProxy } from './ytdlpRuntime';
 import { resolveBgmPath } from './bgm';
 import { getVideoConfig } from './videoConfig';
-import { synthesize, getVoiceFallbacks, getLastTtsError, alignSentencesToCues, type TtsCue } from './tts';
+import { synthesize, getVoiceFallbacks, getLastTtsError, alignSentencesToCues, voiceProviderLabel, type TtsCue } from './tts';
 import { resolvePublishCaption } from './publishCaptionWriter';
 import { callDeepSeek } from './scriptWriter';
 import { chargeRepostVideo, refundMode1Video } from './billing';
@@ -736,6 +736,8 @@ export async function runRepostPipeline(
       throwIfAborted(signal);
       tracker.start('voice', '🎤 逐句配音并对齐原时间轴…');
       const voice = input.voice || 'zh-CN-YunjianNeural';
+      // 说清是哪家配音:豆包按字数计费、Edge 免费,用户有权在日志里一眼看到。
+      tracker.progress(`🎤 配音:${voiceProviderLabel(voice)} · 音色 ${voice}`);
       const rate = typeof input.voiceRate === 'number' ? input.voiceRate : 0;
       aligned = await synthAndAlign(translated, voice, rate, assetDir, srcDur, (m) => tracker.progress(m), signal, (tk, usd) => { tracker.addTokens(tk, usd); aiCostUsd += usd; });
       if (!aligned) { const err = '配音失败(edge-tts 不可用或全部句子合成失败)'; tracker.fail('voice', err); return { ok: false, error: err }; }

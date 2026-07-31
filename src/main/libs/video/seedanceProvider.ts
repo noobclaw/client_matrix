@@ -201,6 +201,12 @@ export interface StoryboardOptions {
   referenceImages?: string[];
   /** 中断信号:用户点停止时立刻放弃出图,别让整条卡在这一步。 */
   signal?: AbortSignal;
+  /**
+   * 批次级进度文案。组图是【一次请求出一整批】,中途拿不到逐张进度 —— 只靠计数器的话
+   * 数字会在整批生成的一两分钟里一动不动(实测停在 1/8),看着就是卡死。
+   * 所以批次开始/结束各说一句人话。
+   */
+  onNote?: (msg: string) => void;
 }
 
 /** 滚动参考:除固定参考图外,再带最近这么多张【已生成的历史帧】。 */
@@ -342,9 +348,15 @@ export async function generateStoryboard(
   for (let i = 0; i < total; i++) if (shots[i]) pending.add(i);
   if (pending.size > 1) {
     const idxAll = [...pending];
+    const batchCount = Math.ceil(idxAll.length / GROUP_BATCH);
     for (let b = 0; b < idxAll.length; b += GROUP_BATCH) {
       const batch = idxAll.slice(b, b + GROUP_BATCH);
+      const bi = Math.floor(b / GROUP_BATCH) + 1;
       onProgress?.(total - pending.size, total);
+      opts.onNote?.(
+        `🎨 正在一次性生成第 ${bi}/${batchCount} 批(镜 ${batch[0] + 1}-${batch[batch.length - 1] + 1},共 ${batch.length} 张)`
+        + ' —— 同一批出的图画风、光线天然一致。这一步没有逐张进度,约 1~2 分钟,请稍候',
+      );
       const refs = [...fixedRefs, ...history.slice(-ROLLING_REF_COUNT)].slice(-MAX_REFS);
       if (opts.signal?.aborted) break;
       const r = await generateGroupBatch(
@@ -354,18 +366,35 @@ export async function generateStoryboard(
         refs,
         opts.signal,
       );
-      // 张数对不上就整批退回逐张 —— 按下标硬塞会把图挂到错的镜上,比慢更糟。
-      if (!r || r.images.length !== batch.length) { lastError = lastError || 'group_failed'; continue; }
+      if (!r || r.images.length === 0) {
+        lastError = lastError || 'group_failed';
+        opts.onNote?.(`⚠️ 第 ${bi}/${batchCount} 批组图没出图,这一批改为逐张生成`);
+        continue;
+      }
+      // ⚠️ 少给了几张也要【把给的这几张用上】。服务端是按【实际产出张数】扣费的,
+      //    整批丢弃回落逐张 = 同一批图付两次钱(实测 8 镜的故事板被收了 11 张)。
+      //    组图是顺序生成,返回的第 k 张对应本批第 k 镜;不够的那几镜留给下面逐张补。
       chargedTokens += r.chargedTokens;
-      batch.forEach((idx, k) => {
+      const got = Math.min(r.images.length, batch.length);
+      for (let k = 0; k < got; k++) {
+        const idx = batch[k];
         images[idx] = r.images[k];
         okCount++;
         history.push(r.images[k]);
         pending.delete(idx);
-      });
+      }
+      opts.onNote?.(`✅ 第 ${bi}/${batchCount} 批已出 ${got}/${batch.length} 张(累计 ${okCount}/${total})`);
+      if (got < batch.length) {
+        lastError = lastError || 'group_partial';
+        opts.onNote?.(`⚠️ 第 ${bi} 批少出了 ${batch.length - got} 张,缺的那几镜改为逐张补出`);
+      }
     }
   }
 
+  const needPerShot = shots.filter((sh, i) => sh && (pending.has(i) || !images[i])).length;
+  if (needPerShot > 0 && total > 1) {
+    opts.onNote?.(`🖼️ 还有 ${needPerShot} 镜逐张生成中…`);
+  }
   for (let i = 0; i < total; i++) {
     if (!pending.has(i) && images[i]) continue;   // 组图已经出了这一镜
     onProgress?.(i, total);

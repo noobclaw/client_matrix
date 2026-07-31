@@ -38,6 +38,14 @@ export function isDoubaoVoice(v: string | undefined): boolean {
 }
 
 /**
+ * 配音供应商的人话标签。进度日志一律带上它 —— 用户看到「正在合成配音…」根本不知道
+ * 这一步花不花钱:豆包按字符计费(成本×2),Edge 完全免费,差别是实打实的钱。
+ */
+export function voiceProviderLabel(voice: string | undefined): string {
+  return isDoubaoVoice(voice) ? '豆包真人(按字数计费)' : 'Edge 微软(免费)';
+}
+
+/**
  * 豆包(火山)大模型语音合成:走后端代理 /api/tts/synthesize(key 不下发、按字符×2 计费)。
  * 成功写 mp3 到 outPath;任何失败返回 null → 调用方回退 edge-tts(用户拍板的兜底策略)。
  */
@@ -275,6 +283,8 @@ function sleep(ms: number): Promise<void> {
 
 /** synthesize() 的可选控制项(不传 = 老行为)。 */
 export interface SynthesizeOpts {
+  /** 豆包 → Edge 降级时的通知(换掉了用户选的音色,必须让他在日志里看见)。 */
+  onFallback?: (msg: string) => void;
   /** 用户停止信号:当次 WebSocket 立即掀桌,重试循环立即退出(不再退避睡眠)。 */
   signal?: AbortSignal;
   /** 重试次数上限(默认 5)。多段流水(爆帖逐段配音)可调小,防失败时静默磨太久。 */
@@ -297,7 +307,11 @@ export async function synthesize(text: string, outPath: string, voice?: string, 
       return { ok: true, audioPath: outPath, durationSec: dur > 0 ? dur : estDur, synthesized: true };
     }
     // 回退:豆包音色没有 edge 对应体,按语言取 edge 默认音色。
+    // ⚠️ 这一步会【换掉用户选的音色】,必须说出来 —— 原来是静默的,用户听到成片
+    //    不是自己选的声音却在日志里找不到任何线索,只能怀疑「是不是又回滚成 edge 了」。
     const fallbackVoice = /^en[_-]/i.test(useVoice) ? 'en-US-AriaNeural' : 'zh-CN-YunjianNeural';
+    _lastTtsError = `豆包音色 ${useVoice} 合成失败,已改用 Edge 免费音色 ${fallbackVoice}(这一句不计费)`;
+    opts?.onFallback?.(_lastTtsError);
     return synthesize(clean, outPath, fallbackVoice, rate, opts);
   }
 

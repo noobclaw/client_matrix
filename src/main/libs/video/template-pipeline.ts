@@ -33,7 +33,7 @@ import { generateFreeformScene, deterministicFallbackScene, type FreeformResult 
 import { wrapTemplateHtml } from './templateAnim';
 import { loadFontFaceCss } from './fontAsset';
 import { loadGsapSource } from './gsapAsset';
-import { synthesize, getLastTtsError, getVoiceFallbacks, alignSentencesToCues } from './tts';
+import { synthesize, getLastTtsError, getVoiceFallbacks, alignSentencesToCues, voiceProviderLabel } from './tts';
 import { getTtsVoice } from './config';
 import { chargeMode1Video, refundMode1Video } from './billing';
 import type { CaptionCue } from './templateAnim';
@@ -390,6 +390,8 @@ export async function runTemplatePipeline(
       // 的 文案.txt 就能看到生成结果;显式选了生成语言时一并标出。
       tracker.progress(`📝 口播稿(约 ${script.length} 字${forceLangName ? ` · ${forceLangName}` : ''}${tpl.voiceScript ? '' : ' · AI 生成'}):${script}`);
       const voice = tpl.voice || input.voice || getTtsVoice();
+      // 说清是哪家配音:豆包按字数计费、Edge 免费,用户有权在日志里一眼看到。
+      tracker.progress(`🎤 配音:${voiceProviderLabel(voice)} · 音色 ${voice}`);
       const rate = typeof tpl.voiceRate === 'number' ? tpl.voiceRate
         : typeof input.voiceRate === 'number' ? input.voiceRate : 0;
       const r = await ttsWithFallback(script, voice, narrationPath, rate, signal);

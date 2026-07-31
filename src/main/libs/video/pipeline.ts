@@ -19,7 +19,7 @@ import { randomUUID } from 'crypto';
 import { getHomePath } from '../platformAdapter';
 import { isFfmpegAvailable, setVideoAbortSignal, runFfmpeg, probeDuration } from './ffmpegRuntime';
 import {
-  synthesize, synthesizeWhole, getLastTtsError, getVoiceFallbacks, isDoubaoVoice,
+  synthesize, synthesizeWhole, getLastTtsError, getVoiceFallbacks, isDoubaoVoice, voiceProviderLabel,
   alignSentencesToCues, groupWordCues,
 } from './tts';
 import { getTtsVoice } from './config';
@@ -1222,7 +1222,7 @@ async function runVideoPipeline(
     //   生成 / 本地拼接 / compose)统一读 sceneDurations,不再直接摸 audios[i].durationSec。
     const sceneDurations: number[] = [];
     throwIfAborted(signal);
-    tracker.start('tts');
+    tracker.start('tts', wantNarration ? `🎤 配音:${voiceProviderLabel(input.voice || getTtsVoice())} · 音色 ${input.voice || getTtsVoice()}` : undefined);
     const audios: { audioPath: string; durationSec: number }[] = [];
     const subtitleCues: SubtitleCue[] = [];
     if (wantNarration) {
@@ -1252,7 +1252,7 @@ async function runVideoPipeline(
       let wholeDone = false;
       const skipWhole = isDoubaoVoice(primary);
       if (skipWhole) {
-        tracker.progress('🎙️ 豆包音色:逐句合成(整段合成仅 Edge 音色支持)');
+        tracker.progress('🎙️ 豆包真人音色:逐句合成(整段合成仅 Edge 音色支持)。按字数计费,失败自动退');
       }
       try {
         if (skipWhole) throw new Error('SKIP_WHOLE_FOR_DOUBAO');
@@ -1264,10 +1264,10 @@ async function runVideoPipeline(
           throwIfAborted(signal);
           // ⚠️ 这段原来全程无日志:synthesizeWhole 内部 60s×5 重试 × 多个备用音色 → 连不上微软 TTS 时
           //   会静默 grind 十几分钟,UI 看着像「卡死无报错」。这里每个音色尝试前后都打日志 + 抛出 TTS 错因。
-          tracker.progress(`配音合成中(音色 ${v}${voiceChain.length > 1 ? ` · ${vi + 1}/${voiceChain.length}` : ''})… 网络慢会重试,请稍候`);
+          tracker.progress(`配音合成中(${voiceProviderLabel(v)} · 音色 ${v}${voiceChain.length > 1 ? ` · ${vi + 1}/${voiceChain.length}` : ''})… 网络慢会重试,请稍候`);
           // ⚠️ signal 必须传:synthesizeWhole 内部 60s × 5 次重试,不传的话点停止要在
           //    这一个音色上磨到 5 分钟,只有换音色时才会碰到上面那句 throwIfAborted。
-          const w = await synthesizeWhole(sentences.join('\n'), masterMp3, v, input.voiceRate, { signal });
+          const w = await synthesizeWhole(sentences.join('\n'), masterMp3, v, input.voiceRate, { signal, onFallback: (m: string) => tracker.progress(`⚠️ ${m}`) });
           if (w.ok) { whole = w; usedWholeVoice = v; break; }
           const reason = getLastTtsError();
           tracker.progress(`音色 ${v} 整段合成未成功${reason ? `(${reason.slice(0, 110)})` : ''}${vi < voiceChain.length - 1 ? ',换下一个音色…' : ''}`);
@@ -1324,7 +1324,7 @@ async function runVideoPipeline(
         for (const v of tryOrder) {
           // ⚠️ signal 必须传:synthesize 内部有 voiceChain × 最多 5 次重试 × 单次最长 60s,
           //    不传的话点了停止要磨数分钟才走到下一句的 throwIfAborted。
-          const r = await synthesize(sentences[i], outMp3, v, input.voiceRate, { signal });
+          const r = await synthesize(sentences[i], outMp3, v, input.voiceRate, { signal, onFallback: (m: string) => tracker.progress(`⚠️ ${m}`) });
           if (r.synthesized) { got = r; usedVoice = v; break; }
           lastReason = getLastTtsError() || lastReason;
         }
@@ -1506,8 +1506,11 @@ async function runVideoPipeline(
             allowText: aiShots ? aiShots.map((s) => shotAllowsText(s.type)) : undefined,
             // 出图是分钟级的一步,不接 signal 的话点停止要干等它跑完。
             signal,
+            // 组图一次出一整批,中途没有逐张进度 —— 批次级的话由它来说,否则计数器
+            //   会在整批生成的一两分钟里停着不动,看着像卡死。
+            onNote: (m) => tracker.progress(m),
           },
-          (done, total) => { if (done < total) tracker.progress(`🎨 故事板生成中… ${done + 1}/${total} 张`); },
+          (done, total) => { if (done < total && done > 0) tracker.progress(`🎨 故事板已出 ${done}/${total} 张`); },
         );
         const keyframes = storyboard.images; // 按 shot 索引对齐,失败位为 ''
         const okFrames = keyframes.filter((s) => s).length;
