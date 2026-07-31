@@ -1582,16 +1582,6 @@ async function runVideoPipeline(
         : aiScenes.map(() => true);
       const animateIdx: number[] = [];
       animateFlags.forEach((on, i) => { if (on) animateIdx.push(i); });
-      // ⚠️ 用户【没有】亲自审过分镜表时(animate 是解析器按脚本语气推断的),给个硬上限:
-      //   一份 5 分钟脚本里若解析器把 30 镜都判成「要动」,就是一张几百块的账单,而用户
-      //   从头到尾没点过头。用户在分镜表上确认过(input.storyboardShots)则完全按他勾的来。
-      const AUTO_ANIMATE_CAP = 6;
-      const userCurated = Array.isArray(input.storyboardShots) && input.storyboardShots.length > 0;
-      if (aiShots && !userCurated && animateIdx.length > AUTO_ANIMATE_CAP) {
-        const dropped = animateIdx.length - AUTO_ANIMATE_CAP;
-        animateIdx.splice(AUTO_ANIMATE_CAP);
-        tracker.progress(`💰 自动判定的「生成视频」镜有 ${dropped + AUTO_ANIMATE_CAP} 个,超出未确认上限 → 只生成前 ${AUTO_ANIMATE_CAP} 个,其余用首帧 + 运镜(避免未经确认的大额消耗)`);
-      }
       const stillCount = aiScenes.length - animateIdx.length;
       if (stillCount > 0) {
         tracker.progress(`🖼️ ${stillCount} 镜使用故事板首帧 + 运镜(不生成视频,省这部分费用)`);

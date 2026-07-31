@@ -63,6 +63,8 @@ export interface VideoTemplateOptions {
  *    作为 input.storyboardShots 回传给 pipeline 直接使用(不再二次解析)。
  */
 export interface StoryShot {
+  /** 这一镜的标题 = 它在叙事里干什么(如「黄金3秒钩子 · 砸出悬念」)。 */
+  title?: string;
   /** 时长(秒)。有旁白时最终以真实配音时长为准。 */
   seconds: number;
   /** 口播原文。【逐字】,拼起来 = 全片文案。空 = 无旁白镜。 */

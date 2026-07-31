@@ -52,6 +52,12 @@ export function shotAllowsText(t: ShotType): boolean {
 }
 
 export interface StoryShot {
+  /**
+   * 这一镜的标题 = 它在叙事里干什么(如「黄金3秒钩子 · 砸出悬念」「反转 · 秃鹫基金白嫖」)。
+   * 用户自己写的分镜脚本通常就带这个,没有则由 AI 起一个 —— 分镜稿没有标题会退化成
+   * 一堆看不出结构的段落,人读起来抓不住这一镜为什么存在。
+   */
+  title?: string;
   /** 这一镜的时长(秒)。有旁白时最终以真实配音时长为准,这里是脚本标注/估算值。 */
   seconds: number;
   /** 口播原文。【逐字】,拼起来 = 全片文案。空串 = 无旁白镜(纯画面)。 */
@@ -185,6 +191,7 @@ function cleanShot(raw: any, fallbackSeconds: number): StoryShot | null {
     .slice(0, 12);
 
   return {
+    title: str(raw.title, 40) || undefined,
     seconds,
     narration,
     visualFirst,
@@ -194,10 +201,13 @@ function cleanShot(raw: any, fallbackSeconds: number): StoryShot | null {
     bgmMood: str(raw.bgm_mood ?? raw.bgmMood, 40) || undefined,
     sfx: str(raw.sfx, 120) || undefined,
     type,
-    // ⚠️ 恒为 false,【不采纳 LLM 的判断】。分镜脚本几乎每场都写着景别运镜,LLM 会把整片
-    //    都判成「要动」—— 8 镜里 7 镜勾上就是几块钱,而用户从没点过头。
-    //    生成视频是花钱的事,只能由用户在分镜表上逐镜勾。
-    animate: false,
+    // 默认【每一镜都生成视频】—— 这张卡就叫「电影级 · 纯 AI 生成」,出 AI 视频是它的
+    //   全部意义,默认成静图等于把功能废掉。
+    //   之前的问题不是「不该生成视频」,是「AI 替用户勾、他没点头就花钱」——
+    //   那个由分镜表这道确认关口解决(费用摆在按钮旁边,不想花的镜自己取消勾选),
+    //   不该靠把默认值改成 false 来回避。
+    //   LLM 显式标了 false(静态展示的镜)才尊重它。
+    animate: raw.animate !== false,
     locked,
   };
 }
@@ -237,6 +247,7 @@ export function verifyNarrationFidelity(shots: StoryShot[], sourceText: string):
 const SHOT_SCHEMA_BLOCK = [
   '每个分镜对象的字段(json):',
   '{',
+  '  "title": string,            // 这镜的标题:它在叙事里干什么。如「黄金3秒钩子 · 砸出悬念」「反转 · 秃鹫基金白嫖」。原脚本有场景标题就用原文,没有你起一个(≤14 字)',
   '  "seconds": number,          // 这镜时长(秒)。脚本标了就用标的;没标按口播字数估(中文 4.5 字/秒,英文 2.2)',
   '  "narration": string,        // 要念出来的口播。⚠️必须从原文【逐字复制】,一个字都不许改写/润色/补充。这镜没有旁白就填 ""',
   '  "visual_first": string,     // 首帧画面描述:主体 + 环境 + 光线 + 构图。只写【看得见的东西】',
@@ -246,7 +257,7 @@ const SHOT_SCHEMA_BLOCK = [
   '  "bgm_mood": string,         // 配乐情绪,只从这些里选:轻快/节拍/大气/舒缓/轻柔/悠闲/紧张/悬疑/欢快/开场/动感/新闻',
   '  "sfx": string,              // 音效提示。没有填 ""',
   '  "type": string,             // 只能是:chart(图表数据) | textcard(文字卡封面) | scene(实景空镜) | person(人物出镜) | logo(品牌标识) | transition(转场)',
-  '  "animate": false,           // 固定填 false(是否生成视频由用户自己勾,不用你判断)',
+  '  "animate": boolean,         // 默认 true。只有【纯静态展示、动起来反而奇怪】的镜(如纯文字卡)才填 false',
   '  "locked": string[]          // 原脚本里【明确写了】的字段名,如 ["narration","visual_first","on_screen_text"]。你自己推断补充的字段不要列进来',
   '}',
 ].join('\n');
@@ -542,7 +553,7 @@ export function storyboardToText(shots: StoryShot[], title?: string): string {
   lines.push(`分镜 ${shots.length} 镜 · 预计 ${Math.round(shots.reduce((a, s) => a + s.seconds, 0))} 秒`);
   lines.push('');
   shots.forEach((s, i) => {
-    lines.push(`── 镜 ${i + 1} · ${s.seconds}s · ${s.type}${s.animate ? ' · 生成视频' : ''} ──`);
+    lines.push(`── 镜 ${i + 1}${s.title ? ` · ${s.title}` : ''} · ${s.seconds}s · ${s.type} ──`);
     if (s.narration) lines.push(`口播: ${s.narration}`);
     lines.push(`首帧: ${s.visualFirst}`);
     if (s.visualLast) lines.push(`尾帧: ${s.visualLast}`);

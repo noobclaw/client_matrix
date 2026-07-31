@@ -78,10 +78,16 @@ export default function StoryboardReviewModal(props: StoryboardReviewModalProps)
     () => Math.round(shots.reduce((a, s) => a + (Number(s.seconds) || 0), 0)),
     [shots],
   );
-  const animateCount = useMemo(() => shots.filter((s) => s.animate).length, [shots]);
-  // 只有勾了「要动」的镜才按秒烧 Seedance;其余是首帧 + 运镜,成本可忽略。
+  // 电影级每一镜都生成 AI 视频 → 按全部镜的时长估(单镜 clamp 到 Seedance 的 [4,12])。
+  // 每镜在整片时间轴上的起点,用来显示「0:20 - 0:50」这种时间码。
+  const startAt = useMemo(() => {
+    const out: number[] = [];
+    let t = 0;
+    for (const x of shots) { out.push(t); t += Number(x.seconds) || 0; }
+    return out;
+  }, [shots]);
   const animateSec = useMemo(
-    () => shots.filter((s) => s.animate).reduce((a, s) => a + Math.max(4, Math.min(12, Number(s.seconds) || 5)), 0),
+    () => shots.reduce((a, s) => a + Math.max(4, Math.min(12, Number(s.seconds) || 5)), 0),
     [shots],
   );
   const estCredits = creditsPerSec != null ? Math.round(creditsPerSec * animateSec) : null;
@@ -120,8 +126,8 @@ export default function StoryboardReviewModal(props: StoryboardReviewModalProps)
             </div>
             <div className="text-[12px] text-gray-500 dark:text-gray-400 mt-0.5 leading-relaxed">
               {isZh
-                ? '这是按你的内容生成的完整分镜脚本 —— 每一镜念什么、画什么、打什么字、配什么乐。可以直接改，也可以复制／导出留档。确认后就按它出片。'
-                : 'A complete storyboard generated from your content — what each shot says, shows, captions and scores. Edit it, copy or export it, then generate from it.'}
+                ? '按你的内容生成的完整分镜稿：每一镜念什么、画什么、怎么动、打什么字、配什么乐。每一镜都会用 AI 生成视频。可以直接改，也可以复制／导出留档。'
+                : 'A complete storyboard for your video: what each shot says, shows, how it moves, its caption and score. Every shot is generated as AI video. Edit it, copy it, or export it.'}
             </div>
           </div>
           <div className="shrink-0 flex items-center gap-2">
@@ -210,40 +216,17 @@ export default function StoryboardReviewModal(props: StoryboardReviewModalProps)
                       key={i}
                       className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-800/40"
                     >
-                      {/* 一镜 = 一个脚本块。所有字段都摆出来 —— 这一屏的定位是
-                          「我们生成的分镜脚本」,不是一张待勾选的清单。 */}
-                      <div className="px-3 py-2.5">
-                        <div className="flex items-center gap-2 mb-1.5">
-                          <span className="text-[12px] font-medium text-gray-500 dark:text-gray-400 tabular-nums">
-                            {isZh ? `镜 ${i + 1}` : `Shot ${i + 1}`}
-                          </span>
+                      {/* 一镜 = 一个场景块,版式对齐用户手写分镜稿:
+                          序号 + 标题 / 时间码 · 时长 / 景别类型,下面是分节标签的字段。 */}
+                      <div className="px-4 py-3">
+                        <div className="flex items-baseline gap-2 mb-2">
+                          <span className="text-[15px] font-semibold text-fuchsia-600 dark:text-fuchsia-400 tabular-nums">{i + 1}</span>
                           <input
-                            type="number"
-                            min={1}
-                            max={120}
-                            value={s.seconds}
-                            onChange={(e) => patch(i, { seconds: Math.max(1, Math.min(120, Number(e.target.value) || 1)) })}
-                            className="w-12 rounded border border-gray-300 dark:border-gray-700 bg-transparent px-1 py-0.5 text-[12px] dark:text-white tabular-nums"
+                            value={s.title || ''}
+                            onChange={(e) => patch(i, { title: e.target.value })}
+                            placeholder={isZh ? '这一镜干什么（如：黄金3秒钩子 · 砸出悬念）' : 'What this shot does'}
+                            className="flex-1 min-w-0 bg-transparent border-0 border-b border-transparent hover:border-gray-300 dark:hover:border-gray-700 focus:border-fuchsia-500 focus:outline-none text-[14px] font-medium dark:text-white px-0 py-0.5"
                           />
-                          <span className="text-[11px] text-gray-400">{isZh ? '秒' : 's'}</span>
-                          <select
-                            value={s.type}
-                            onChange={(e) => patch(i, { type: e.target.value as ShotType })}
-                            className={`rounded px-1.5 py-0.5 text-[11px] border-0 ${meta.cls}`}
-                          >
-                            {TYPE_ORDER.map((t) => (
-                              <option key={t} value={t}>{isZh ? TYPE_META[t].zh : TYPE_META[t].en}</option>
-                            ))}
-                          </select>
-                          <div className="flex-1" />
-                          <label
-                            className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400 cursor-pointer"
-                            title={isZh ? '勾上 = 这一镜用 AI 生成会动的视频，按秒收费；不勾 = 出一张图慢慢推近，几乎不花钱' : 'Ticked = AI video, charged per second. Unticked = still image with a slow push-in.'}
-                          >
-                            <input type="checkbox" checked={!!s.animate}
-                              onChange={(e) => patch(i, { animate: e.target.checked })} className="accent-fuchsia-500" />
-                            {isZh ? '生成视频' : 'Animate'}
-                          </label>
                           <button type="button" onClick={() => move(i, -1)} disabled={i === 0}
                             className="px-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-30" title={isZh ? '上移' : 'Up'}>↑</button>
                           <button type="button" onClick={() => move(i, 1)} disabled={i === shots.length - 1}
@@ -254,22 +237,43 @@ export default function StoryboardReviewModal(props: StoryboardReviewModalProps)
                             className="px-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
                             title={isZh ? '编辑这一镜' : 'Edit'}>{isOpen ? '▴' : '✎'}</button>
                         </div>
-                        {/* 脚本正文:每个字段一行,标签固定宽度,像一份真的分镜稿 */}
-                        <dl className="text-[13px] leading-relaxed space-y-0.5">
-                          <ScriptLine label={isZh ? '口播' : 'Say'} value={s.narration}
-                            empty={isZh ? '（这一镜不说话）' : '(silent)'} />
-                          <ScriptLine label={isZh ? '画面' : 'Visual'} value={s.visualFirst}
+                        {/* 时间码 · 时长 · 景别 —— 对齐手写稿里「0:00 - 0:08 · 8秒」那一行 */}
+                        <div className="flex items-center gap-2 mb-2 text-[12px] text-gray-500 dark:text-gray-400">
+                          <span className="tabular-nums">{fmtClock(startAt[i])} - {fmtClock(startAt[i] + s.seconds)}</span>
+                          <span className="text-gray-300 dark:text-gray-700">·</span>
+                          <input
+                            type="number" min={1} max={120} value={s.seconds}
+                            onChange={(e) => patch(i, { seconds: Math.max(1, Math.min(120, Number(e.target.value) || 1)) })}
+                            className="w-12 rounded border border-gray-300 dark:border-gray-700 bg-transparent px-1 py-0.5 text-[12px] dark:text-white tabular-nums"
+                          />
+                          <span>{isZh ? '秒' : 's'}</span>
+                          <span className="text-gray-300 dark:text-gray-700">·</span>
+                          <select
+                            value={s.type}
+                            onChange={(e) => patch(i, { type: e.target.value as ShotType })}
+                            className={`rounded px-1.5 py-0.5 text-[11px] border-0 ${meta.cls}`}
+                          >
+                            {TYPE_ORDER.map((t) => (
+                              <option key={t} value={t}>{isZh ? TYPE_META[t].zh : TYPE_META[t].en}</option>
+                            ))}
+                          </select>
+                        </div>
+                        {/* 分节字段 —— 对齐手写稿的「景别运镜 / 画面内容 / 口播旁白 / 字幕花字 / 音乐音效」 */}
+                        <div className="space-y-2">
+                          <ScriptField label={isZh ? '画面内容' : 'Visual'} value={s.visualFirst}
                             empty={isZh ? '（没写画面，AI 会自己发挥）' : '(none — AI will improvise)'} warn={!s.visualFirst} />
-                          {s.animate && s.motion && <ScriptLine label={isZh ? '运动' : 'Motion'} value={s.motion} muted />}
-                          {s.onScreenText && <ScriptLine label={isZh ? '花字' : 'Caption'} value={s.onScreenText} muted />}
+                          {s.motion && <ScriptField label={isZh ? '景别运镜' : 'Camera'} value={s.motion} muted />}
+                          <ScriptField label={isZh ? '口播旁白' : 'Narration'} value={s.narration}
+                            empty={isZh ? '（这一镜不说话）' : '(silent)'} />
+                          {s.onScreenText && <ScriptField label={isZh ? '字幕花字' : 'Caption'} value={s.onScreenText} />}
                           {(s.bgmMood || s.sfx) && (
-                            <ScriptLine
-                              label={isZh ? '声音' : 'Audio'}
-                              value={[s.bgmMood && `${isZh ? '配乐' : 'music'} ${s.bgmMood}`, s.sfx && `${isZh ? '音效' : 'sfx'} ${s.sfx}`].filter(Boolean).join(' · ')}
+                            <ScriptField
+                              label={isZh ? '音乐音效' : 'Audio'}
+                              value={[s.bgmMood, s.sfx].filter(Boolean).join(' · ')}
                               muted
                             />
                           )}
-                        </dl>
+                        </div>
                       </div>
                       {isOpen && (
                         <div className="px-3 pb-3 pt-1 space-y-2 border-t border-gray-100 dark:border-gray-800">
@@ -340,15 +344,14 @@ export default function StoryboardReviewModal(props: StoryboardReviewModalProps)
             <span className="dark:text-gray-200 font-medium">{shots.length}</span> {isZh ? '镜' : 'shots'}
             <span className="mx-2 text-gray-300 dark:text-gray-700">·</span>
             {isZh ? '约' : '~'} <span className="dark:text-gray-200 font-medium">{totalSec}</span>s
-            <span className="mx-2 text-gray-300 dark:text-gray-700">·</span>
-            {isZh ? '首帧' : 'frames'} <span className="dark:text-gray-200 font-medium">{shots.length}</span> {isZh ? '张' : ''}
-            <span className="mx-2 text-gray-300 dark:text-gray-700">·</span>
-            {isZh ? '生成视频' : 'animated'} <span className={animateCount > 0 ? 'text-fuchsia-600 dark:text-fuchsia-400 font-medium' : 'dark:text-gray-200 font-medium'}>{animateCount}</span> {isZh ? '镜' : ''}
-            {estCredits != null && animateCount > 0 && (
-              <span className="ml-2 text-fuchsia-600 dark:text-fuchsia-400">
-                ≈ {estCredits.toLocaleString()} {isZh ? '积分' : 'credits'}
-                {estUsd != null && ` ($${estUsd.toFixed(2)})`}
-              </span>
+            {estCredits != null && (
+              <>
+                <span className="mx-2 text-gray-300 dark:text-gray-700">·</span>
+                <span className="text-fuchsia-600 dark:text-fuchsia-400">
+                  {isZh ? '预估 ' : 'est. '}{estCredits.toLocaleString()} {isZh ? '积分' : 'credits'}
+                  {estUsd != null && ` ($${estUsd.toFixed(2)})`}
+                </span>
+              </>
             )}
           </div>
           <div className="flex items-center gap-2">
@@ -382,33 +385,42 @@ function toScriptText(shots: StoryShot[], isZh: boolean): string {
     isZh ? `分镜脚本 · ${shots.length} 镜 · 约 ${total} 秒` : `Storyboard · ${shots.length} shots · ~${total}s`,
     '',
   ];
+  let clock = 0;
   shots.forEach((x, i) => {
-    out.push(`── ${isZh ? '镜' : 'Shot'} ${i + 1} · ${x.seconds}s · ${TYPE_META[x.type]?.[isZh ? 'zh' : 'en'] || x.type}${x.animate ? (isZh ? ' · 生成视频' : ' · animated') : ''} ──`);
-    if (x.narration) out.push(`${isZh ? '口播' : 'Say'}: ${x.narration}`);
-    if (x.visualFirst) out.push(`${isZh ? '画面' : 'Visual'}: ${x.visualFirst}`);
-    if (x.visualLast) out.push(`${isZh ? '尾帧' : 'End frame'}: ${x.visualLast}`);
-    if (x.motion) out.push(`${isZh ? '运动' : 'Motion'}: ${x.motion}`);
-    if (x.onScreenText) out.push(`${isZh ? '花字' : 'Caption'}: ${x.onScreenText}`);
-    if (x.bgmMood) out.push(`${isZh ? '配乐' : 'Music'}: ${x.bgmMood}`);
-    if (x.sfx) out.push(`${isZh ? '音效' : 'SFX'}: ${x.sfx}`);
+    const dur = Number(x.seconds) || 0;
+    out.push(`${i + 1}  ${x.title || ''}`.trimEnd());
+    out.push(`${fmtClock(clock)} - ${fmtClock(clock + dur)} · ${dur}${isZh ? '秒' : 's'} · ${TYPE_META[x.type]?.[isZh ? 'zh' : 'en'] || x.type}`);
+    clock += dur;
+    if (x.visualFirst) { out.push(isZh ? '画面内容' : 'Visual'); out.push(x.visualFirst); }
+    if (x.visualLast) { out.push(isZh ? '尾帧画面' : 'End frame'); out.push(x.visualLast); }
+    if (x.motion) { out.push(isZh ? '景别运镜' : 'Camera'); out.push(x.motion); }
+    if (x.narration) { out.push(isZh ? '口播旁白' : 'Narration'); out.push(x.narration); }
+    if (x.onScreenText) { out.push(isZh ? '字幕花字' : 'Caption'); out.push(x.onScreenText); }
+    if (x.bgmMood || x.sfx) { out.push(isZh ? '音乐音效' : 'Audio'); out.push([x.bgmMood, x.sfx].filter(Boolean).join(' · ')); }
     out.push('');
   });
   return out.join('\n');
 }
 
-/** 分镜稿里的一行:固定宽度的标签 + 内容。空值给灰字提示,缺画面给橙字警告。 */
-function ScriptLine(props: { label: string; value?: string; empty?: string; muted?: boolean; warn?: boolean }) {
+/** 秒 → mm:ss。分镜稿要有时间码,不然看不出这一镜落在片子哪一段。 */
+function fmtClock(sec: number): string {
+  const t = Math.max(0, Math.round(sec));
+  return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+}
+
+/** 一节字段:上面小标签,下面内容 —— 对齐手写分镜稿「画面内容 / 口播旁白」那种版式。 */
+function ScriptField(props: { label: string; value?: string; empty?: string; muted?: boolean; warn?: boolean }) {
   const { label, value, empty, muted, warn } = props;
   if (!value && !empty) return null;
   return (
-    <div className="flex gap-2">
-      <dt className="shrink-0 w-8 text-[11px] text-gray-400 pt-[3px]">{label}</dt>
-      <dd className={`flex-1 min-w-0 break-words ${
+    <div>
+      <div className="text-[11px] text-gray-400 dark:text-gray-500 mb-0.5">{label}</div>
+      <div className={`text-[13px] leading-relaxed break-words ${
         !value ? (warn ? 'text-amber-500' : 'text-gray-400')
-        : muted ? 'text-gray-500 dark:text-gray-400 text-[12px]'
+        : muted ? 'text-gray-500 dark:text-gray-400'
         : 'text-gray-800 dark:text-gray-200'}`}>
         {value || empty}
-      </dd>
+      </div>
     </div>
   );
 }
