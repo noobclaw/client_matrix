@@ -180,45 +180,93 @@ export interface StoryboardResult {
   chargedTokens: number;
   /** 失败原因(服务端返回的 error/detail 或异常信息),供进度展示排查;成功为空。 */
   error?: string;
+  /** 出图失败的镜序号(0-based)。调用方可据此在分镜表上标红,而不是静默降级。 */
+  failedIndices: number[];
 }
 
+export interface StoryboardOptions {
+  /** 每镜的【画面描述】prompt。⚠️ 必须是给图像模型的画面 prompt,不是给视频模型的运动 prompt。 */
+  shots: string[];
+  /** 角色/主体锁定串(每张都带,保一致)。 */
+  character?: string;
+  /** 画风锁定串。 */
+  style?: string;
+  /** 镜数(默认 shots.length)。 */
+  count?: number;
+  /** 画幅。不传时服务端按老行为默认竖屏 9:16。 */
+  aspect?: '9:16' | '16:9' | '1:1';
+  /** 与 shots 等长:该镜是否允许(需要)画面内出现文字。图表/文字卡/Logo 必须 true。 */
+  allowText?: boolean[];
+  /** 额外的固定参考图(如用户上传的定妆图),每张都会带上。 */
+  referenceImages?: string[];
+}
+
+/** 滚动参考:除固定参考图外,再带最近这么多张【已生成的历史帧】。 */
+const ROLLING_REF_COUNT = 2;
+/** 单次请求最多带几张参考图(服务端也会截断)。 */
+const MAX_REFS = 4;
+
 /**
- * 故事板首帧:【逐张】调服务端 /api/image/storyboard 生成每镜首帧 dataURL。
+ * 故事板首帧:逐张调服务端 /api/image/storyboard 生成每镜首帧 dataURL。
  *
  * 为什么逐张而不是组图一次出 N 张:组图是单次长请求(6 张 >100s),必然撞 Cloudflare
  * 的 100s 超时(HTTP 524)→ 生产环境组图永远失败。逐张每张独立短请求(~20s)既绕开 524,
- * 又能逐张回进度(onProgress)。一致性靠每张都带【角色设定串(character)】文本维持。
+ * 又能逐张回进度(onProgress)。
  *
- * 返回的 images 按 shot 索引【对齐】(某张失败 → 该位置为空串 ''),pipeline 按 index 挂首帧,
- * 失败的那镜自动退化为纯文生视频。chargedTokens 为各张实扣之和。
+ * ## 一致性:滚动参考(不是单锚点)
+ * 老实现是「第 1 张成功的图当 anchor,后面每镜都参考它」。问题有三:
+ *   ① 第 1 张画偏了全片跟着偏,没有自纠机会;
+ *   ② 第 1 张不只带角色,还带着【那个场景那束光】,后面每镜都被往回拽;
+ *   ③ 第 8 镜完全不知道第 7 镜长什么样 —— 越往后越飘。
+ * 改成滚动参考:固定参考图(定妆图)+ 最近 ROLLING_REF_COUNT 张历史帧。相邻镜之间的
+ * 连续性比「和第一张像」更重要 —— 这是 ViMax reference_image_selector 的经验规则。
+ *
+ * 返回的 images 按 shot 索引【对齐】(某张失败 → 该位置为空串 ''),失败的镜号同时记进
+ * failedIndices 供上层标红,不再静默降级。
  */
 export async function generateStoryboard(
-  opts: { shots: string[]; character?: string; style?: string; count?: number },
+  opts: StoryboardOptions,
   onProgress?: (done: number, total: number) => void,
 ): Promise<StoryboardResult> {
   const headers = authHeaders();
-  if (!headers) return { images: [], chargedTokens: 0, error: '未登录' };
-  const shots = (opts.shots || []).filter((s) => typeof s === 'string' && s.trim());
+  if (!headers) return { images: [], chargedTokens: 0, error: '未登录', failedIndices: [] };
+  // ⚠️ 不能先 filter 再用下标:上层(pipeline)按 shot 索引挂首帧,过滤会让整条 images 错位。
+  //    空 prompt 的位置直接判失败,保持下标对齐。
+  const shots = (opts.shots || []).map((s) => (typeof s === 'string' ? s.trim() : ''));
   const total = shots.length;
   const images: string[] = new Array(total).fill('');
+  const failedIndices: number[] = [];
   let chargedTokens = 0;
   let okCount = 0;
   let lastError = '';
-  // image2「单参考锚定」:第 1 张成功的首帧作锚点,后续每镜把它当参考图(图生图)→ 锁角色一致。
-  let anchor = '';
+  // 固定参考图(如定妆图):每张都带,锁主体。
+  const fixedRefs = (opts.referenceImages || [])
+    .filter((s) => typeof s === 'string' && /^(https?:\/\/|data:image\/)/.test(s));
+  // 滚动参考:已成功生成的历史帧(按时间顺序),取最近几张。
+  const history: string[] = [];
 
   for (let i = 0; i < total; i++) {
     onProgress?.(i, total);
+    if (!shots[i]) { failedIndices.push(i); lastError = 'empty_prompt'; continue; }
+    // 相邻镜的连续性比「和第一张像」更重要 → 取最近的历史帧,不是永远第 1 张。
+    const refs = [...fixedRefs, ...history.slice(-ROLLING_REF_COUNT)].slice(-MAX_REFS);
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 90_000); // 单张 < CF 100s,绝不触发 524
     try {
       const resp = await fetch(`${apiBase()}/api/image/storyboard`, {
         method: 'POST',
         headers,
-        // 单镜单图:count=1。character 每张都带(文本一致)+ 有锚点时把锚点当参考图(图生图,更强一致)。
         body: JSON.stringify({
-          shots: [shots[i]], character: opts.character || '', style: opts.style || '', count: 1,
-          ...(anchor ? { referenceImage: anchor } : {}),
+          shots: [shots[i]],
+          character: opts.character || '',
+          style: opts.style || '',
+          count: 1,
+          ...(opts.aspect ? { aspect: opts.aspect } : {}),
+          // 该镜是否允许画面内出现文字(图表/文字卡/Logo 必须允许,否则出来是空白板)。
+          ...(opts.allowText ? { allowText: opts.allowText[i] === true } : {}),
+          ...(refs.length ? { referenceImages: refs } : {}),
+          // 老后端只认单张 referenceImage —— 一并带上首张,保证不部署新后端也能跑。
+          ...(refs.length ? { referenceImage: refs[refs.length - 1] } : {}),
         }),
         signal: ctrl.signal,
       });
@@ -227,19 +275,26 @@ export async function generateStoryboard(
         try { const ej: any = await resp.json(); detail = ej?.detail || ej?.error || ''; }
         catch { try { detail = (await resp.text()).slice(0, 200); } catch { /* ignore */ } }
         lastError = `HTTP ${resp.status}${detail ? ' · ' + detail : ''}`;
+        failedIndices.push(i);
         continue;
       }
       const json: any = await resp.json();
       const imgs = Array.isArray(json?.images) ? json.images.filter((s: any) => typeof s === 'string' && s) : [];
       chargedTokens += Number(json?.chargedTokens) || 0;
-      if (imgs[0]) { images[i] = imgs[0]; okCount++; if (!anchor) anchor = imgs[0]; }
-      else lastError = json?.error || 'empty';
+      if (imgs[0]) { images[i] = imgs[0]; okCount++; history.push(imgs[0]); }
+      else { lastError = json?.error || 'empty'; failedIndices.push(i); }
     } catch (e) {
       lastError = String((e as any)?.message || e).slice(0, 200);
+      failedIndices.push(i);
     } finally { clearTimeout(timer); }
   }
   onProgress?.(total, total);
-  return { images, chargedTokens, error: okCount > 0 ? undefined : (lastError || 'all_failed') };
+  return {
+    images,
+    chargedTokens,
+    error: okCount > 0 ? undefined : (lastError || 'all_failed'),
+    failedIndices,
+  };
 }
 
 /** 生成单镜:create → 轮询 → 下载。失败返回 {path:null,error}(不抛,交给上层降级)。 */

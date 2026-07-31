@@ -32,13 +32,18 @@ import { composeVideo, type SceneSpec, type SubtitleStyle, type SubtitleCue } fr
 import { generateScript, generateSearchTerms, detectLang, type ContentLang } from './scriptWriter';
 import { getVideoConfig, localeFor } from './videoConfig';
 import { chargeMode1Video, chargeHotspotImages, refundMode1Video } from './billing';
-import { resolveBgmPath } from './bgm';
+import { resolveBgmPath, buildMoodBgmTrack } from './bgm';
 import { generateSeedanceClips, generateStoryboard, type SeedanceClipResult, type SeedanceSceneSpec } from './seedanceProvider';
 import type { TemplateOptions } from './templateHtmlWriter';
 import { runTemplatePipeline } from './template-pipeline';
 import { runThreadPipeline } from './thread-pipeline';
 import { runRepostPipeline } from './repost-pipeline';
 import { generateStoryboardAnchor } from './storyboardAnchor';
+// 电影级(engine='ai')分镜表:把用户脚本 / 口播稿解析成结构化分镜,口播与画面彻底分家。
+import {
+  parseStoryboardScript, deriveStoryboard, storyboardToText, shotAllowsText, type StoryShot,
+} from './storyboardScript';
+import { buildFramePrompt, buildMotionPrompt, buildLegacyPrompt, DEFAULT_STYLE_LOCK } from './shotPrompts';
 import { resolvePublishCaption } from './publishCaptionWriter';
 import { setCurrentVideoTask, clearCurrentVideoTask, videoTypeLabel } from './videoRunWindow';
 
@@ -74,38 +79,20 @@ function aspectToSeedanceRatio(aspect: VideoAspect): '9:16' | '16:9' | '1:1' {
 }
 
 /**
- * 给一句口播稿构造 Seedance 画面 prompt —— 套 Seedance 官方 6 步公式(主体/动作 → 环境/光
- * → 单一运镜 → 风格 → 本地化 → 负向约束),提质不加钱。要点(来自官方/社区最佳实践):
- *   · 只给一个运镜(多运镜会抖);逐镜轮换不同运镜避免全片雷同。
- *   · 物理光源 + 写实风格;ROI 最高。
- *   · 负向约束:无文字/水印 + 避免抖动/肢体扭曲/闪烁。
- *   · 图生视频(有参考图)时不复述图里已有内容,只描述运动/运镜(否则主体漂移)。
- *   · 本地化:中文/日韩内容,人物按亚洲/对应国家、实景按当代城市风格;通用物体保持中性。
+ * 【已降级为兜底路径】给一句口播稿构造单个 Seedance prompt。
+ *
+ * ⚠️ 这个函数的输出原本【同时】喂给图像模型(故事板首帧)和视频模型(片段生成)——
+ *   图像模型收到 "运镜:缓慢推近…避免时间闪烁" 这类视频专属指令,根本不知道要画什么,
+ *   这是首帧画错、进而整片跑偏的根因。
+ *
+ * 正常链路现在走分镜表:buildFramePrompt(给图) + buildMotionPrompt(给视频),见 shotPrompts.ts。
+ * 本函数仅在【分镜表构建失败】时作降级使用,保持老行为不变(绝不阻塞出片)。
  */
 function buildSeedancePrompt(
   sentence: string,
   opts: { track?: string; persona?: string; lang?: string; isI2V?: boolean; shotIndex?: number },
 ): string {
-  const REGION: Record<string, string> = { zh: '中国', ja: '日本', ko: '韩国' };
-  const region = REGION[(opts.lang || '').slice(0, 2).toLowerCase()];
-  const styleBits = [opts.track, opts.persona].filter(Boolean).join('、');
-  const CAMS = ['镜头缓慢推近', '镜头缓慢左移跟随', '镜头缓慢上摇', '固定机位、主体自然轻微动作', '镜头缓慢环绕'];
-  const cam = CAMS[(opts.shotIndex ?? 0) % CAMS.length];
-
-  const parts: string[] = [];
-  if (opts.isI2V) {
-    parts.push(`保持参考图的主体、构图与配色不变,只为画面添加自然、轻微的运动。`);
-  } else {
-    parts.push(`电影感竖屏空镜,画面贴合这句旁白(具体、可拍,有明确主体与单一动作):「${sentence}」。`);
-  }
-  parts.push(`环境真实、自然光、有空间层次与景深。`);
-  parts.push(`运镜:${cam}(全程只用这一种,平稳不抖)。`);
-  parts.push(`风格:电影感、纪实写实、画质清晰${styleBits ? `,贴合「${styleBits}」` : ''}。`);
-  if (region) {
-    parts.push(`本地化:若出现人物,为亚洲/${region}人面孔与气质;若为街景/室内/餐厅/商店/交通等实景,呈现当代${region}城市的环境与风格;通用物体、纯自然风景保持中性。`);
-  }
-  parts.push(`不要任何文字、字幕、水印、logo;避免画面抖动、肢体扭曲、时间闪烁。`);
-  return parts.join('');
+  return buildLegacyPrompt(sentence, opts);
 }
 
 /**
@@ -177,6 +164,18 @@ export interface VideoCreationInput {
   seedanceResolution?: '480p' | '720p' | '1080p';
   /** AI 引擎模型档位:'lite'(1.0 Lite) | 'pro'(1.0 Pro) | 'pro15'(1.5 Pro,默认) | 'v2'(2.0)。 */
   seedanceModel?: 'lite' | 'pro' | 'pro15' | 'v2';
+  /**
+   * engine==='ai'(电影级)是否启用【分镜表】链路(默认启用)。
+   * 分镜表把口播 / 画面 / 运动彻底分家:narration 只进 TTS、visualFirst 只进图像模型、
+   * motion 只进视频模型;同时解除 45s 硬上限。
+   * 显式传 false = 回到老链路(整篇 splitScript + 大分镜合并 + 45s 截断),用于出问题时兜底。
+   */
+  useStoryboardTable?: boolean;
+  /**
+   * engine==='ai':用户在分镜表界面确认/编辑过的分镜。传了就【直接用】,不再跑解析/派生
+   * (省一次 AI 调用,也保证用户改过的内容原样生效)。
+   */
+  storyboardShots?: StoryShot[];
   /** engine==='template'(模板速生)专属配置;其它 engine 忽略。 */
   template?: TemplateOptions;
   /** engine==='hotspot'(热搜成片)专属:用户勾选的热点源('hotsearch'|'web3'|'tech')。
@@ -1080,17 +1079,87 @@ async function runVideoPipeline(
       tracker.progress(`📝 视频文案(约 ${script.length} 字 ≈ ${Math.round(script.length / 4.5)}s):${script}`);
     }
 
-    // 拆句(并入「脚本」步:本地纯文本切分,无 AI、瞬时完成)。
-    let sentences = splitScript(script);
+    // ── 电影级(engine='ai')分镜表 ──────────────────────────────────────────
+    //  老链路把整篇文档 splitScript 按标点切句,于是脚本里的表头/景别运镜/B-roll 清单/
+    //  拍摄准备全被当台词念出来,而用户写好的【画面内容】那一栏反被丢弃 —— 成片必然驴唇
+    //  不对马嘴。新链路先把脚本解析成结构化分镜:narration 只进 TTS、visual 只进图像模型、
+    //  motion 只进视频模型。构建失败 → aiShots 留 null,整段降级回老链路(绝不阻塞出片)。
+    let aiShots: StoryShot[] | null = null;
+    if (input.engine === 'ai' && input.useStoryboardTable !== false
+        && Array.isArray(input.storyboardShots) && input.storyboardShots.length > 0) {
+      // 用户已在分镜表界面确认过 → 直接用,不再跑解析/派生(省一次 AI 调用,且用户改过的内容原样生效)。
+      aiShots = input.storyboardShots;
+      tracker.progress(`🎬 使用你确认过的分镜表(${aiShots.length} 镜)`);
+    } else if (input.engine === 'ai' && input.useStoryboardTable !== false) {
+      // strict = 用户粘了脚本(可能是完整分镜脚本)→ 解析;ai = 稿子是 AI 写的口播 → 派生分镜。
+      const isUserScript = scriptMode === 'strict';
+      tracker.progress(isUserScript ? '🎬 正在解析你的分镜脚本…' : '🎬 正在为口播稿设计分镜…');
+      try {
+        const sbInput = {
+          lang: contentLang,
+          targetSeconds: input.targetSeconds,
+          // 赛道/人设只作画面调性参考,不决定题材(有脚本时更不该干扰)。
+          styleHint: isUserScript ? undefined : [input.track, input.persona].filter(Boolean).join('、') || undefined,
+          signal,
+        };
+        const sb = isUserScript
+          ? await parseStoryboardScript(script, sbInput)
+          : await deriveStoryboard(script, sbInput);
+        if (sb && sb.shots.length > 0) {
+          tracker.addTokens(sb.tokens, sb.costUsd);
+          aiCostUsd += sb.costUsd;
+          for (const w of sb.warnings) tracker.progress(`⚠️ ${w}`);
+          // 逐字保真复核:口播必须忠于原文(营销文案/热点事实不能被 AI 改写)。低于阈值
+          //   说明 LLM 擅自润色了 → 宁可降级回老链路,也不出一条被改写过的片子。
+          if (sb.fidelity < 0.85) {
+            tracker.progress(`⚠️ 口播逐字复核仅 ${(sb.fidelity * 100).toFixed(0)}%,放弃分镜表、回退原文案链路`);
+          } else {
+            aiShots = sb.shots;
+          }
+        } else {
+          tracker.progress('⚠️ 分镜解析未成功,回退到按句拆分');
+        }
+      } catch (e) {
+        tracker.progress(`⚠️ 分镜解析异常(${String((e as any)?.message || e).slice(0, 120)}),回退到按句拆分`);
+      }
+    }
+
+    // 拆句。有分镜表 → 直接用每镜的 narration(口播与画面已分家);否则走老的本地标点切分。
+    let sentences: string[];
+    if (aiShots) {
+      // 有旁白模式下丢掉无口播的镜:sentences / audios / sceneDurations / clipResults 全靠
+      //   【下标对齐】,留着空 narration 会让 TTS 那步产出空音频并错位。纯画面模式(关旁白)
+      //   不受影响 —— 那条路不按 sentences 走。
+      const narrated = !(input.engine === 'ai' && input.narrationEnabled === false);
+      if (narrated) {
+        const before = aiShots.length;
+        aiShots = aiShots.filter((s) => s.narration.trim());
+        if (aiShots.length < before) {
+          tracker.progress(`分镜表:跳过 ${before - aiShots.length} 个无口播镜(有旁白模式下画面需跟着口播走)`);
+        }
+      }
+      if (aiShots.length === 0) {
+        aiShots = null;
+        sentences = splitScript(script);
+      } else {
+        sentences = aiShots.map((s) => s.narration);
+        const totalSec = Math.round(aiShots.reduce((a, s) => a + s.seconds, 0));
+        tracker.progress(`🎬 分镜表就绪:${aiShots.length} 镜 · 预计 ${totalSec} 秒`);
+      }
+    } else {
+      sentences = splitScript(script);
+    }
     if (sentences.length === 0) {
       const err = '文案为空或无法拆出有效分镜';
       tracker.fail('script', err);
       return { ok: false, error: err };
     }
-    // AI 自动成片(Seedance):把碎句合并成更长的「大分镜」(每段 ~8–12s 旁白)再 TTS,
-    // 这样每段配一个 8–12s 的连续片段 → 切刀少、更流畅,且少踩 Seedance 单镜最短时长的浪费。
-    // 在 TTS 之前合并,音频/字幕(词边界 cue)自然按合并后的段走,不破坏。
-    if (input.engine === 'ai') {
+    // 老链路的「大分镜合并 + 45s 硬截」只在【没有分镜表】时才跑:
+    //   · 合并成 8–12s 长镜是为了省 Seedance 的钱,但观感就是「一张图慢慢动十秒」,
+    //     跟分镜表按叙事切镜是相反的。
+    //   · 45s 硬截是成本兜底,而分镜表模式下条数与是否生成视频由用户在分镜表上定,
+    //     不该再拿一个写死的秒数把用户 4 分钟的脚本砍掉 6/7。
+    if (input.engine === 'ai' && !aiShots) {
       sentences = mergeSentencesForAi(sentences);
       // 硬上限 45s:targetSeconds 只是给 AI 的提示,AI 可能写超 → 这里按字数估时长(CJK ~4.5
       // 字/秒、拉丁 ~2.2)累加截断,保证纯 AI 成片【实际】不超 45s,杜绝写超长稿烧钱。
@@ -1133,6 +1202,14 @@ async function runVideoPipeline(
         ...sentences.map((s, i) => `${i + 1}. ${s}`),
       ].join('\n');
       fs.writeFileSync(path.join(destDir, '文案.txt'), txt, 'utf8');
+      // 分镜表另存一份(电影级):画面/运动/花字/配乐逐镜留档,方便用户核对与二改。
+      if (aiShots) {
+        fs.writeFileSync(
+          path.join(destDir, '分镜表.txt'),
+          storyboardToText(aiShots, input.taskTitle || '分镜表'),
+          'utf8',
+        );
+      }
     } catch { /* 写文案 txt 失败不影响出片 */ }
     tracker.done('script', `脚本约 ${script.length} 字,拆出 ${sentences.length} 个分镜`);
 
@@ -1332,16 +1409,40 @@ async function runVideoPipeline(
       const refImagesAi = (input.referenceImages || []).filter((p) => p && fs.existsSync(p)).slice(0, 2);
       // 档位/分辨率不在客户端定:透传(可能 undefined)→ 服务端 seedance create 端点决定。
       const resolution = input.seedanceResolution;
-      const aiScenes = sentences.map((s, i) => ({
-        prompt: buildSeedancePrompt(s, {
-          // 有参考文案时不把赛道当画面风格(避免给跨领域参考文案的画面带原赛道倾向);
-          // 画面内容本就贴合口播句子(=参考文案内容),这里只去掉"风格贴合美食"的干扰。
-          track: userText ? undefined : input.track, persona: input.persona,
-          lang: contentLang, isI2V: refImagesAi.length > 0, shotIndex: i,
-        }),
-        // Seedance 单镜上限 12s(1.x/lite),大分镜合并后某段可能超过 → clamp 到 [4,12]。
-        durationSec: Math.max(4, Math.min(12, Math.ceil(sceneDurations[i]))),
-      }));
+      // 每镜时长:Seedance 单镜上限 12s(1.x/lite)→ clamp 到 [4,12]。
+      const clampDur = (i: number) => Math.max(4, Math.min(12, Math.ceil(sceneDurations[i])));
+      // 有分镜表 → 图和视频各用各的 prompt(buildFramePrompt / buildMotionPrompt);
+      //   没有 → 降级回老的单 prompt(buildSeedancePrompt),行为与改造前一致。
+      const aiScenes = aiShots
+        ? aiShots.map((shot, i) => ({
+            prompt: buildMotionPrompt(shot, {
+              shotIndex: i,
+              durationSec: clampDur(i),
+              // 首帧图在下面故事板那步生成;这里先按「会有首帧」写 prompt(即只描述运动)。
+              // 若某镜首帧最终没出来,seedanceProvider 会退化成文生视频 —— 那种情况下运动
+              // prompt 里缺画面描述,但 motion 本身已经含主体动作,足以生成可用画面。
+              hasKeyframe: true,
+              // ⚠️ 尾帧图目前【没有生成】(故事板只出首帧),所以这里必须是 false。
+              //   置 true 会让 prompt 写成「从首帧自然过渡到尾帧画面」,而模型根本收不到尾帧 →
+              //   等于给它一个不存在的目标。首尾帧(flf2v)要等故事板支持出两张图再打开。
+              hasLastFrame: false,
+              styleLock: DEFAULT_STYLE_LOCK,
+              lang: contentLang,
+            }),
+            durationSec: clampDur(i),
+          }))
+        : sentences.map((s, i) => ({
+            prompt: buildSeedancePrompt(s, {
+              // 有参考文案时不把赛道当画面风格(避免给跨领域参考文案的画面带原赛道倾向);
+              // 画面内容本就贴合口播句子(=参考文案内容),这里只去掉"风格贴合美食"的干扰。
+              track: userText ? undefined : input.track, persona: input.persona,
+              lang: contentLang, isI2V: refImagesAi.length > 0, shotIndex: i,
+            }),
+            durationSec: clampDur(i),
+          }));
+      // 每镜首帧的落盘路径(按 shot 索引对齐,没出图为 '')。没勾「要动」的镜直接用它当
+      //   静帧走 Ken Burns —— 这是成本的关键杠杆:一张图几毛,一个 4.5s 的 Seedance 镜要几块。
+      const keyframePaths: string[] = new Array(aiScenes.length).fill('');
       // ── 故事板模式:先用 Seedream 组图出每镜【首帧】(同角色/画风),再图生视频(i2v,更稳)──
       //   首帧也存一份到本次输出目录的「故事板」文件夹(用户要的本地存档)。
       //   故事板失败/未配置 → 退化为纯文生视频(不挂首帧),不阻塞。
@@ -1369,12 +1470,26 @@ async function runVideoPipeline(
         }
 
         tracker.progress(`🎨 生成故事板首帧(逐张出 ${aiScenes.length} 张,保持角色一致)…`);
+        // ⚠️ 喂给【图像模型】的必须是画面描述,不是 aiScenes[].prompt(那是给视频模型的运动
+        //   描述:"运动:镜头缓慢推近…不要剪切、不要画面闪烁")。老代码两处共用一个 prompt,
+        //   图像模型完全不知道要画什么 —— 这是首帧画错、整片跑偏的根因。
+        //   有分镜表 → buildFramePrompt(只写画面);没有 → 只能退回老行为(单 prompt 共用)。
+        const framePrompts = aiShots
+          ? aiShots.map((shot) => buildFramePrompt(shot, {
+              lang: contentLang,
+              styleLock: DEFAULT_STYLE_LOCK,
+              aspect: input.aspect,
+            }))
+          : aiScenes.map((sc) => sc.prompt);
         // 逐张生成:每张独立短请求(绕开 Cloudflare 100s/HTTP524),并逐张回进度。
         const storyboard = await generateStoryboard(
           {
-            shots: aiScenes.map((sc) => sc.prompt),
+            shots: framePrompts,
             character: anchorCharacter,
             count: aiScenes.length,
+            aspect: input.aspect,
+            // 图表/文字卡/Logo 这类镜必须允许画面内出现文字,否则出来是空白板。
+            allowText: aiShots ? aiShots.map((s) => shotAllowsText(s.type)) : undefined,
           },
           (done, total) => { if (done < total) tracker.progress(`🎨 故事板生成中… ${done + 1}/${total} 张`); },
         );
@@ -1395,19 +1510,68 @@ async function runVideoPipeline(
               const m = /^data:(image\/\w+);base64,(.+)$/.exec(dataUrl);
               if (m) {
                 const ext = m[1] === 'image/png' ? 'png' : m[1] === 'image/webp' ? 'webp' : 'jpg';
-                fs.writeFileSync(path.join(sbDir, `镜${i + 1}.${ext}`), Buffer.from(m[2], 'base64'));
+                const p = path.join(sbDir, `镜${i + 1}.${ext}`);
+                fs.writeFileSync(p, Buffer.from(m[2], 'base64'));
+                // 落盘路径留着:没勾「要动」的镜直接拿它当静帧走 Ken Burns,不烧 Seedance 的钱。
+                keyframePaths[i] = p;
               }
             } catch { /* 单张存盘失败不影响 */ }
           });
           tracker.progress(`🎨 故事板已生成 ${okFrames}/${aiScenes.length} 张首帧(已存「故事板」文件夹),转图生视频…`);
+          // 失败的镜显式报出来 —— 老实现是静默降级成文生视频,用户只看到「7/12 张」,
+          //   却不知道剩下 5 镜的画风会完全跑到另一个世界去(钱还照花)。
+          if (storyboard.failedIndices.length > 0) {
+            const list = storyboard.failedIndices.slice(0, 12).map((i) => i + 1).join('、');
+            tracker.progress(`⚠️ 第 ${list} 镜首帧未出图,这些镜将退化为文生视频,画面可能与其它镜不统一`);
+          }
         } else {
           // 把服务端真实失败原因显示出来(否则只剩通用「未生成」,没法排查 Seedream 端报错)。
           tracker.progress(`🎨 故事板未生成${storyboard.error ? `(${storyboard.error})` : ''},退化为文生视频…`);
         }
       } catch (e) { tracker.progress(`🎨 故事板异常(${String((e as any)?.message || e).slice(0, 120)}),退化为文生视频…`); }
-      tracker.progress(`🎬 AI 自动成片:逐镜生成 ${aiScenes.length} 个片段${resolution ? `(${resolution})` : ''}${refImagesAi.length ? ` · ${refImagesAi.length} 张参考图统一风格` : ''}…`);
-      const clipResults = await generateSeedanceClips({
-        scenes: aiScenes,
+      // ── 只给【勾了「要动」的镜】生成视频 ──────────────────────────────────────
+      //  Seedance 一个 4.5s 的镜要几块钱,而一张首帧图几毛 —— 差两个数量级。默认 animate=false,
+      //  没勾的镜直接拿首帧走 Ken Burns(compose 的 zoompan),观感上是「图在动」而不是死图。
+      //  没有分镜表时(降级路径)维持老行为:所有镜都生成视频。
+      //  ⚠️ animate 只认【用户意图】,不因为「这镜没出首帧」就自动改成生成视频 ——
+      //     那样一旦故事板整体失败,40 镜的长片会静默变成 40 次 Seedance 调用(几百块)。
+      //     老链路有 45s 硬截兜着,现在上限解除了,这个口子必须堵死。
+      //     没出首帧的镜改为【借邻镜首帧】(免费),见下面 assignVisuals。
+      const animateFlags: boolean[] = aiShots
+        ? aiShots.map((s) => s.animate === true)
+        : aiScenes.map(() => true);
+      const animateIdx: number[] = [];
+      animateFlags.forEach((on, i) => { if (on) animateIdx.push(i); });
+      // ⚠️ 用户【没有】亲自审过分镜表时(animate 是解析器按脚本语气推断的),给个硬上限:
+      //   一份 5 分钟脚本里若解析器把 30 镜都判成「要动」,就是一张几百块的账单,而用户
+      //   从头到尾没点过头。用户在分镜表上确认过(input.storyboardShots)则完全按他勾的来。
+      const AUTO_ANIMATE_CAP = 6;
+      const userCurated = Array.isArray(input.storyboardShots) && input.storyboardShots.length > 0;
+      if (aiShots && !userCurated && animateIdx.length > AUTO_ANIMATE_CAP) {
+        const dropped = animateIdx.length - AUTO_ANIMATE_CAP;
+        animateIdx.splice(AUTO_ANIMATE_CAP);
+        tracker.progress(`💰 自动判定的「生成视频」镜有 ${dropped + AUTO_ANIMATE_CAP} 个,超出未确认上限 → 只生成前 ${AUTO_ANIMATE_CAP} 个,其余用首帧 + 运镜(避免未经确认的大额消耗)`);
+      }
+      const stillCount = aiScenes.length - animateIdx.length;
+      if (stillCount > 0) {
+        tracker.progress(`🖼️ ${stillCount} 镜使用故事板首帧 + 运镜(不生成视频,省这部分费用)`);
+      }
+      // 既没有任何首帧、又一镜都没勾生成视频 → 后面无论如何拼不出画面。在【花钱之前】直接失败,
+      //   而不是硬着头皮跑完再交一条黑屏片。
+      if (keyframePaths.filter(Boolean).length === 0 && animateIdx.length === 0) {
+        const err = '故事板首帧一张都没生成,且没有任何镜勾选「生成视频」,无法出片。请稍后重试或在分镜里勾选要生成视频的镜。';
+        tracker.fail('visuals', err);
+        return { ok: false, error: err };
+      }
+      // 一镜都不用生成 → 跳过 Seedance,直接进静帧分配(避免空数组调用把服务端打出 400)。
+      const clipResults: SeedanceClipResult[] = Array.from(
+        { length: aiScenes.length },
+        (): SeedanceClipResult => ({ path: null }),
+      );
+      if (animateIdx.length > 0) {
+      tracker.progress(`🎬 AI 自动成片:逐镜生成 ${animateIdx.length} 个片段${resolution ? `(${resolution})` : ''}${refImagesAi.length ? ` · ${refImagesAi.length} 张参考图统一风格` : ''}…`);
+      const generated = await generateSeedanceClips({
+        scenes: animateIdx.map((i) => aiScenes[i]),
         referenceImages: refImagesAi,
         resolution,
         tier: input.seedanceModel,
@@ -1424,8 +1588,13 @@ async function runVideoPipeline(
         },
         signal,
       });
+      // 结果按【子集下标】回来 → 映射回全量下标,否则后面 sceneClips/sceneDurations 全错位。
+      generated.forEach((r, k) => { clipResults[animateIdx[k]] = r; });
+      }
       const okCount = clipResults.filter((r) => r.path).length;
-      if (okCount === 0) {
+      // 全片没有任何可用画面(视频没出 + 首帧也没出)才算失败;只要有首帧就还能出片。
+      const stillOk = keyframePaths.filter(Boolean).length;
+      if (okCount === 0 && stillOk === 0) {
         // 原始 sample(如 "fetch failed")只打到 console 供排查,不展示给用户;
         // 用户面只给通用文案(退费由服务端按计费政策处理:有 token 输出不退、0 输出才退,不在文案里承诺)。
         const sample = clipResults.find((r) => r.error)?.error || '';
@@ -1434,19 +1603,30 @@ async function runVideoPipeline(
         tracker.fail('visuals', err);
         return { ok: false, error: err };
       }
+      /** 就近借一张已出图的首帧(左右由近及远);都没有返回 ''。 */
+      const nearestKeyframe = (i: number): string => {
+        for (let d = 1; d < keyframePaths.length; d++) {
+          if (keyframePaths[i - d]) return keyframePaths[i - d];
+          if (keyframePaths[i + d]) return keyframePaths[i + d];
+        }
+        return '';
+      };
       assignVisuals = () => {
+        const imageByScene = new Map<number, string>();
         const sceneClips = clipResults.map((r, i) => {
           if (r.path) return [r.path];
+          // 没生成视频的镜(以及生成失败的镜):优先用【本镜自己的首帧】走 Ken Burns ——
+          //   比借邻镜的片段贴题得多(邻镜画的是别的内容)。
+          if (keyframePaths[i]) { imageByScene.set(i, keyframePaths[i]); return []; }
+          // 本镜没出图 → 先借邻镜首帧(免费),再考虑借邻镜片段。
+          const nk = nearestKeyframe(i);
+          if (nk) { imageByScene.set(i, nk); return []; }
           const near = findNearestClip(clipResults, i);
-          return near ? [near] : [];
+          if (near) return [near];
+          // 全都没有(极端)→ 用参考图静帧兜底。
+          if (refImagesAi.length > 0) imageByScene.set(i, refImagesAi[i % refImagesAi.length]);
+          return [];
         });
-        // 既无本镜片段又借不到邻镜的(极端)→ 用参考图静帧兜底。
-        const imageByScene = new Map<number, string>();
-        if (refImagesAi.length > 0) {
-          clipResults.forEach((r, i) => {
-            if (!r.path && !findNearestClip(clipResults, i)) imageByScene.set(i, refImagesAi[i % refImagesAi.length]);
-          });
-        }
         return { sceneClips, imagePool: refImagesAi, imageByScene };
       };
       // AI 生成的片段本地留一份:assetDir 是临时目录(结尾会清掉),拷到成片输出目录的
@@ -2315,7 +2495,18 @@ async function runVideoPipeline(
     // 并缓存(命中缓存不重下);用户上传的绝对路径原样返回。再统一过 existsSync 兜底
     // (取不到 = 不加 BGM,不挡出片)。
     const resolvedBgm = await resolveBgmPath(input.bgmPath, (m) => tracker.progress(m));
-    const bgmPath = resolvedBgm && fs.existsSync(resolvedBgm) ? resolvedBgm : undefined;
+    let bgmPath = resolvedBgm && fs.existsSync(resolvedBgm) ? resolvedBgm : undefined;
+    // 分段配乐(电影级分镜表):相邻同情绪的镜合成一段,每段按情绪从云端曲库挑一首,
+    //   段间交叉淡入淡出拼成一条完整 BGM 轨 —— 叙事推进时音乐跟着变(悬疑开场 → 紧张冲突
+    //   → 轻快反转 → 钢琴收尾),而不是整片循环同一首。
+    //   条件不足(只有一段 / 曲库拉不到 / 切片失败)→ 内部返回 undefined,原样回落单曲。
+    if (aiShots && aiShots.some((s) => (s.bgmMood || '').trim())) {
+      const segs = aiShots.map((s, i) => ({ mood: s.bgmMood || '', seconds: sceneDurations[i] || s.seconds || 0 }));
+      const moodTrack = await buildMoodBgmTrack(
+        segs, assetDir, runFfmpeg, bgmPath, (m) => tracker.progress(m), signal,
+      );
+      if (moodTrack) bgmPath = moodTrack;
+    }
     if (input.bgmPath && !bgmPath) tracker.progress('⚠️ 背景音乐获取失败，本条将不加 BGM');
     if (subtitleEnabled) {
       tracker.progress(subtitleCues.length > 0
@@ -2382,6 +2573,21 @@ async function runVideoPipeline(
         bgmVolume: input.bgmVolume !== undefined && input.bgmVolume >= 0 ? input.bgmVolume : undefined,
         // edge-tts 词边界出的精确 cue;为空时 compose 内部退回按各镜时长估算。
         cues: subtitleEnabled && subtitleCues.length > 0 ? subtitleCues : undefined,
+        // 花字(电影级分镜表的 on_screen_text):按各镜在总时间轴上的累计起点定位。
+        //   与字幕是两层 —— 花字大字偏上、只在本镜出现;字幕小字贴底、全程滚。
+        //   跟字幕开关无关(用户可能关字幕但仍要关键数字弹出)。
+        keyTexts: aiShots ? (() => {
+          const out: { text: string; start: number; end: number }[] = [];
+          let t = 0;
+          aiShots.forEach((s, i) => {
+            const d = sceneDurations[i] || s.seconds || 0;
+            const txt = (s.onScreenText || '').trim();
+            // 太短的镜不弹花字(闪一下反而干扰);首尾各留 0.15s 让它跟画面切换错开。
+            if (txt && d >= 1.2) out.push({ text: txt, start: t + 0.15, end: t + d - 0.15 });
+            t += d;
+          });
+          return out.length > 0 ? out : undefined;
+        })() : undefined,
         onScene: (done, total) => tracker.progress(`${label ? label + ' · ' : ''}合成分镜 ${done}/${total}`),
       });
       if (videoCount > 1) tracker.progress(`✅ ${label} 合成完成`);

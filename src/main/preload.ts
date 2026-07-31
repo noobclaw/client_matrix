@@ -103,6 +103,8 @@ contextBridge.exposeInMainWorld('electron', {
     generate: (input: unknown) => ipcRenderer.invoke('video:generate', input),
     /** Stop a running render job by taskId — aborts the pipeline + SIGKILLs ffmpeg/seedance/tts. */
     stop: (taskId: string) => ipcRenderer.invoke('video:stop', taskId),
+    /** Cinematic: parse a script into a storyboard table for review (LLM only — no images, no video, no image/video charges). */
+    parseStoryboard: (args: unknown) => ipcRenderer.invoke('video:parseStoryboard', args),
     /** Open the system file picker to choose reference images (returns abs paths). */
     pickImages: (max: number) => ipcRenderer.invoke('video:pickImages', max),
     /** Open the system file picker to choose local video material (returns abs paths). */

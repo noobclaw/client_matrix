@@ -2980,6 +2980,27 @@ if (!gotTheLock) {
       const media = scanLocalMediaFolder(String(dir || ''));
       return { videoCount: media.videos.length, imageCount: media.images.length };
     });
+    // 电影级:分镜表预览。向导里点「预览分镜」时调 —— 只跑解析(1~N 次 LLM,几分钱),
+    // 不出图、不生成视频、不扣图片/视频的钱。用户在分镜表上改完再提交任务。
+    ipcMain.handle('video:parseStoryboard', async (_e, args: {
+      script?: string; scriptMode?: 'strict' | 'ai'; lang?: string; targetSeconds?: number; styleHint?: string;
+    }) => {
+      try {
+        const { parseStoryboardScript, deriveStoryboard } = require('./libs/video/storyboardScript');
+        const { detectLang } = require('./libs/video/scriptWriter');
+        const text = String(args?.script || '').trim();
+        if (!text) return { ok: false, error: 'empty_script' };
+        const lang = args?.lang && args.lang !== 'auto' ? args.lang : detectLang(text);
+        const opts = { lang, targetSeconds: args?.targetSeconds, styleHint: args?.styleHint };
+        const r = args?.scriptMode === 'ai'
+          ? await deriveStoryboard(text, opts)
+          : await parseStoryboardScript(text, opts);
+        if (!r) return { ok: false, error: 'parse_failed' };
+        return { ok: true, ...r };
+      } catch (e: unknown) {
+        return { ok: false, error: String((e as Error)?.message || e).slice(0, 300) };
+      }
+    });
     // 本地混剪:直接多选素材文件(与选文件夹二选一),回 { files, videoCount, imageCount }。
     ipcMain.handle('video:pickLocalFiles', async () => {
       const parent = BrowserWindow.getFocusedWindow() || mainWindow || undefined;

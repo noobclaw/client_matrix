@@ -1411,6 +1411,28 @@ const server = http.createServer(async (req, res) => {
               return writeJSON(res, 200, { valid: [], rejected: [] });
             }
           }
+          case 'video:parseStoryboard': {
+            // 电影级分镜表预览:只跑解析(LLM,几分钱),不出图、不生成视频。
+            // ⚠️ Tauri 是主发布路径 —— main.ts 的 ipcMain 同名 handler 必须与这里保持一致。
+            try {
+              const { parseStoryboardScript, deriveStoryboard } = await import('./libs/video/storyboardScript');
+              const { detectLang } = await import('./libs/video/scriptWriter');
+              const a = (args[0] || {}) as {
+                script?: string; scriptMode?: string; lang?: string; targetSeconds?: number; styleHint?: string;
+              };
+              const text = String(a.script || '').trim();
+              if (!text) return writeJSON(res, 200, { ok: false, error: 'empty_script' });
+              const lang = a.lang && a.lang !== 'auto' ? a.lang : detectLang(text);
+              const opts = { lang: lang as any, targetSeconds: a.targetSeconds, styleHint: a.styleHint };
+              const r = a.scriptMode === 'ai'
+                ? await deriveStoryboard(text, opts)
+                : await parseStoryboardScript(text, opts);
+              if (!r) return writeJSON(res, 200, { ok: false, error: 'parse_failed' });
+              return writeJSON(res, 200, { ok: true, ...r });
+            } catch (e) {
+              return writeJSON(res, 200, { ok: false, error: String((e as Error)?.message || e).slice(0, 300) });
+            }
+          }
           case 'video:generate': {
             // Fire-and-forget (same pattern as scenario:runTaskNow above).
             // The pipeline runs for minutes (TTS + stock downloads + ffmpeg).

@@ -557,9 +557,62 @@ function buildDrawtextChain(
   return filters;
 }
 
+/**
+ * 花字(打在画面上的大字)。与底部字幕是【两层】:
+ *   · 字幕 = 把口播念的每句话滚出来,小字、贴底、全程有
+ *   · 花字 = 关键数字 / 金句 / 身份条,大字、偏上、只在指定时间段出现
+ * 电影级的分镜表里 on_screen_text 就落到这里。没有花字时这一层完全不生成滤镜,零开销。
+ */
+export interface KeyTextCue {
+  text: string;
+  start: number;
+  end: number;
+}
+
+/** 由花字 cue 生成一遍 drawtext(大号粗体 + 强描边 + 偏上,避开底部字幕区)。 */
+function buildKeyTextChain(
+  workDir: string,
+  cues: KeyTextCue[],
+  fontRel: string | null,
+  H: number,
+  W: number,
+): string[] {
+  if (!cues.length) return [];
+  // 花字要显眼:字号取画宽的 ~7.5%(1080 宽 → 81px),明显大于常规字幕(默认 ~48)。
+  const fontSize = Math.max(32, Math.round(W * 0.075));
+  const borderW = Math.max(4, Math.round(fontSize * 0.08));
+  const safeX = Math.round(W * 0.08);
+  const maxPerLine = Math.max(4, Math.floor((W - 2 * safeX) / Math.max(16, fontSize)));
+  // 放在画面上部 28% 处 —— 底部留给常规字幕,中间留给画面主体。
+  const yExpr = `${Math.round(H * 0.28)}-text_h/2`;
+  const filters: string[] = [];
+  cues.forEach((cue, j) => {
+    const wrapped = wrapSubtitle(cue.text, maxPerLine);
+    if (!wrapped) return;
+    const txtName = `key_${String(j).padStart(4, '0')}.txt`;
+    fs.writeFileSync(path.join(workDir, txtName), wrapped, 'utf8');
+    const parts = [
+      fontRel ? `fontfile=${fontRel}` : '',
+      `textfile=${txtName}`,
+      'fontcolor=white',
+      `fontsize=${fontSize}`,
+      'line_spacing=10',
+      'bordercolor=black@0.85',
+      `borderw=${borderW}`,
+      'x=(w-text_w)/2',
+      `y=${yExpr}`,
+      `enable='between(t,${cue.start.toFixed(2)},${cue.end.toFixed(2)})'`,
+    ].filter(Boolean);
+    filters.push(`drawtext=${parts.join(':')}`);
+  });
+  return filters;
+}
+
 export interface ComposeOptions {
   scenes: SceneSpec[];
   outputPath: string;
+  /** 花字层(可选)。空/不传 = 不生成这一层。 */
+  keyTexts?: KeyTextCue[];
   /** 成片宽高(上层按 aspect 算)。默认 1080×1920。 */
   width?: number;
   height?: number;
@@ -739,6 +792,11 @@ export async function composeVideo(opts: ComposeOptions): Promise<string> {
         : rawCues;
       drawtext = buildDrawtextChain(workDir, refineCues(cues), style, fontRel, H, W);
     }
+    // 花字层:与字幕开关无关(用户可能关字幕但仍要关键数字弹出),同样要吃 leadSec 偏移。
+    const keyTextCues = (opts.keyTexts || [])
+      .filter((k) => k && k.text && k.end > k.start)
+      .map((k) => (leadSec > 0 ? { ...k, start: k.start + leadSec, end: k.end + leadSec } : k));
+    const keyDraw = buildKeyTextChain(workDir, keyTextCues, fontRel, H, W);
 
     // 4. 烧字幕 / 加留白(或直接 mux)→ merged
     const wantBgm = !!(opts.bgmPath && fs.existsSync(opts.bgmPath));
@@ -748,8 +806,9 @@ export async function composeVideo(opts: ComposeOptions): Promise<string> {
     const vPad = hasPad
       ? `tpad=start_duration=${leadSec.toFixed(2)}:start_mode=clone:stop_duration=${tailSec.toFixed(2)}:stop_mode=clone`
       : '';
-    const vParts = [vPad, ...drawtext, 'format=yuv420p'].filter(Boolean);
-    const needVideoFilter = vPad !== '' || drawtext.length > 0;
+    // 花字画在字幕之后 → 叠在字幕之上(两层位置本就错开:花字偏上、字幕贴底)。
+    const vParts = [vPad, ...drawtext, ...keyDraw, 'format=yuv420p'].filter(Boolean);
+    const needVideoFilter = vPad !== '' || drawtext.length > 0 || keyDraw.length > 0;
     // 音频:adelay 把旁白整体后移 leadSec,apad 无限补尾;配合 -shortest 由画面总时长(已含
     // 首尾留白)裁齐 → 实际尾部留白 = 全片时长 - 旁白结束点。
     const aFilter = hasPad ? `[1:a]adelay=${Math.round(leadSec * 1000)}:all=1,apad[a]` : '';

@@ -29,6 +29,7 @@ import {
   type VideoAspect,
   type SubtitlePosition,
   type VideoTemplateStyle,
+  type StoryShot,
 } from '../../../services/videoCreation';
 import {
   videoTaskStore,
@@ -40,6 +41,7 @@ import {
   type VideoSchedule,
 } from '../../../services/videoTaskStore';
 import { videoQueue, VIDEO_TASK_LIMIT } from '../../../services/videoQueue';
+import StoryboardReviewModal from './StoryboardReviewModal';
 
 // 订阅 store 的 React hook:任意视图都能拿到最新任务列表 + 运行记录并自动重渲染。
 function useVideoStore(): { tasks: VideoTask[]; runs: VideoRunRecord[] } {
@@ -2397,13 +2399,28 @@ const PUBLISH_PLATFORMS: Array<{ id: Platform; zh: string; en: string; emoji: st
 const DEFAULT_PUBLISH_PLATFORMS: Platform[] = PUBLISH_PLATFORMS.map((p) => p.id);
 
 const SCRIPT_MAX = 800;
+/**
+ * 电影级(pure_ai)专用的文案上限。
+ *
+ * ⚠️ 800 字对「粘一份完整分镜脚本」来说远远不够 —— 一份 4~5 分钟的分镜脚本(含景别运镜、
+ *   画面内容、花字、音乐音效)动辄 3000~6000 字,老上限直接把这类用户挡在门外,
+ *   而"用户可输入精确脚本"正是电影级的核心卖点。
+ *   pipeline 侧已按段落分块解析(storyboardScript.chunkText),长脚本不会撑爆 LLM 上下文。
+ */
+const SCRIPT_MAX_CINEMA = 20000;
 // 严格模式:视频文案逐字朗读,直接决定时长 → 必填且不少于此字数。
 const SCRIPT_MIN_STRICT = 200;
 // 中文配音约 4.5 字/秒;严格模式据此把字数实时换算成预估时长展示给用户。
 const CHARS_PER_SEC = 4.5;
-const DURATION_OPTIONS = [30, 45, 60, 90, 120, 180, 240];
-// 纯 AI(Seedance)成片成本随秒数线性涨 → 时长上限 90s(UI 给到 30/45/60/90;>90 不给)。
-const AI_MAX_SECONDS = 90;
+const DURATION_OPTIONS = [30, 45, 60, 90, 120, 180, 240, 300];
+/**
+ * 纯 AI(Seedance)成片成本随秒数线性涨,老上限 90s。
+ *
+ * ⚠️ 分镜表链路下这个上限已经不合理:条数与「哪几镜真的生成视频」由分镜表决定
+ *   (默认不生成视频 = 图 + 运镜,成本接近零),不该再拿一个写死的秒数把用户
+ *   4 分半的脚本砍掉 6/7。pipeline 侧对应的 45s 硬截同样只在无分镜表时才生效。
+ */
+const AI_MAX_SECONDS = 300;
 
 // ── MPT 风格出片参数选项 ──
 const ASPECT_OPTIONS: { id: VideoAspect; zh: string; en: string; icon: string }[] = [
@@ -3294,14 +3311,18 @@ const VideoConfigModal: React.FC<{
       : true;
 
   const scriptLen = script.trim().length;
+  // 电影级(pure_ai)允许粘完整分镜脚本 → 用更大的上限;其它模式维持 800。
+  const scriptMax = mode === 'pure_ai' ? SCRIPT_MAX_CINEMA : SCRIPT_MAX;
   // 严格模式据字数预估时长(向上取整,中文约 4.5 字/秒)。
+  // ⚠️ 电影级粘的是【完整分镜脚本】,里面大半是制作说明(会被解析器丢弃),按总字数
+  //   估时长会离谱地偏大 —— 这里只作粗略提示,真实时长以解析出的口播为准。
   const strictEstSec = Math.max(1, Math.round(scriptLen / CHARS_PER_SEC));
   // 文案校验:
-  //   strict 严格逐字:必填、≥SCRIPT_MIN_STRICT 字、≤SCRIPT_MAX 字(直接决定时长)。
+  //   strict 严格逐字:必填、≥SCRIPT_MIN_STRICT 字、≤scriptMax 字(直接决定时长)。
   //   ai 参考:选填,填了则不超上限。
   const scriptValid = scriptMode === 'strict'
-    ? (scriptLen >= SCRIPT_MIN_STRICT && scriptLen <= SCRIPT_MAX)
-    : (scriptLen === 0 || scriptLen <= SCRIPT_MAX);
+    ? (scriptLen >= SCRIPT_MIN_STRICT && scriptLen <= scriptMax)
+    : (scriptLen === 0 || scriptLen <= scriptMax);
   // 赛道步:非矩阵只校验赛道必选;矩阵号必须选好账号(编辑老任务可沿用已存身份不强制重选)。
   const trackStepValid = matrixMode ? (!!identityAccountId || isEdit) : (trackId !== '');
   // 文案步:只校验文案本身。
@@ -3324,12 +3345,15 @@ const VideoConfigModal: React.FC<{
     return `${base}（AI ${isZh ? '写稿' : 'script'} · ${targetSeconds}s）`;
   };
 
-  const buildInput = (): VideoCreationInput => ({
+  const buildInput = (shotsOverride?: StoryShot[]): VideoCreationInput => ({
     persona: persona.trim(),
     track: trackLabel,
     keywords: keywords.split(/[,，\s]+/).map((k) => k.trim()).filter(Boolean),
     script: script.trim(),
     scriptMode,
+    // 电影级:用户在分镜表上确认/编辑过的分镜。pipeline 见到它就直接用,不再跑一次解析
+    //   —— 既省一次 AI 调用,也保证用户改过的内容(含「要动」的勾选)原样生效。
+    storyboardShots: shotsOverride && shotsOverride.length > 0 ? shotsOverride : undefined,
     // engine / seedance / target 等以 mode 为唯一真相源 — 之前以 materialSource 派生,
     // 但 React state 异步 + closure 边界 case 下,用户切「纯 AI→AI 口播稿」时 mode
     // 已切回 'stock',materialSource 可能还停在 'ai',结果 engine 错派 'ai' 跑了 Seedance
@@ -3391,8 +3415,48 @@ const VideoConfigModal: React.FC<{
 
   const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = async () => {
-    const input = buildInput();
+  // ── 电影级:分镜表审阅 ────────────────────────────────────────────────────
+  //  提交前先把脚本解析成分镜表给用户过一眼 —— 这是【烧钱之前】唯一能拦住方向错误的地方,
+  //  也是「要动」逐镜勾选的入口(不勾=首帧+运镜几毛,勾了=生成视频几块)。
+  //  只跑 LLM,不出图不生成视频,所以这一步几乎不花钱。
+  const [sbOpen, setSbOpen] = useState(false);
+  const [sbLoading, setSbLoading] = useState(false);
+  const [sbError, setSbError] = useState<string | null>(null);
+  const [sbShots, setSbShots] = useState<StoryShot[]>([]);
+  const [sbWarnings, setSbWarnings] = useState<string[]>([]);
+  const [sbFidelity, setSbFidelity] = useState<number | undefined>(undefined);
+
+  const runParseStoryboard = async () => {
+    setSbLoading(true);
+    setSbError(null);
+    try {
+      const api = (window as any).electronAPI?.video;
+      if (!api?.parseStoryboard) { setSbError(isZh ? '当前版本不支持分镜预览' : 'Storyboard preview unavailable'); return; }
+      const r = await api.parseStoryboard({
+        script: script.trim(),
+        scriptMode,
+        lang: scriptLang !== 'auto' ? scriptLang : undefined,
+        targetSeconds: Math.min(targetSeconds, AI_MAX_SECONDS),
+        // 有脚本时不拿赛道/人设干扰画面调性(用户脚本自己就定了调)。
+        styleHint: scriptMode === 'ai' ? [persona.trim(), trackLabel].filter(Boolean).join('、') || undefined : undefined,
+      });
+      if (!r?.ok || !Array.isArray(r.shots) || r.shots.length === 0) {
+        setSbError(r?.error || (isZh ? '未解析出分镜' : 'no shots parsed'));
+        return;
+      }
+      setSbShots(r.shots);
+      setSbWarnings(Array.isArray(r.warnings) ? r.warnings : []);
+      setSbFidelity(typeof r.fidelity === 'number' ? r.fidelity : undefined);
+    } catch (e) {
+      setSbError(String((e as Error)?.message || e).slice(0, 200));
+    } finally {
+      setSbLoading(false);
+    }
+  };
+
+  /** 真正落任务(分镜表确认后,或非电影级直接走)。 */
+  const commitTask = async (shotsOverride?: StoryShot[]) => {
+    const input = buildInput(shotsOverride);
     // daily 才带 dailyTime,其余间隔不需要(避免存无意义的时刻)。
     const schedule: VideoSchedule = {
       runInterval,
@@ -3424,6 +3488,23 @@ const VideoConfigModal: React.FC<{
     } finally {
       setSubmitting(false);
     }
+  };
+
+  /**
+   * 提交入口。
+   * 电影级(pure_ai)新建任务 → 先弹分镜表让用户过一眼再落任务;其余模式维持原样直接落。
+   * 编辑老任务不弹(用户是来改配置的,不是来重排分镜的)。
+   */
+  const handleSubmit = async () => {
+    if (mode === 'pure_ai' && !isEdit && script.trim()) {
+      setSbShots([]);
+      setSbWarnings([]);
+      setSbFidelity(undefined);
+      setSbOpen(true);
+      void runParseStoryboard();
+      return;
+    }
+    await commitTask();
   };
 
   // 用户勾选的发布平台 id 数组 —— 写到 input.publishPlatforms,pipeline 据此 forEach 调 driver。
@@ -3723,38 +3804,52 @@ const VideoConfigModal: React.FC<{
                   <ModeOption
                     active={scriptMode === 'strict'}
                     onClick={() => setScriptMode('strict')}
-                    title={isZh ? '严格按我的视频文案' : 'Use my script verbatim'}
-                    desc={isZh ? '逐字朗读，文案长度直接决定视频长度' : 'read verbatim; length sets video length'}
+                    title={mode === 'pure_ai'
+                      ? (isZh ? '我有脚本' : 'I have a script')
+                      : (isZh ? '严格按我的视频文案' : 'Use my script verbatim')}
+                    desc={mode === 'pure_ai'
+                      ? (isZh ? '粘完整分镜脚本或口播稿，口播逐字照念、画面按你写的拍' : 'paste a full storyboard or narration; read verbatim, shot-for-shot')
+                      : (isZh ? '逐字朗读，文案长度直接决定视频长度' : 'read verbatim; length sets video length')}
                   />
                   <ModeOption
                     active={scriptMode === 'ai'}
                     onClick={() => setScriptMode('ai')}
-                    title={isZh ? 'AI 参考我的文案' : 'AI writes (reference mine)'}
-                    desc={isZh ? 'AI 写稿，你的文案仅作参考（可不填）' : 'AI writes; your text is just a reference'}
+                    title={mode === 'pure_ai'
+                      ? (isZh ? '我只有个想法' : 'I just have an idea')
+                      : (isZh ? 'AI 参考我的文案' : 'AI writes (reference mine)')}
+                    desc={mode === 'pure_ai'
+                      ? (isZh ? 'AI 写稿并设计分镜，你的文字仅作方向参考（可不填）' : 'AI writes the script and designs shots; your text is a hint')
+                      : (isZh ? 'AI 写稿，你的文案仅作参考（可不填）' : 'AI writes; your text is just a reference')}
                   />
                 </div>
               </Field>
 
               <Field
-                label={isZh ? '视频文案' : 'Script'}
+                label={mode === 'pure_ai' && scriptMode === 'strict'
+                  ? (isZh ? '分镜脚本 / 口播稿' : 'Storyboard or narration')
+                  : (isZh ? '视频文案' : 'Script')}
                 hint={scriptMode === 'strict'
-                  ? (isZh ? `逐字朗读，不少于 ${SCRIPT_MIN_STRICT} 字；字数越多视频越长` : `read verbatim; at least ${SCRIPT_MIN_STRICT} chars`)
+                  ? (mode === 'pure_ai'
+                      ? (isZh ? `不少于 ${SCRIPT_MIN_STRICT} 字。表头、拍摄准备、B-roll 清单这类制作说明会自动剔除，不会被念出来` : `at least ${SCRIPT_MIN_STRICT} chars; production notes are stripped automatically`)
+                      : (isZh ? `逐字朗读，不少于 ${SCRIPT_MIN_STRICT} 字；字数越多视频越长` : `read verbatim; at least ${SCRIPT_MIN_STRICT} chars`))
                   : (isZh ? '选填，留空则由 AI 按目标时长写稿；填了 AI 会参考' : 'optional; AI writes for target length, uses yours as reference')}
               >
                 <textarea
                   value={script}
                   onChange={(e) => setScript(e.target.value)}
-                  rows={5}
+                  rows={mode === 'pure_ai' && scriptMode === 'strict' ? 10 : 5}
                   placeholder={scriptMode === 'strict'
-                    ? (isZh ? `把要逐字朗读的视频文案粘进来…（${SCRIPT_MIN_STRICT}~${SCRIPT_MAX} 字）` : `Paste the exact narration… (${SCRIPT_MIN_STRICT}~${SCRIPT_MAX} chars)`)
-                    : (isZh ? `给 AI 的参考方向，可留空…（≤${SCRIPT_MAX} 字）` : `Reference for AI, can be empty… (≤${SCRIPT_MAX} chars)`)}
+                    ? (mode === 'pure_ai'
+                        ? (isZh ? '把你的分镜脚本整份粘进来（场景/口播/画面/花字/音乐都可以带上），或者只粘一段口播稿…' : 'Paste your full storyboard (scenes, narration, visuals, captions, music) or just the narration…')
+                        : (isZh ? `把要逐字朗读的视频文案粘进来…（${SCRIPT_MIN_STRICT}~${scriptMax} 字）` : `Paste the exact narration… (${SCRIPT_MIN_STRICT}~${scriptMax} chars)`))
+                    : (isZh ? `给 AI 的参考方向，可留空…（≤${scriptMax} 字）` : `Reference for AI, can be empty… (≤${scriptMax} chars)`)}
                   className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm dark:text-white focus:outline-none focus:ring-2 focus:ring-rose-500/50 resize-y min-h-[100px]"
                 />
                 <div className={`mt-1 text-[11px] text-right ${!scriptValid ? 'text-red-500' : 'text-gray-400'}`}>
-                  {scriptLen}/{SCRIPT_MAX}
+                  {scriptLen}/{scriptMax}
                   {scriptMode === 'strict' && scriptLen > 0 && scriptLen < SCRIPT_MIN_STRICT
                     && (isZh ? `（还需 ${SCRIPT_MIN_STRICT - scriptLen} 字）` : ` (need ${SCRIPT_MIN_STRICT - scriptLen} more)`)}
-                  {scriptLen > SCRIPT_MAX && (isZh ? '（超出上限）' : ' (over limit)')}
+                  {scriptLen > scriptMax && (isZh ? '（超出上限）' : ' (over limit)')}
                 </div>
               </Field>
 
@@ -3762,9 +3857,13 @@ const VideoConfigModal: React.FC<{
                 /* 严格模式:不选目标时长,实时按字数预估时长展示 */
                 <div className="rounded-lg border border-rose-200 dark:border-rose-900/50 bg-rose-50 dark:bg-rose-950/20 px-3 py-2 text-[12px] text-rose-700 dark:text-rose-300">
                   {scriptLen >= SCRIPT_MIN_STRICT
-                    ? (isZh
-                        ? `⏱️ 预估视频时长约 ${strictEstSec}s（按中文 ${CHARS_PER_SEC} 字/秒朗读估算，实际以配音为准）`
-                        : `⏱️ Estimated ~${strictEstSec}s (at ${CHARS_PER_SEC} chars/sec; actual depends on TTS)`)
+                    ? (mode === 'pure_ai'
+                        ? (isZh
+                            ? `⏱️ 实际时长以解析出的口播为准（整份脚本 ${scriptLen} 字，其中制作说明会被剔除）`
+                            : `⏱️ Actual length depends on the parsed narration (${scriptLen} chars pasted; production notes are stripped)`)
+                        : (isZh
+                            ? `⏱️ 预估视频时长约 ${strictEstSec}s（按中文 ${CHARS_PER_SEC} 字/秒朗读估算，实际以配音为准）`
+                            : `⏱️ Estimated ~${strictEstSec}s (at ${CHARS_PER_SEC} chars/sec; actual depends on TTS)`))
                     : (isZh
                         ? `⏱️ 填够 ${SCRIPT_MIN_STRICT} 字后这里显示预估时长（按 ${CHARS_PER_SEC} 字/秒）`
                         : `⏱️ Estimate shows after ${SCRIPT_MIN_STRICT} chars`)}
@@ -3795,16 +3894,27 @@ const VideoConfigModal: React.FC<{
                 </Field>
               )}
 
-              {/* 纯AI:按【时长 × 清晰度】预估实收费用(积分 + $,按卖价),让用户开跑前心里有数。 */}
+              {/* 纯AI 费用说明。
+                  ⚠️ 老版本按【整片秒数 × 每秒价】估,那是"每一镜都生成视频"的口径。分镜表链路下
+                     默认【一镜都不生成视频】(用故事板首帧 + 运镜,只收出图费),只有用户点名要动的
+                     镜才按秒计费 —— 再按整片秒数报价会把用户吓跑,而且是错的。 */}
               {mode === 'pure_ai' && aiCreditsPerSec != null && aiUsdPerSec != null && (() => {
                 const estSec = Math.min(AI_MAX_SECONDS, scriptMode === 'strict' ? Math.max(1, strictEstSec) : targetSeconds);
-                const estCredits = Math.round(aiCreditsPerSec * estSec);
-                const estUsd = aiUsdPerSec * estSec;
+                const maxCredits = Math.round(aiCreditsPerSec * estSec);
+                const maxUsd = aiUsdPerSec * estSec;
                 return (
                   <div className="mt-3 rounded-lg border border-fuchsia-500/30 bg-fuchsia-500/5 px-3 py-2.5 text-sm">
-                    <span className="text-fuchsia-600 dark:text-fuchsia-400 font-semibold">💎 {isZh ? '预估费用' : 'Est. cost'}</span>
-                    <span className="ml-2 dark:text-gray-200">{isZh ? `约 ${estCredits.toLocaleString()} 积分(≈$${estUsd.toFixed(2)})` : `~${estCredits.toLocaleString()} credits (≈$${estUsd.toFixed(2)})`}</span>
-                    <div className="text-[11px] text-gray-400 mt-1">{isZh ? `${seedanceResolution} · 约 ${estSec}s · 实际按真实时长逐镜扣` : `${seedanceResolution} · ~${estSec}s · charged per real shot length`}</div>
+                    <span className="text-fuchsia-600 dark:text-fuchsia-400 font-semibold">💎 {isZh ? '费用说明' : 'Cost'}</span>
+                    <div className="mt-1 text-[12px] dark:text-gray-200">
+                      {isZh
+                        ? '默认按分镜出故事板首帧 + 运镜成片，只收出图费（每镜几毛）。'
+                        : 'By default each shot uses a storyboard frame + camera move — you only pay for images.'}
+                    </div>
+                    <div className="text-[11px] text-gray-400 mt-1">
+                      {isZh
+                        ? `若整片每一镜都改成 AI 生成视频，上限约 ${maxCredits.toLocaleString()} 积分（≈$${maxUsd.toFixed(2)}，${seedanceResolution} · ${estSec}s）。实际按真实时长逐镜扣。`
+                        : `If every shot were AI-generated video, up to ~${maxCredits.toLocaleString()} credits (≈$${maxUsd.toFixed(2)}, ${seedanceResolution} · ${estSec}s). Charged per real shot length.`}
+                    </div>
                   </div>
                 );
               })()}
@@ -4484,7 +4594,9 @@ const VideoConfigModal: React.FC<{
                   if (scriptMode === 'strict' && scriptLen < SCRIPT_MIN_STRICT) {
                     setSubmitError(isZh ? `严格模式下视频文案不少于 ${SCRIPT_MIN_STRICT} 字（当前 ${scriptLen} 字）` : `Verbatim mode needs ≥ ${SCRIPT_MIN_STRICT} chars (now ${scriptLen})`);
                   } else {
-                    setSubmitError(isZh ? `文案不能超过 ${SCRIPT_MAX} 字` : `Script must be ≤ ${SCRIPT_MAX} chars`);
+                    // ⚠️ 用 scriptMax(电影级 = SCRIPT_MAX_CINEMA),不是写死的 SCRIPT_MAX ——
+                    //   否则粘完整分镜脚本会在这一步被 800 字上限挡住,前面放宽的输入框形同虚设。
+                    setSubmitError(isZh ? `文案不能超过 ${scriptMax} 字` : `Script must be ≤ ${scriptMax} chars`);
                   }
                   return;
                 }
@@ -4521,6 +4633,22 @@ const VideoConfigModal: React.FC<{
             onConfirmed={() => { setShowLoginCheck(false); void handleSubmit(); }}
           />
         )}
+        {/* 电影级:分镜表审阅 —— 烧钱之前最后一道关口 */}
+        <StoryboardReviewModal
+          open={sbOpen}
+          isZh={isZh}
+          loading={sbLoading}
+          error={sbError}
+          shots={sbShots}
+          warnings={sbWarnings}
+          fidelity={sbFidelity}
+          creditsPerSec={aiCreditsPerSec}
+          usdPerSec={aiUsdPerSec}
+          onChange={setSbShots}
+          onRetry={() => { void runParseStoryboard(); }}
+          onCancel={() => setSbOpen(false)}
+          onConfirm={() => { setSbOpen(false); void commitTask(sbShots); }}
+        />
       </div>
     </div>
   );
