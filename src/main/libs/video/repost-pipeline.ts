@@ -475,6 +475,9 @@ async function synthAndAlign(
       const out = path.join(assetDir, `seg_${String(i).padStart(3, '0')}.mp3`);
       // ⚠️ signal 必须传:voiceChain × 最多 5 次重试 × 单次最长 60s,不传则停止要磨数分钟。
       const r0 = await synthesize(seg.text, out, v, rate, { signal });
+      // 豆包按字符实扣 —— 必须报出来。repost 的平台费是按 aiCostUsd 翻倍算的,
+      //   漏了 TTS 这笔就等于少收钱(不只是详情页少显示)。Edge 免费,chargedTokens 为空。
+      if (r0.chargedTokens) onCost?.(r0.chargedTokens, r0.costUsd || 0);
       if (r0.synthesized && r0.durationSec > 0) { preTts.set(i, { path: r0.audioPath, dur: r0.durationSec }); break; }
     }
     const got = preTts.get(i);
@@ -514,6 +517,7 @@ async function synthAndAlign(
       for (const v of chain) {
         const out = path.join(assetDir, `seg_${String(i).padStart(3, '0')}_g.mp3`);
         const r = await synthesize(seg.text, out, v, globalRate, { signal });
+        if (r.chargedTokens) onCost?.(r.chargedTokens, r.costUsd || 0);
         if (r.synthesized && r.durationSec > 0) { ttsPath = r.audioPath; ttsDur = r.durationSec; break; }
       }
       if (!ttsPath && cached) { ttsPath = cached.path; ttsDur = cached.dur; }
@@ -529,6 +533,7 @@ async function synthAndAlign(
       const outF = path.join(assetDir, `seg_${String(i).padStart(3, '0')}_f.mp3`);
       for (const v of chain) {
         const rf = await synthesize(seg.text, outF, v, Math.min(50, globalRate + TUNE.lineBoost), { signal });
+        if (rf.chargedTokens) onCost?.(rf.chargedTokens, rf.costUsd || 0);
         if (rf.synthesized && rf.durationSec > 0 && rf.durationSec < ttsDur) {
           onLog(`⏩ 第 ${i + 1} 句偏长,自动提速重配(${ttsDur.toFixed(1)}s→${rf.durationSec.toFixed(1)}s)`);
           ttsPath = rf.audioPath; ttsDur = rf.durationSec;
@@ -548,6 +553,7 @@ async function synthAndAlign(
           const out2 = path.join(assetDir, `seg_${String(i).padStart(3, '0')}_c.mp3`);
           for (const v of chain) {
             const r2 = await synthesize(short, out2, v, Math.min(50, globalRate + TUNE.lineBoost), { signal });
+            if (r2.chargedTokens) onCost?.(r2.chargedTokens, r2.costUsd || 0);
             if (r2.synthesized && r2.durationSec > 0 && r2.durationSec < ttsDur) {
               onLog(`✂️ 第 ${i + 1} 句仍超长,轻度精简重配(${ttsDur.toFixed(1)}s→${r2.durationSec.toFixed(1)}s)`);
               ttsPath = r2.audioPath; ttsDur = r2.durationSec; seg.text = short;
