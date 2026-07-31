@@ -3020,6 +3020,10 @@ if (!gotTheLock) {
           ? await deriveStoryboard(text, opts)
           : await parseStoryboardScript(text, opts);
         if (!r) return { ok: false, error: 'parse_failed' };
+        // 解析器现在会在「一条都没出来」时带回 warnings 说明原因 —— 别再让 UI 只剩 parse_failed。
+        if (!r.shots || r.shots.length === 0) {
+          return { ok: false, error: (r.warnings || []).join('；') || 'parse_failed', warnings: r.warnings };
+        }
         return { ok: true, ...r };
       } catch (e: unknown) {
         return { ok: false, error: String((e as Error)?.message || e).slice(0, 300) };

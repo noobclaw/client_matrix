@@ -1452,6 +1452,10 @@ const server = http.createServer(async (req, res) => {
                 ? await deriveStoryboard(text, opts)
                 : await parseStoryboardScript(text, opts);
               if (!r) return writeJSON(res, 200, { ok: false, error: 'parse_failed' });
+              // 解析器现在会在「一条都没出来」时带回 warnings 说明原因 —— 别再让 UI 只剩 parse_failed。
+              if (!r.shots || r.shots.length === 0) {
+                return writeJSON(res, 200, { ok: false, error: (r.warnings || []).join('；') || 'parse_failed', warnings: r.warnings });
+              }
               return writeJSON(res, 200, { ok: true, ...r });
             } catch (e) {
               return writeJSON(res, 200, { ok: false, error: String((e as Error)?.message || e).slice(0, 300) });

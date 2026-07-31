@@ -42,7 +42,7 @@ import {
 } from '../../../services/videoTaskStore';
 import { videoQueue, VIDEO_TASK_LIMIT } from '../../../services/videoQueue';
 import StoryboardReviewModal from './StoryboardReviewModal';
-import BgmPreviewBar, { useBgmPreview, useVoicePreview } from './BgmPreviewBar';
+import BgmPreviewBar, { BgmPreviewButtons, BgmPreviewPlayer, useBgmPreview, useVoicePreview } from './BgmPreviewBar';
 
 // 订阅 store 的 React hook:任意视图都能拿到最新任务列表 + 运行记录并自动重渲染。
 function useVideoStore(): { tasks: VideoTask[]; runs: VideoRunRecord[] } {
@@ -4152,8 +4152,9 @@ const VideoConfigModal: React.FC<{
                           </optgroup>
                         )}
                       </select>
+                      <BgmPreviewButtons isZh={isZh} bgmPath={bgmPath} state={bgmPreview} tone="rose" />
                     </div>
-                    <BgmPreviewBar isZh={isZh} bgmPath={bgmPath} state={bgmPreview} tone="rose" showCloudHint />
+                    <BgmPreviewPlayer isZh={isZh} bgmPath={bgmPath} state={bgmPreview} tone="rose" showCloudHint />
                   </div>
                 )}
 
@@ -5478,23 +5479,25 @@ export const HotspotVideoModal: React.FC<{
                 </div>
               </Field>
               <Field label={isZh ? '背景音乐(选填)' : 'BGM (optional)'}>
-                <select value={bgmPath} onChange={(e) => setBgmPath(e.target.value)}
-                  className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50">
-                  <option value="">{isZh ? '无背景音乐' : 'None'}</option>
-                  {/* 编辑老任务时选中的云端曲目可能不在已拉清单里(清单变了/拉不到)→ 补占位,避免下拉空白。 */}
-                  {bgmPath.startsWith(REMOTE_BGM_PREFIX) && !remoteBgm.some((b) => `${REMOTE_BGM_PREFIX}${b.url}` === bgmPath) && (
-                    <option value={bgmPath}>☁️ {bgmDisplayName(bgmPath, isZh, remoteBgm)}</option>
-                  )}
-                  <optgroup label={isZh ? '内置曲库' : 'Built-in'}>
-                    {BUILTIN_BGM.map((b) => (<option key={b.id} value={`${BUILTIN_BGM_PREFIX}${b.id}`}>🎵 {isZh ? b.zh : b.en}</option>))}
-                  </optgroup>
-                  {remoteBgm.length > 0 && (
-                    <optgroup label={isZh ? '云端曲库（首次需下载）' : 'Cloud (downloads first time)'}>
-                      {remoteBgm.map((b) => (<option key={b.url} value={`${REMOTE_BGM_PREFIX}${b.url}`}>☁️ {isZh ? b.zh : b.en}</option>))}
+                <div className="flex items-center gap-2">
+                  <select value={bgmPath} onChange={(e) => setBgmPath(e.target.value)}
+                    className="flex-1 min-w-0 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50">
+                    <option value="">{isZh ? '无背景音乐' : 'None'}</option>
+                    {/* 编辑老任务时选中的云端曲目可能不在已拉清单里(清单变了/拉不到)→ 补占位,避免下拉空白。 */}
+                    {bgmPath.startsWith(REMOTE_BGM_PREFIX) && !remoteBgm.some((b) => `${REMOTE_BGM_PREFIX}${b.url}` === bgmPath) && (
+                      <option value={bgmPath}>☁️ {bgmDisplayName(bgmPath, isZh, remoteBgm)}</option>
+                    )}
+                    <optgroup label={isZh ? '内置曲库' : 'Built-in'}>
+                      {BUILTIN_BGM.map((b) => (<option key={b.id} value={`${BUILTIN_BGM_PREFIX}${b.id}`}>🎵 {isZh ? b.zh : b.en}</option>))}
                     </optgroup>
-                  )}
-                </select>
-                <BgmPreviewBar isZh={isZh} bgmPath={bgmPath} state={bgmPreview} tone="fuchsia" showCloudHint />
+                    {remoteBgm.length > 0 && (
+                      <optgroup label={isZh ? '云端曲库（首次需下载）' : 'Cloud (downloads first time)'}>
+                        {remoteBgm.map((b) => (<option key={b.url} value={`${REMOTE_BGM_PREFIX}${b.url}`}>☁️ {isZh ? b.zh : b.en}</option>))}
+                      </optgroup>
+                    )}
+                  </select>                  <BgmPreviewButtons isZh={isZh} bgmPath={bgmPath} state={bgmPreview} tone="fuchsia" />
+                </div>
+                <BgmPreviewPlayer isZh={isZh} bgmPath={bgmPath} state={bgmPreview} tone="fuchsia" showCloudHint />
               </Field>
             </>
           )}
@@ -6066,22 +6069,24 @@ export const ThreadVideoModal: React.FC<{
                 </div>
               </Field>
               <Field label={isZh ? '背景音乐(选填)' : 'BGM (optional)'}>
-                <select value={bgmPath} onChange={(e) => setBgmPath(e.target.value)}
-                  className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500/50">
-                  <option value="">{isZh ? '无背景音乐' : 'None'}</option>
-                  {bgmPath.startsWith(REMOTE_BGM_PREFIX) && !remoteBgm.some((b) => `${REMOTE_BGM_PREFIX}${b.url}` === bgmPath) && (
-                    <option value={bgmPath}>☁️ {bgmDisplayName(bgmPath, isZh, remoteBgm)}</option>
-                  )}
-                  <optgroup label={isZh ? '内置曲库' : 'Built-in'}>
-                    {BUILTIN_BGM.map((b) => (<option key={b.id} value={`${BUILTIN_BGM_PREFIX}${b.id}`}>🎵 {isZh ? b.zh : b.en}</option>))}
-                  </optgroup>
-                  {remoteBgm.length > 0 && (
-                    <optgroup label={isZh ? '云端曲库（首次需下载）' : 'Cloud (downloads first time)'}>
-                      {remoteBgm.map((b) => (<option key={b.url} value={`${REMOTE_BGM_PREFIX}${b.url}`}>☁️ {isZh ? b.zh : b.en}</option>))}
+                <div className="flex items-center gap-2">
+                  <select value={bgmPath} onChange={(e) => setBgmPath(e.target.value)}
+                    className="flex-1 min-w-0 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500/50">
+                    <option value="">{isZh ? '无背景音乐' : 'None'}</option>
+                    {bgmPath.startsWith(REMOTE_BGM_PREFIX) && !remoteBgm.some((b) => `${REMOTE_BGM_PREFIX}${b.url}` === bgmPath) && (
+                      <option value={bgmPath}>☁️ {bgmDisplayName(bgmPath, isZh, remoteBgm)}</option>
+                    )}
+                    <optgroup label={isZh ? '内置曲库' : 'Built-in'}>
+                      {BUILTIN_BGM.map((b) => (<option key={b.id} value={`${BUILTIN_BGM_PREFIX}${b.id}`}>🎵 {isZh ? b.zh : b.en}</option>))}
                     </optgroup>
-                  )}
-                </select>
-                <BgmPreviewBar isZh={isZh} bgmPath={bgmPath} state={bgmPreview} tone="sky" showCloudHint />
+                    {remoteBgm.length > 0 && (
+                      <optgroup label={isZh ? '云端曲库（首次需下载）' : 'Cloud (downloads first time)'}>
+                        {remoteBgm.map((b) => (<option key={b.url} value={`${REMOTE_BGM_PREFIX}${b.url}`}>☁️ {isZh ? b.zh : b.en}</option>))}
+                      </optgroup>
+                    )}
+                  </select>                  <BgmPreviewButtons isZh={isZh} bgmPath={bgmPath} state={bgmPreview} tone="sky" />
+                </div>
+                <BgmPreviewPlayer isZh={isZh} bgmPath={bgmPath} state={bgmPreview} tone="sky" showCloudHint />
               </Field>
             </>
           )}
@@ -6480,12 +6485,14 @@ export const RepostVideoModal: React.FC<{ isZh: boolean; matrixMode?: boolean; o
                 )}
               </Field>
               <Field label={isZh ? '背景音乐(选填)' : 'BGM (optional)'} hint={isZh ? '压低垫在配音下,循环铺满全片' : 'Ducked under the dub, looped to fit'}>
-                <select value={bgmPath} onChange={(e) => setBgmPath(e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm dark:text-white">
-                  <option value="">{isZh ? '无背景音乐' : 'None'}</option>
-                  {BUILTIN_BGM.map((b) => (<option key={b.id} value={`${BUILTIN_BGM_PREFIX}${b.id}`}>🎵 {isZh ? b.zh : b.en}</option>))}
-                </select>
-                <BgmPreviewBar isZh={isZh} bgmPath={bgmPath} state={bgmPreview} tone="sky" showCloudHint />
+                <div className="flex items-center gap-2">
+                  <select value={bgmPath} onChange={(e) => setBgmPath(e.target.value)}
+                    className="flex-1 min-w-0 w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm dark:text-white">
+                    <option value="">{isZh ? '无背景音乐' : 'None'}</option>
+                    {BUILTIN_BGM.map((b) => (<option key={b.id} value={`${BUILTIN_BGM_PREFIX}${b.id}`}>🎵 {isZh ? b.zh : b.en}</option>))}
+                  </select>                  <BgmPreviewButtons isZh={isZh} bgmPath={bgmPath} state={bgmPreview} tone="sky" />
+                </div>
+                <BgmPreviewPlayer isZh={isZh} bgmPath={bgmPath} state={bgmPreview} tone="sky" showCloudHint />
                 {bgmPath && (
                   <div className="flex gap-2 mt-2">
                     {BGM_VOLUME_OPTIONS.map((b) => (
@@ -7676,8 +7683,9 @@ export const TemplateSpeedModal: React.FC<{ isZh: boolean; matrixMode?: boolean;
                           </optgroup>
                         )}
                       </select>
+                      <BgmPreviewButtons isZh={isZh} bgmPath={bgmPath} state={bgmPreview} tone="fuchsia" />
                     </div>
-                    <BgmPreviewBar isZh={isZh} bgmPath={bgmPath} state={bgmPreview} tone="fuchsia" showCloudHint />
+                    <BgmPreviewPlayer isZh={isZh} bgmPath={bgmPath} state={bgmPreview} tone="fuchsia" showCloudHint />
                   </div>
                 )}
                 {bgmIsUpload && (

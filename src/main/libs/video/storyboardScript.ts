@@ -88,8 +88,15 @@ export interface StoryboardResult {
   warnings: string[];
 }
 
-/** 超过这个字符数的原文按段落切块,分批解析(避免 max_tokens=4000 截断输出)。 */
-const CHUNK_CHARS = 2600;
+/**
+ * 单次给 LLM 的输出上限。分镜 JSON 很占字数(每镜十来个字段),原来沿用 callDeepSeek 的
+ * 默认 4000 会把 JSON 截在半截 → JSON.parse 失败 → parse_failed。DeepSeek 单次可出 384k,
+ * 这里给 16k 足够一块(见 CHUNK_CHARS)出满 MAX_SHOTS_PER_CHUNK 镜。
+ */
+const PARSE_MAX_TOKENS = 16000;
+/** 超过这个字符数的原文按段落切块,分批解析。上限放开后可以切得更粗 —— 块越少
+ *  LLM 越能看到上下文,分镜的连贯性也越好。 */
+const CHUNK_CHARS = 7000;
 /** 单块最多解析出多少镜(防 LLM 把一句话拆成几十镜)。 */
 const MAX_SHOTS_PER_CHUNK = 24;
 /** 整片分镜上限(与老链路 40 镜上限对齐)。 */
@@ -266,7 +273,7 @@ const PARSE_SYSTEM = [
   '⚠️ C 类被当成口播念出来是最严重的错误。宁可漏,也绝不把制作说明写进 narration。',
   '',
   '# 输出',
-  '只输出一个 json 数组,数组元素是分镜对象。不要 markdown 围栏,不要解释文字。',
+  '只输出一个 json 对象:{"shots": [ ...分镜对象... ]}。不要 markdown 围栏,不要解释文字。',
   '',
   SHOT_SCHEMA_BLOCK,
   '',
@@ -290,7 +297,7 @@ const DERIVE_SYSTEM = [
   '- 画面要跟着这一段口播的【内容】走,不是泛泛的空镜。',
   '',
   '# 输出',
-  '只输出一个 json 数组。不要 markdown 围栏,不要解释文字。',
+  '只输出一个 json 对象:{"shots": [ ...分镜对象... ]}。不要 markdown 围栏,不要解释文字。',
   '',
   SHOT_SCHEMA_BLOCK,
   '',
@@ -358,22 +365,33 @@ async function runOne(
   user: string,
   fallbackSeconds: number,
   signal?: AbortSignal,
-): Promise<{ shots: StoryShot[]; tokens: number; costUsd: number } | null> {
+): Promise<{ shots: StoryShot[]; tokens: number; costUsd: number; error?: string } | null> {
   if (signal?.aborted) return null;
   let res;
   try {
-    // 解析是【结构化抽取】不是创作 → 用默认低温(不传 temperature),输出更稳定。
-    res = await callDeepSeek(system, user, false, 120_000, 'noobclawai-reasoner');
-  } catch {
-    return null;
+    // ⚠️ 这里【不能用 reasoner】:它是思考模型,callDeepSeek 的 max_tokens 写死 4000,
+    //    思考过程先把额度吃掉,真正的 JSON 输出被截断 → JSON.parse 失败 → parse_failed。
+    //    而且解析是【结构化抽取】不是创作,chat(flash)完全够用、更快更便宜,还能开
+    //    response_format=json_object 强制合法 JSON(仅 chat 支持,reasoner 带上会被拒)。
+    res = await callDeepSeek(system, user, true, 180_000, 'noobclawai-chat', undefined, PARSE_MAX_TOKENS);
+  } catch (e) {
+    return { shots: [], tokens: 0, costUsd: 0, error: `AI 调用失败:${String((e as Error)?.message || e).slice(0, 160)}` };
   }
   const arr = parseShotsJson(res.content);
-  if (!arr || arr.length === 0) return null;
+  if (!arr || arr.length === 0) {
+    const head = (res.content || '').trim().slice(0, 120).replace(/\s+/g, ' ');
+    return {
+      shots: [], tokens: res.tokens, costUsd: res.costUsd,
+      error: head ? `AI 返回的不是可解析的分镜 JSON(开头:${head})` : 'AI 返回为空',
+    };
+  }
   const shots = arr
     .slice(0, MAX_SHOTS_PER_CHUNK)
     .map((r) => cleanShot(r, fallbackSeconds))
     .filter((s): s is StoryShot => s !== null);
-  if (shots.length === 0) return null;
+  if (shots.length === 0) {
+    return { shots: [], tokens: res.tokens, costUsd: res.costUsd, error: `解析出 ${arr.length} 条但没有一条含口播或画面` };
+  }
   return { shots, tokens: res.tokens, costUsd: res.costUsd };
 }
 
@@ -407,14 +425,15 @@ export async function parseStoryboardScript(
       chunks[i],
       '=== 脚本原文结束 ===',
       '',
-      '输出 json 数组。记住:制作说明类文字一律丢弃,narration 必须逐字复制原文。',
+      '输出 {"shots":[...]} 这个 json 对象。记住:制作说明类文字一律丢弃,narration 必须逐字复制原文。',
     ].filter(Boolean).join('\n');
 
     // fallbackSeconds:LLM 没给 seconds 时的兜底。下面还会按 narration 字数复算,这里给个
     //   中庸值即可(Seedance 单镜合理区间 4~12s)。
     const r = await runOne(PARSE_SYSTEM, userParts, 6, input.signal);
-    if (!r) {
-      warnings.push(`第 ${i + 1}/${chunks.length} 段解析失败`);
+    if (!r || r.shots.length === 0) {
+      if (r) { tokens += r.tokens; costUsd += r.costUsd; }
+      warnings.push(`第 ${i + 1}/${chunks.length} 段解析失败${r?.error ? `:${r.error}` : ''}`);
       continue;
     }
     tokens += r.tokens;
@@ -426,7 +445,10 @@ export async function parseStoryboardScript(
     }
   }
 
-  if (all.length === 0) return null;
+  if (all.length === 0) {
+    // 一条都没解析出来:把【为什么】带回去,别让 UI 只剩一句 parse_failed。
+    return { shots: [], tokens, costUsd, fidelity: 0, warnings };
+  }
 
   // seconds 兜底:LLM 没给或给得离谱时,按 narration 字数重算。
   for (const s of all) {
@@ -474,12 +496,13 @@ export async function deriveStoryboard(
       chunks[i],
       '=== 口播稿结束 ===',
       '',
-      '输出 json 数组。narration 必须是上面原文的逐字切分,拼起来能还原原文。',
+      '输出 {"shots":[...]} 这个 json 对象。narration 必须是上面原文的逐字切分,拼起来能还原原文。',
     ].filter(Boolean).join('\n');
 
     const r = await runOne(DERIVE_SYSTEM, userParts, 6, input.signal);
-    if (!r) {
-      warnings.push(`第 ${i + 1}/${chunks.length} 段分镜失败`);
+    if (!r || r.shots.length === 0) {
+      if (r) { tokens += r.tokens; costUsd += r.costUsd; }
+      warnings.push(`第 ${i + 1}/${chunks.length} 段分镜失败${r?.error ? `:${r.error}` : ''}`);
       continue;
     }
     tokens += r.tokens;
@@ -491,7 +514,9 @@ export async function deriveStoryboard(
     }
   }
 
-  if (all.length === 0) return null;
+  if (all.length === 0) {
+    return { shots: [], tokens, costUsd, fidelity: 0, warnings };
+  }
 
   for (const s of all) {
     if (!s.narration) continue;

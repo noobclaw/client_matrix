@@ -207,11 +207,14 @@ const ROLLING_REF_COUNT = 2;
 const MAX_REFS = 4;
 
 /**
- * 故事板首帧:逐张调服务端 /api/image/storyboard 生成每镜首帧 dataURL。
+ * 故事板首帧:调服务端 /api/image/storyboard 生成每镜首帧 dataURL。
  *
- * 为什么逐张而不是组图一次出 N 张:组图是单次长请求(6 张 >100s),必然撞 Cloudflare
- * 的 100s 超时(HTTP 524)→ 生产环境组图永远失败。逐张每张独立短请求(~20s)既绕开 524,
- * 又能逐张回进度(onProgress)。
+ * ## 先组图,失败才逐张
+ * 组图(一次出 N 张)的价值是【同一次去噪出来的 N 张天然一致】—— 光影、画风、人物长相,
+ * 这是靠参考图补不回来的。老实现被迫逐张,是因为组图是单次长请求(6 张 >100s)必撞
+ * Cloudflare 的 100s 超时(HTTP 524)。现在服务端支持异步任务(提交拿 job_id → 轮询),
+ * 天花板没了,所以先按 GROUP_BATCH 分批组图;哪一批不通(老后端 / 超时 / 张数对不上)
+ * 就把那一批退回逐张,不影响出片。
  *
  * ## 一致性:滚动参考(不是单锚点)
  * 老实现是「第 1 张成功的图当 anchor,后面每镜都参考它」。问题有三:
@@ -224,6 +227,71 @@ const MAX_REFS = 4;
  * 返回的 images 按 shot 索引【对齐】(某张失败 → 该位置为空串 ''),失败的镜号同时记进
  * failedIndices 供上层标红,不再静默降级。
  */
+/** 组图单次最多几张(Seedream sequential 上限 6)。超过就分批,每批各自一次生成。 */
+const GROUP_BATCH = 6;
+/** 异步任务轮询间隔 / 上限。6 张一批实测几十秒,给到 4 分钟足够。 */
+const POLL_INTERVAL_MS = 3_000;
+const POLL_MAX_MS = 240_000;
+
+/**
+ * 真组图:一次请求出一批(≤GROUP_BATCH 张),走服务端异步任务绕开 Cloudflare 100s。
+ *
+ * 为什么值得:同一次去噪出来的 N 张,光影 / 画风 / 人物长相天然一致 —— 这是靠参考图
+ * 补不回来的。老实现为了躲 524 退回「一次一张调 N 次」,那 N 张是各画各的,风格会飘。
+ *
+ * 返回 null = 这条路不通(老后端不认 async / 轮询超时 / 任务失败),调用方回落逐张。
+ */
+async function generateGroupBatch(
+  headers: Record<string, string>,
+  shots: string[],
+  opts: StoryboardOptions,
+  refs: string[],
+): Promise<{ images: string[]; chargedTokens: number } | null> {
+  try {
+    const resp = await fetch(`${apiBase()}/api/image/storyboard`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        shots,
+        character: opts.character || '',
+        style: opts.style || '',
+        count: shots.length,
+        async: true,
+        ...(opts.aspect ? { aspect: opts.aspect } : {}),
+        // 组图是一次请求出多张 → 只能给一个统一的文字策略:这批里只要有一镜需要文字就放开。
+        ...(opts.allowText ? { allowText: opts.allowText.some(Boolean) } : {}),
+        ...(refs.length ? { referenceImages: refs, referenceImage: refs[refs.length - 1] } : {}),
+      }),
+    });
+    // 老后端没有 async 分支 → 会当成同步请求直接返图(200)。那也能用,直接收下。
+    if (resp.status === 200) {
+      const j: any = await resp.json();
+      const imgs = Array.isArray(j?.images) ? j.images.filter((x: any) => typeof x === 'string' && x) : [];
+      return imgs.length ? { images: imgs, chargedTokens: Number(j?.chargedTokens) || 0 } : null;
+    }
+    if (resp.status !== 202) return null;
+    const started: any = await resp.json();
+    const jobId = String(started?.job_id || '');
+    if (!jobId) return null;
+
+    const deadline = Date.now() + POLL_MAX_MS;
+    while (Date.now() < deadline) {
+      await sleep(POLL_INTERVAL_MS);
+      const pr = await fetch(`${apiBase()}/api/image/storyboard/status/${encodeURIComponent(jobId)}`, { headers });
+      if (!pr.ok) return null;           // 404/403 → 别再等了
+      const pj: any = await pr.json();
+      if (pj?.status === 'done') {
+        const imgs = Array.isArray(pj?.images) ? pj.images.filter((x: any) => typeof x === 'string' && x) : [];
+        return imgs.length ? { images: imgs, chargedTokens: Number(pj?.chargedTokens) || 0 } : null;
+      }
+      if (pj?.status === 'failed') return null;
+    }
+    return null;                          // 超时 → 回落逐张
+  } catch {
+    return null;
+  }
+}
+
 export async function generateStoryboard(
   opts: StoryboardOptions,
   onProgress?: (done: number, total: number) => void,
@@ -245,7 +313,36 @@ export async function generateStoryboard(
   // 滚动参考:已成功生成的历史帧(按时间顺序),取最近几张。
   const history: string[] = [];
 
+  // ── 先走【真组图】:一次出一批,同一次去噪出来的 N 张天然一致 ──────────────────
+  //  失败(老后端 / 超时 / 任务失败)就把这一批退回逐张,不影响出片。
+  const pending = new Set<number>();
+  for (let i = 0; i < total; i++) if (shots[i]) pending.add(i);
+  if (pending.size > 1) {
+    const idxAll = [...pending];
+    for (let b = 0; b < idxAll.length; b += GROUP_BATCH) {
+      const batch = idxAll.slice(b, b + GROUP_BATCH);
+      onProgress?.(total - pending.size, total);
+      const refs = [...fixedRefs, ...history.slice(-ROLLING_REF_COUNT)].slice(-MAX_REFS);
+      const r = await generateGroupBatch(
+        headers,
+        batch.map((i) => shots[i]),
+        { ...opts, allowText: opts.allowText ? batch.map((i) => opts.allowText![i] === true) : undefined },
+        refs,
+      );
+      // 张数对不上就整批退回逐张 —— 按下标硬塞会把图挂到错的镜上,比慢更糟。
+      if (!r || r.images.length !== batch.length) { lastError = lastError || 'group_failed'; continue; }
+      chargedTokens += r.chargedTokens;
+      batch.forEach((idx, k) => {
+        images[idx] = r.images[k];
+        okCount++;
+        history.push(r.images[k]);
+        pending.delete(idx);
+      });
+    }
+  }
+
   for (let i = 0; i < total; i++) {
+    if (!pending.has(i) && images[i]) continue;   // 组图已经出了这一镜
     onProgress?.(i, total);
     if (!shots[i]) { failedIndices.push(i); lastError = 'empty_prompt'; continue; }
     // 相邻镜的连续性比「和第一张像」更重要 → 取最近的历史帧,不是永远第 1 张。

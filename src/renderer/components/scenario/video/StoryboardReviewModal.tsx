@@ -60,9 +60,18 @@ export default function StoryboardReviewModal(props: StoryboardReviewModalProps)
     creditsPerSec, usdPerSec, onChange, onRetry, onConfirm, onCancel,
   } = props;
   const [expanded, setExpanded] = useState<number | null>(null);
+  // 解析已跑了多少秒。长脚本要分块跑几次 LLM,十几二十秒很正常 —— 没有动的东西
+  // 用户会以为卡死了,所以给一个走字的计时 + 转圈。
+  const [elapsed, setElapsed] = useState(0);
 
   // 关闭时收起展开态,避免下次打开还停在上一次那一行。
   useEffect(() => { if (!open) setExpanded(null); }, [open]);
+  useEffect(() => {
+    if (!loading) { setElapsed(0); return; }
+    setElapsed(0);
+    const t = setInterval(() => setElapsed((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [loading]);
 
   const totalSec = useMemo(
     () => Math.round(shots.reduce((a, s) => a + (Number(s.seconds) || 0), 0)),
@@ -122,8 +131,17 @@ export default function StoryboardReviewModal(props: StoryboardReviewModalProps)
         {/* 体 */}
         <div className="flex-1 overflow-y-auto px-5 py-4">
           {loading && (
-            <div className="py-16 text-center text-sm text-gray-500 dark:text-gray-400">
-              {isZh ? '正在解析分镜…（只跑文字，不出图、不生成视频）' : 'Parsing storyboard… (text only — no images, no video)'}
+            <div className="py-16 flex flex-col items-center gap-3">
+              <span className="w-7 h-7 rounded-full border-2 border-fuchsia-500/30 border-t-fuchsia-500 animate-spin" />
+              <div className="text-sm text-gray-500 dark:text-gray-400">
+                {isZh ? '正在解析分镜…' : 'Parsing storyboard…'}
+                <span className="ml-1 tabular-nums text-fuchsia-500 font-medium">{elapsed}s</span>
+              </div>
+              <div className="text-[11px] text-gray-400">
+                {isZh
+                  ? '只跑文字，不出图、不生成视频。脚本越长拆得越多，通常 10~40 秒。'
+                  : 'Text only — no images, no video. Longer scripts take more passes, usually 10-40s.'}
+              </div>
             </div>
           )}
 

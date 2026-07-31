@@ -124,16 +124,30 @@ export function useBgmPreview(bgmPath: string, isZh: boolean): BgmPreviewState {
  * ⚠️ 豆包音色走后端代理【按字符计费】,所以主进程那边样例句只有十来个字(voiceSample.ts)。
  *    Edge 音色免费。
  */
+/**
+ * 已合成过的样例缓存(音色+语速 → dataURL)。模块级,跨向导/跨开关弹窗都命中。
+ *
+ * ⚠️ 必须有:豆包音色走后端代理【按字符计费】,用户来回比对几个音色就会重复扣费。
+ *    同一个音色 + 同一档语速,合成结果本来就一样,没有任何理由再跑一遍。
+ *    上限 40 条,超了按插入顺序丢最旧的(样例句很短,内存压力可忽略)。
+ */
+const voiceSampleCache = new Map<string, string>();
+const VOICE_CACHE_MAX = 40;
+
 export function useVoicePreview(voice: string, rate: number | undefined, lang: string | undefined, isZh: boolean): BgmPreviewState {
   const [previewUrl, setPreviewUrl] = useState('');
   const [previewErr, setPreviewErr] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // 换音色/语速就清掉上一条,避免听到的还是上一个音色。
+  // 换音色/语速就清掉播放器,避免听到的还是上一个音色。
   useEffect(() => { setPreviewErr(''); setPreviewUrl(''); }, [voice, rate]);
 
   const preview = async () => {
     if (!voice || loading) return;
+    const key = `${voice}|${rate ?? ''}`;
+    // 听过的直接回放,不再合成、不再扣费。
+    const cached = voiceSampleCache.get(key);
+    if (cached) { setPreviewErr(''); setPreviewUrl(cached); return; }
     setLoading(true);
     setPreviewErr('');
     try {
@@ -143,8 +157,14 @@ export function useVoicePreview(voice: string, rate: number | undefined, lang: s
         return;
       }
       const r = await api.previewVoice({ voice, rate, lang });
-      if (r?.ok && r.dataUrl) setPreviewUrl(r.dataUrl);
-      else setPreviewErr((isZh ? '试听失败：' : 'Preview failed: ') + (r?.error || 'unknown'));
+      if (r?.ok && r.dataUrl) {
+        if (voiceSampleCache.size >= VOICE_CACHE_MAX) {
+          const oldest = voiceSampleCache.keys().next().value;
+          if (oldest) voiceSampleCache.delete(oldest);
+        }
+        voiceSampleCache.set(key, r.dataUrl);
+        setPreviewUrl(r.dataUrl);
+      } else setPreviewErr((isZh ? '试听失败：' : 'Preview failed: ') + (r?.error || 'unknown'));
     } catch (e) {
       setPreviewErr((isZh ? '试听失败：' : 'Preview failed: ') + String((e as Error)?.message || e).slice(0, 120));
     } finally {
@@ -181,36 +201,45 @@ const TONE: Record<NonNullable<BgmPreviewBarProps['tone']>, { solid: string; gho
   sky:      { solid: 'bg-sky-500 hover:bg-sky-600',         ghost: 'border-sky-400 text-sky-500 hover:bg-sky-50 dark:hover:bg-sky-500/10' },
 };
 
-/** 试听按钮 + 打开文件夹按钮 + 播放器 + 错误行。全站唯一实现。 */
-export default function BgmPreviewBar({
-  isZh, bgmPath, state, tone = 'rose', showCloudHint, showFolder = true, previewLabel,
-}: BgmPreviewBarProps) {
+/**
+ * 试听 + 文件夹两个按钮。**放进 select 所在的那一行**(左右布局:select 占大部分宽度,
+ * 两个按钮贴右)—— 这是原来的样子,别再让试听独占一整行。
+ * 播放器和错误行由 <BgmPreviewPlayer/> 渲染在这一行【下面】。
+ */
+export function BgmPreviewButtons({ isZh, bgmPath, state, tone = 'rose', showFolder = true, previewLabel }: BgmPreviewBarProps) {
   if (!bgmPath) return null;
   const t = TONE[tone] || TONE.rose;
   return (
-    <div className="mt-2 space-y-1.5">
-      <div className="flex gap-2">
+    <>
+      <button
+        type="button"
+        onClick={state.preview}
+        disabled={state.loading}
+        className={`shrink-0 px-3 py-2 rounded-lg text-xs font-medium text-white transition-colors disabled:opacity-60 ${t.solid}`}
+      >
+        {state.loading ? '⏳' : (previewLabel || (isZh ? '▶ 试听' : '▶ Preview'))}
+      </button>
+      {showFolder && (
         <button
           type="button"
-          onClick={state.preview}
-          disabled={state.loading}
-          className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-colors disabled:opacity-60 ${t.solid}`}
+          onClick={state.openFolder}
+          disabled={state.opening}
+          className={`shrink-0 px-2.5 py-2 rounded-lg text-xs font-medium border transition-colors disabled:opacity-60 ${t.ghost}`}
         >
-          {state.loading
-            ? (isZh ? '⏳ 加载中…' : '⏳')
-            : (previewLabel || (isZh ? '▶ 试听' : '▶ Preview'))}
+          {state.opening ? '⏳' : (isZh ? '📂 文件夹' : '📂 Folder')}
         </button>
-        {showFolder && (
-          <button
-            type="button"
-            onClick={state.openFolder}
-            disabled={state.opening}
-            className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors disabled:opacity-60 ${t.ghost}`}
-          >
-            {state.opening ? '⏳' : (isZh ? '📂 文件夹' : '📂 Folder')}
-          </button>
-        )}
-      </div>
+      )}
+    </>
+  );
+}
+
+/** 播放器 + 错误行 + 云端提示。放在 select 那一行【下面】。 */
+export function BgmPreviewPlayer({ isZh, bgmPath, state, showCloudHint }: BgmPreviewBarProps) {
+  if (!bgmPath) return null;
+  const hasCloudHint = !!showCloudHint && bgmPath.startsWith('remote:');
+  if (!state.previewUrl && !state.previewErr && !hasCloudHint) return null;
+  return (
+    <div className="mt-1.5 space-y-1.5">
       {state.previewUrl && (
         <audio
           controls
@@ -225,13 +254,29 @@ export default function BgmPreviewBar({
         />
       )}
       {state.previewErr && <div className="text-[11px] text-red-500 break-all">{state.previewErr}</div>}
-      {showCloudHint && bgmPath.startsWith('remote:') && (
+      {hasCloudHint && (
         <div className="text-[11px] text-gray-400">
           {isZh
             ? '☁️ 云端曲目首次打开文件夹/合成时自动下载并缓存，之后复用不再下载。'
             : '☁️ Cloud track downloads on first open/compose, then cached.'}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * 独立成块的版本(没有 select 可并排时用,如「上传的曲子」那种场景)。
+ * 有 select 的地方请用 BgmPreviewButtons + BgmPreviewPlayer,保持左右布局。
+ */
+export default function BgmPreviewBar(props: BgmPreviewBarProps) {
+  if (!props.bgmPath) return null;
+  return (
+    <div className="mt-2">
+      <div className="flex gap-2 justify-end">
+        <BgmPreviewButtons {...props} />
+      </div>
+      <BgmPreviewPlayer {...props} />
     </div>
   );
 }
