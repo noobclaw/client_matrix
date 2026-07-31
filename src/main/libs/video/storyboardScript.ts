@@ -140,13 +140,54 @@ function extractJsonBlock(raw: string): string {
   return t.slice(start);
 }
 
-function parseShotsJson(raw: string): any[] | null {
+/**
+ * 抢救被截断的分镜 JSON。
+ *
+ * 为什么需要:输出被 max_tokens 截断时,JSON 停在半个字符串/半个对象上,整块 parse 失败 →
+ *   用户看到「AI 返回的不是可解析的分镜 JSON」,前面的十几镜全白跑。截断只影响**最后一镜**,
+ *   把它丢掉、把括号补齐就能拿回其余全部。(根因已在后端修:max_tokens 上限 8192→32768;
+ *   这里是防线二 —— 脚本再长一点又会撞上,不能只靠上限。)
+ *
+ * 做法:从尾部往前找最后一个「完整对象的结束 `}`」(即栈深回到数组层的位置),截到那里
+ *   再补上 `]` / `}`。找不到就返回 null。
+ */
+function salvageTruncatedShots(block: string): any[] | null {
+  const arrStart = block.indexOf('[');
+  if (arrStart < 0) return null;
+  let depth = 0, inStr = false, esc = false, lastGood = -1;
+  for (let i = arrStart; i < block.length; i++) {
+    const c = block[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === '{' || c === '[') depth++;
+    else if (c === '}' || c === ']') {
+      depth--;
+      // depth 回到 1 = 刚闭合了数组里的一个元素对象 → 这里是安全的截断点
+      if (depth === 1 && c === '}') lastGood = i;
+    }
+  }
+  if (lastGood < 0) return null;
   try {
-    const parsed = JSON.parse(extractJsonBlock(raw));
+    const arr = JSON.parse(block.slice(arrStart, lastGood + 1) + ']');
+    return Array.isArray(arr) && arr.length > 0 ? arr : null;
+  } catch { return null; }
+}
+
+function parseShotsJson(raw: string): any[] | null {
+  const block = extractJsonBlock(raw);
+  try {
+    const parsed = JSON.parse(block);
     if (Array.isArray(parsed)) return parsed;
     if (parsed && Array.isArray(parsed.shots)) return parsed.shots;
     return null;
-  } catch { return null; }
+  } catch {
+    return salvageTruncatedShots(block);
+  }
 }
 
 // ────────────────────────────────────────────────────────────────────────────

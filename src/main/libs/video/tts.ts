@@ -54,7 +54,39 @@ export function voiceProviderLabel(voice: string | undefined): string {
  *
  * 长度不用管:后端按字节自动分流 —— ≤1024 字节走在线合成 HTTP,超了自动改走火山的
  * 异步长文本接口(单次 10 万字符),返回体形状一致。客户端这边不再做任何切分。
+ *
+ * ⚠️【长文本必须走 job 轮询,不能干等】火山长文本要 1~3 分钟,而 **Cloudflare 100 秒就掐连接**
+ *    → 客户端收到 524。整段合成上线以来一次都没成功过,全卡在这。现在:超 1024 字节时发
+ *    `async:true`,后端立刻回 202 + job_id,客户端轮询 `/api/tts/job/:id` 取结果。
  */
+const LONG_TEXT_BYTES = 1024;          // 与后端 SYNC_MAX_BYTES 对齐
+const JOB_POLL_INTERVAL_MS = 3_000;
+const JOB_POLL_MAX_MS = 420_000;       // 7 分钟(后端上游上限 5 分钟 + 下载余量)
+
+async function pollTtsJob(jobId: string, token: string, signal?: AbortSignal): Promise<any | null> {
+  const deadline = Date.now() + JOB_POLL_MAX_MS;
+  while (Date.now() < deadline) {
+    if (signal?.aborted) { _lastTtsError = '已停止'; return null; }
+    await new Promise((r) => setTimeout(r, JOB_POLL_INTERVAL_MS));
+    if (signal?.aborted) { _lastTtsError = '已停止'; return null; }
+    try {
+      const r = await fetch(`${apiBase()}/api/tts/job/${encodeURIComponent(jobId)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(30_000),
+      });
+      const j: any = await r.json().catch(() => ({}));
+      if (j?.status === 'done') return j;
+      if (j?.status === 'failed') { _lastTtsError = `豆包长文本合成失败:${String(j?.error || '').slice(0, 140)}`; return null; }
+      if (r.status === 404) { _lastTtsError = '豆包长文本任务已过期'; return null; }
+      // queued / processing → 继续轮询
+    } catch {
+      // 单次查询抖动不算失败,下一轮再试
+    }
+  }
+  _lastTtsError = `豆包长文本合成超时(${Math.round(JOB_POLL_MAX_MS / 1000)}s 未完成)`;
+  return null;
+}
+
 async function synthDoubao(text: string, outPath: string, voice: string, rate?: number, signal?: AbortSignal): Promise<{ ok: boolean; tokens: number; costUsd: number; sentences?: TtsCue[] } | null> {
   const token = getNoobClawAuthToken();
   if (!token) return null;
@@ -62,20 +94,27 @@ async function synthDoubao(text: string, outPath: string, voice: string, rate?: 
   const speedRatio = Math.max(0.5, Math.min(2, 1 + (Number(rate) || 0) / 100));
   const clean = (text || '').trim();
   if (!clean) return null;
+  const isLong = Buffer.byteLength(clean, 'utf8') > LONG_TEXT_BYTES;
   try {
     const resp = await fetch(`${apiBase()}/api/tts/synthesize`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ text: clean, voice, speedRatio, encoding: 'mp3' }),
-      // 长文本走异步接口(提交+轮询+下载),比在线合成慢得多 → 给 5 分钟,别在这掐断。
-      signal: signal || AbortSignal.timeout(300_000),
+      body: JSON.stringify({ text: clean, voice, speedRatio, encoding: 'mp3', ...(isLong ? { async: true } : {}) }),
+      // 短文本在线合成:60s 足够。长文本这一发只是「提交」,后端立刻回 202。
+      signal: signal || AbortSignal.timeout(120_000),
     });
-    if (!resp.ok) {
+    if (!resp.ok && resp.status !== 202) {
       const j: any = await resp.json().catch(() => ({}));
       _lastTtsError = `豆包配音失败(${resp.status}):${String(j?.message || j?.error || '').slice(0, 120)}`;
       return null;
     }
-    const j: any = await resp.json();
+    let j: any = await resp.json();
+    // 202 = 长文本 job 已入队 → 轮询取结果(绕开 Cloudflare 100s)。
+    if (j?.job_id) {
+      const done = await pollTtsJob(String(j.job_id), token, signal);
+      if (!done) return null;
+      j = done;
+    }
     const b64 = typeof j?.audioBase64 === 'string' ? j.audioBase64 : '';
     if (!b64) { _lastTtsError = '豆包配音返回空音频'; return null; }
     fs.writeFileSync(outPath, Buffer.from(b64, 'base64'));

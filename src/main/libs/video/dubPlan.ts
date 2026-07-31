@@ -1,0 +1,209 @@
+/**
+ * dubPlan —— 配音时间轴规划(估时 / 合块 / 贴轴)。
+ *
+ * 结构照搬 KrillinAI 的 `internal/service/dubbing`(planner/estimator/fit),它是目前
+ * 开源里把「译文配音贴回原视频时间轴」做得最完整的一套。核心三条:
+ *
+ *   ① 【合块】相邻字幕间隙小、且其中一条很短 → 并成一个 chunk,**整块一次 TTS**。
+ *      逐句合成会让每句都带独立的朗读收尾,拼起来一顿一顿;并且每句各自 atempo
+ *      不同倍率,听感忽快忽慢。整块合成让块内语气连贯、共用一个速度因子。
+ *   ② 【先估后合成】用统计式估时(中文 4.2 字/秒、英文 13.5 字符/秒 + 标点停顿 +
+ *      数字/缩写惩罚)在**花钱之前**判断会不会超窗,超了先叫 LLM 缩写,再去 TTS。
+ *      旧做法是「合成→发现超长→提速重配→还超→缩写再重配」,同一句最多 4 次 TTS,
+ *      豆包按字符实扣 = 4 倍字符费,而且每次都真扣。
+ *   ③ 【贴轴】块实测时长 / 块窗口 = 速度因子,夹在 [1, atempoMax];块内各句按权重
+ *      分摊起止时间,得出最终字幕 cue。
+ *
+ * 本文件是纯计算,不碰 ffmpeg / TTS / 网络,方便单测和复用(电影级也可以接)。
+ */
+
+// ── 语速档案 ───────────────────────────────────────────────────────────────
+export interface SpeechProfile {
+  /** 每秒朗读的非空白字符数 */
+  cps: number;
+  /** 标点停顿权重 */
+  pauseWeight: number;
+  /** 数字惩罚权重(数字念得比字母慢) */
+  numberWeight: number;
+  /** 连续大写(缩写,逐字母念)惩罚权重 */
+  acronymWeight: number;
+}
+
+const PROFILES: Array<{ re: RegExp; p: SpeechProfile }> = [
+  { re: /繁體|繁体|zh-TW|zh-HK|Traditional/i, p: { cps: 4.1, pauseWeight: 0.30, numberWeight: 0.22, acronymWeight: 0.12 } },
+  { re: /中文|简体|汉语|漢語|Chinese|zh/i, p: { cps: 4.2, pauseWeight: 0.30, numberWeight: 0.22, acronymWeight: 0.12 } },
+  { re: /日本|日語|日语|Japanese|ja/i, p: { cps: 4.0, pauseWeight: 0.28, numberWeight: 0.20, acronymWeight: 0.12 } },
+  { re: /한국|韓語|韩语|Korean|ko/i, p: { cps: 4.3, pauseWeight: 0.28, numberWeight: 0.20, acronymWeight: 0.12 } },
+  { re: /Deutsch|德语|德語|German|de/i, p: { cps: 11.8, pauseWeight: 0.24, numberWeight: 0.25, acronymWeight: 0.28 } },
+  { re: /Русск|俄语|俄語|Russian|ru/i, p: { cps: 10.8, pauseWeight: 0.24, numberWeight: 0.24, acronymWeight: 0.24 } },
+  { re: /Türk|土耳其|Turkish|tr/i, p: { cps: 12.0, pauseWeight: 0.24, numberWeight: 0.24, acronymWeight: 0.26 } },
+  { re: /Español|西班牙|Spanish|es/i, p: { cps: 13.2, pauseWeight: 0.24, numberWeight: 0.26, acronymWeight: 0.30 } },
+  { re: /Português|葡萄牙|Portuguese|pt/i, p: { cps: 13.0, pauseWeight: 0.24, numberWeight: 0.26, acronymWeight: 0.30 } },
+  { re: /Français|法语|法語|French|fr/i, p: { cps: 12.8, pauseWeight: 0.24, numberWeight: 0.26, acronymWeight: 0.30 } },
+  { re: /Italiano|意大利|Italian|it/i, p: { cps: 13.0, pauseWeight: 0.24, numberWeight: 0.26, acronymWeight: 0.30 } },
+  { re: /Indonesia|印尼|印度尼西亚|id/i, p: { cps: 12.5, pauseWeight: 0.24, numberWeight: 0.26, acronymWeight: 0.28 } },
+  { re: /Tiếng Việt|越南|Vietnamese|vi/i, p: { cps: 12.0, pauseWeight: 0.26, numberWeight: 0.24, acronymWeight: 0.26 } },
+  { re: /ไทย|泰语|泰語|Thai|th/i, p: { cps: 11.0, pauseWeight: 0.26, numberWeight: 0.24, acronymWeight: 0.26 } },
+  { re: /العربية|阿拉伯|Arabic|ar/i, p: { cps: 12.0, pauseWeight: 0.26, numberWeight: 0.24, acronymWeight: 0.26 } },
+];
+
+const EN_PROFILE: SpeechProfile = { cps: 13.5, pauseWeight: 0.24, numberWeight: 0.26, acronymWeight: 0.32 };
+
+/**
+ * 按目标语言标签(如 '中文' / 'English' / '日本語')取语速档案。
+ * 匹配不到 → 按文本本身是否含 CJK 兜底,再不行按英文。
+ */
+export function speechProfileFor(langLabel: string, sampleText = ''): SpeechProfile {
+  const label = String(langLabel || '');
+  for (const { re, p } of PROFILES) if (re.test(label)) return p;
+  if (/[぀-ヿ一-鿿가-힯]/.test(sampleText)) return PROFILES[1].p;
+  return EN_PROFILE;
+}
+
+function nonSpaceCount(text: string): number {
+  let n = 0;
+  for (const ch of text) if (!/\s/.test(ch)) n++;
+  return n;
+}
+
+function punctuationPause(text: string, p: SpeechProfile): number {
+  let s = 0;
+  for (const ch of text) {
+    if (',，、;；:：'.includes(ch)) s += 0.22 * p.pauseWeight;
+    else if ('.。!！?？'.includes(ch)) s += 0.28 * p.pauseWeight;
+    else if ('…—～'.includes(ch)) s += 0.34 * p.pauseWeight;
+  }
+  return s;
+}
+
+function numberPenalty(text: string, p: SpeechProfile): number {
+  const n = (text.match(/\d/g) || []).length;
+  return n * 0.12 * p.numberWeight;
+}
+
+function acronymPenalty(text: string, p: SpeechProfile): number {
+  let penalty = 0;
+  let run = 0;
+  const flush = () => { if (run >= 2) penalty += run * 0.18 * p.acronymWeight; run = 0; };
+  for (const ch of text) {
+    if (/[A-ZА-Я]/.test(ch)) { run++; continue; }
+    flush();
+  }
+  flush();
+  return penalty;
+}
+
+/**
+ * 估算一段文本的自然朗读秒数。**在花 TTS 的钱之前**判断会不会超窗就靠它。
+ * 误差 ±15% 属正常 —— 后面还有 atempo 压缩 + 顺延兜底,不需要精确。
+ */
+export function estimateSpeechSeconds(text: string, p: SpeechProfile): number {
+  const runes = nonSpaceCount(text);
+  if (runes === 0) return 0;
+  const base = runes / Math.max(0.5, p.cps);
+  return base + punctuationPause(text, p) + numberPenalty(text, p) + acronymPenalty(text, p);
+}
+
+/** 语速百分比(-50..50)对时长的缩放:+25% 语速 → 时长 ×0.8。 */
+export function rateScale(ratePercent: number): number {
+  const r = Math.max(-50, Math.min(50, ratePercent || 0));
+  return 100 / (100 + r);
+}
+
+// ── 合块 ───────────────────────────────────────────────────────────────────
+export interface DubCue {
+  /** 在原 segs 里的下标,用来回写译文 */
+  index: number;
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface DubChunk {
+  id: number;
+  /** cues 数组的下标(不是 cue.index) */
+  items: number[];
+  start: number;
+  end: number;
+}
+
+export interface ChunkConfig {
+  /** 短于这个秒数的句子才允许被并块(长句本来就撑得住,单独合成更好锚) */
+  minDur: number;
+  /** 相邻句间隙超过这个秒数就不并(那是真停顿,并了会把停顿吃掉) */
+  gapTolerance: number;
+  /** 一块最多几句 */
+  maxSize: number;
+}
+
+export const DEFAULT_CHUNK_CONFIG: ChunkConfig = { minDur: 2.5, gapTolerance: 1.2, maxSize: 4 };
+
+/**
+ * 把相邻的短句并成块。判据(同 KrillinAI):
+ *   间隙 ≤ gapTolerance **且**(前一句 < minDur **或** 本句 < minDur)→ 并入当前块;
+ *   块内条数达 maxSize 强制断开。
+ *
+ * 并块的代价是块内各句失去独立硬锚点(改成按权重分摊)。所以只并「挨得近的短句」——
+ * 它们本来就在同一口气里,分摊误差远小于逐句合成带来的顿挫。
+ */
+export function makeChunks(cues: DubCue[], cfg: ChunkConfig = DEFAULT_CHUNK_CONFIG): DubChunk[] {
+  if (cues.length === 0) return [];
+  const chunks: DubChunk[] = [];
+  let cur: DubChunk = { id: 1, items: [0], start: cues[0].start, end: cues[0].end };
+
+  for (let i = 1; i < cues.length; i++) {
+    const prev = cues[i - 1];
+    const cue = cues[i];
+    const gap = cue.start - prev.end;
+    const prevDur = prev.end - prev.start;
+    const curDur = cue.end - cue.start;
+    const mergeable = gap <= cfg.gapTolerance && (prevDur < cfg.minDur || curDur < cfg.minDur);
+    if (!mergeable || cur.items.length >= cfg.maxSize) {
+      chunks.push(cur);
+      cur = { id: chunks.length + 1, items: [i], start: cue.start, end: cue.end };
+      continue;
+    }
+    cur.items.push(i);
+    cur.end = cue.end;
+  }
+  chunks.push(cur);
+  return chunks;
+}
+
+/** 块内文本拼成一次 TTS 的输入(拉丁系要空格;句末已有标点时 TTS 自带停顿)。 */
+export function chunkText(cues: DubCue[], chunk: DubChunk): string {
+  return chunk.items.map((i) => cues[i].text.trim()).filter(Boolean).join(' ');
+}
+
+// ── 贴轴 ───────────────────────────────────────────────────────────────────
+export interface FittedCue {
+  index: number;
+  start: number;
+  end: number;
+  text: string;
+}
+
+/**
+ * 把一块的实测音频时长摊回块内各句,得出最终字幕时间。
+ * 权重优先用各句估时,退回字数,再退回均分。
+ */
+export function distributeChunk(
+  cues: DubCue[], chunk: DubChunk, placeStart: number, effectiveDur: number, p: SpeechProfile,
+): FittedCue[] {
+  const idxs = chunk.items;
+  if (idxs.length === 0) return [];
+  const weights = idxs.map((i) => {
+    const est = estimateSpeechSeconds(cues[i].text, p);
+    return est > 0 ? est : Math.max(1, nonSpaceCount(cues[i].text));
+  });
+  const sum = weights.reduce((a, b) => a + b, 0);
+  const out: FittedCue[] = [];
+  let cursor = placeStart;
+  for (let k = 0; k < idxs.length; k++) {
+    const dur = sum > 0 ? (effectiveDur * weights[k]) / sum : effectiveDur / idxs.length;
+    const c = cues[idxs[k]];
+    out.push({ index: c.index, text: c.text, start: cursor, end: cursor + dur });
+    cursor += dur;
+  }
+  return out;
+}

@@ -6,12 +6,16 @@
  * 多平台发布。前半段(下载/转写/重组/翻译)是本引擎独有;后半段(发布文案 + 发布)
  * 完全复用现有基建。
  *
- * 音画对齐策略(比"纯顺延"更稳):翻译时按原句秒数给时长预算(超长是「画面完了配音还响」的根因),逐句 TTS 后
- *   · 说得比原句短 → 尾部垫静音到下一句原始起点(硬锚点,自动纠偏回正);
- *   · 溢出 >40% → AI 把这句压缩改写再配一次(源头治超长);
- *   · 仍比原句长 → atempo 压到原时长,封顶 1.3x(听感自然);
- *   · 还不够 → 顺延后续,时间轴向后漂移、靠句间空隙还债。
- * 每句 TTS 先 trim 首尾静音(synthesize 已在内部处理),否则拼接漂移会雪崩。
+ * 音画对齐策略(结构对齐 KrillinAI 的 dubbing 包,详见 dubPlan.ts):
+ *   ① 时间轴来自【原音轨的词级时间戳】,不是 TTS —— ASR 出 words[] → resplitByWords 切句 →
+ *      regroupSegments 重组 → 译文贴回原窗口。这一点和 KrillinAI 的 GenerateTimestamps 同源。
+ *   ② 【合块】挨得近的短句(间隙 ≤1.2s 且其一 <2.5s,最多 4 句)并成一块,**整块一次 TTS**。
+ *      逐句合成每句都带独立朗读收尾,拼起来一顿一顿;整块合成块内语气连贯、共用一个速度因子。
+ *   ③ 【先估后合成】统计式估时(中文 4.2 字/秒、英文 13.5 字符/秒 + 标点/数字/缩写惩罚)在花钱
+ *      之前判断超不超窗:超出 atempo 能吃的部分 → 一次 LLM 批量精简;吃得下的不动文字。
+ *   ④ 【贴轴】块实测/块窗口 = 速度因子,atempo 封顶 1.25;块内各句按估时权重分摊出字幕时间。
+ *      说得短 → 尾部垫静音到下一块原始起点(硬锚点纠偏);说得长 → 顺延,靠块间空隙还债。
+ * 每块 TTS 先 trim 首尾静音(synthesize 已在内部处理),否则拼接漂移会雪崩。
  */
 
 import fs from 'fs';
@@ -23,6 +27,9 @@ import { getYtdlpPath, detectSystemProxy } from './ytdlpRuntime';
 import { resolveBgmPath } from './bgm';
 import { getVideoConfig } from './videoConfig';
 import { synthesize, getVoiceFallbacks, getLastTtsError, alignSentencesToCues, voiceProviderLabel, type TtsCue } from './tts';
+import {
+  speechProfileFor, estimateSpeechSeconds, rateScale, makeChunks, chunkText, distributeChunk, type DubCue,
+} from './dubPlan';
 import { resolvePublishCaption } from './publishCaptionWriter';
 import { callDeepSeek } from './scriptWriter';
 import { chargeRepostVideo, refundMode1Video } from './billing';
@@ -44,6 +51,8 @@ const TUNE = {
   rateHi: 1.08, rateLo: 0.9, rateUpMax: 15, rateDownMax: 10,
   lineBoost: 20, atempoMax: 1.25, stretchMax: 1.15,
   gapSplit: 1.0, unitsSplit: 36,
+  // 配音合块(dubPlan):短于 chunkMinDur 且间隙 ≤chunkGap 的相邻句并成一块整块合成,最多 chunkMax 句。
+  chunkMinDur: 2.5, chunkGap: 1.2, chunkMax: 4,
   maskRatio: 0.16, fontDivisor: 700,
   ytdlpFormat: 'bv*+ba/b', ytdlpExtractorArgs: 'youtube:player_client=android,ios',
   translatePrompt: '', condensePrompt: '',
@@ -63,6 +72,9 @@ async function refreshTune(): Promise<void> {
     TUNE.stretchMax = n(c?.repostStretchMax, TUNE.stretchMax);
     TUNE.gapSplit = n(c?.repostGapSplit, TUNE.gapSplit);
     TUNE.unitsSplit = n(c?.repostUnitsSplit, TUNE.unitsSplit);
+    TUNE.chunkMinDur = n(c?.repostChunkMinDur, TUNE.chunkMinDur);
+    TUNE.chunkGap = n(c?.repostChunkGap, TUNE.chunkGap);
+    TUNE.chunkMax = n(c?.repostChunkMax, TUNE.chunkMax);
     TUNE.maskRatio = n(c?.repostMaskRatio, TUNE.maskRatio);
     TUNE.fontDivisor = n(c?.repostFontDivisor, TUNE.fontDivisor);
     if (typeof c?.repostYtdlpFormat === 'string' && c.repostYtdlpFormat.trim()) TUNE.ytdlpFormat = c.repostYtdlpFormat.trim();
@@ -459,9 +471,56 @@ async function translateSegments(
   return out;
 }
 
-// ── 逐句配音 + 对齐:静音填充 + AI 压缩重配 + atempo 微压 + 顺延漂移 ──
+/**
+ * 批量精简超窗句子 —— 一次 LLM 调用改完所有超长句,不是一句一调。
+ * 返回与输入等长的数组;某条精简失败/变长时原样返回。
+ */
+async function condenseBatch(
+  items: Array<{ text: string; budget: number }>, onCost?: (tk: number, usd: number) => void, signal?: AbortSignal,
+): Promise<string[]> {
+  if (items.length === 0) return [];
+  const system = TUNE.condensePrompt.trim()
+    ? TUNE.condensePrompt.split('{{BUDGET}}').join('每项自带的 max')
+    : [
+      '你是口播精简器(json)。把输入 items 数组每一项的 text 用【同一种语言】略微精简。',
+      '# 硬规则:',
+      '1. 一一对应:第 N 条输入只对应第 N 条输出,禁止合并/拆分/增删条目。',
+      '2. 每项的 max 是该条输出的长度上限(中日韩=字符数,其它=单词数),绝不允许超过。',
+      '3. 删冗余修饰、口头语、重复表述;核心信息(数字、人名、结论)一个都不能丢。',
+      '4. 不解释、不加引号、不改语言。',
+      '# 只返回 JSON:{ "texts": ["精简1", "精简2", ...] },数组长度必须等于输入长度。',
+    ].join('\n');
+  try {
+    const r = await callDeepSeek(
+      system,
+      '精简下面 ' + items.length + ' 条:\n' + JSON.stringify({ items: items.map((x) => ({ text: x.text, max: x.budget })) }),
+      true, 60_000, 'noobclawai-chat', 0.3,
+    );
+    onCost?.(r.tokens || 0, r.costUsd || 0);
+    if (signal?.aborted) return items.map((x) => x.text);
+    const m = r.content.match(/\{[\s\S]*\}/);
+    const parsed = m ? JSON.parse(m[0]) : JSON.parse(r.content);
+    if (Array.isArray(parsed?.texts) && parsed.texts.length === items.length) {
+      return parsed.texts.map((t: any, i: number) => {
+        const s = String(t ?? '').trim().replace(/^["'「『]|["'」』]$/g, '').trim();
+        // 精简后反而变长 / 空 → 用原文(宁可 atempo 压,不要丢内容)
+        return s && s.length < items[i].text.length ? s : items[i].text;
+      });
+    }
+  } catch { /* 精简失败 → 原文,后面 atempo + 顺延兜底 */ }
+  return items.map((x) => x.text);
+}
+
+// ── 配音 + 对齐(合块一次 TTS → 贴回原时间轴)──────────────────────────────
+//
+// 结构来自 KrillinAI 的 dubbing 包(见 dubPlan.ts 顶部注释)。相对旧版逐句合成的两点改变:
+//   ① 【合块】挨得近的短句并成一块整块合成 → 块内语气连贯,不再每句一个独立朗读收尾;
+//   ② 【先估后合成】统计式估时判断超窗 → 超了先批量 LLM 缩写,再 TTS。
+//      旧版是「合成→超长→提速重配→仍超→缩写再重配」= 同一句最多 4 次 TTS。
+//      豆包按字符实扣,那是 4 倍字符费且每次真扣。现在每块 1 次(极端超长才多 1 次)。
 async function synthAndAlign(
   segs: Seg[], voice: string, rate: number, assetDir: string, targetTotalDur: number,
+  targetLangLabel: string,
   onLog: (m: string) => void, signal?: AbortSignal, onCost?: (tk: number, usd: number) => void,
 ): Promise<{ voiceTrackPath: string; totalDur: number; cues: TtsCue[] } | null> {
   const pieces: string[] = []; // 按时间轴排好的音频片段(含静音)文件列表
@@ -469,33 +528,63 @@ async function synthAndAlign(
   let cursor = 0; // 当前已排到的音频末尾(秒)
   const chain = getVoiceFallbacks(voice);
 
-  // ── 全局自适应语速(温和版):先按基准语速把全部句子配一遍测总长,算 r=配音总长/原口播总长。
-  //    r>1.08 → 全片统一提速(封顶 +15%);r<0.90 → 全片统一放慢(封顶 -10%,治「译文偏短
-  //    →到处垫静音很怪」)。语速全片一致(不再忽快忽慢);首轮结果缓存,r 正常时零额外开销。
-  const preTts = new Map<number, { path: string; dur: number }>();
-  let preSum = 0, preTarget = 0;
-  for (let i = 0; i < segs.length; i++) {
-    throwIfAborted(signal);
-    const seg = segs[i];
-    if (!seg.text.trim()) continue;
-    for (const v of chain) {
-      const out = path.join(assetDir, `seg_${String(i).padStart(3, '0')}.mp3`);
-      // ⚠️ signal 必须传:voiceChain × 最多 5 次重试 × 单次最长 60s,不传则停止要磨数分钟。
-      const r0 = await synthesize(seg.text, out, v, rate, { signal });
-      // 豆包按字符实扣 —— 必须报出来。repost 的平台费是按 aiCostUsd 翻倍算的,
-      //   漏了 TTS 这笔就等于少收钱(不只是详情页少显示)。Edge 免费,chargedTokens 为空。
-      if (r0.chargedTokens) onCost?.(r0.chargedTokens, r0.costUsd || 0);
-      if (r0.synthesized && r0.durationSec > 0) { preTts.set(i, { path: r0.audioPath, dur: r0.durationSec }); break; }
-    }
-    const got = preTts.get(i);
-    if (got) { preSum += got.dur; preTarget += Math.max(0.6, seg.end - seg.start); }
+  // 只保留有译文的句(被翻成空的导流句直接丢,原位留空)。
+  const dubCues: DubCue[] = [];
+  segs.forEach((s, i) => { if (s.text.trim()) dubCues.push({ index: i, start: s.start, end: s.end, text: s.text.trim() }); });
+  if (dubCues.length === 0) return null;
+
+  const profile = speechProfileFor(targetLangLabel, dubCues[0].text);
+  const chunks = makeChunks(dubCues, {
+    minDur: TUNE.chunkMinDur, gapTolerance: TUNE.chunkGap, maxSize: Math.max(1, Math.round(TUNE.chunkMax)),
+  });
+  if (chunks.length < dubCues.length) {
+    onLog(`🧩 相邻短句合块:${dubCues.length} 句 → ${chunks.length} 块(整块一次合成,语气更连贯、TTS 花费更省)`);
   }
+
+  // ── 全局自适应语速:用估时算,**零 TTS 开销**(旧版为了算这个要把全片先合成一遍)。
+  const availOf = (c: { start: number; end: number }) => Math.max(0.6, c.end - c.start);
+  let estSum = 0, availSum = 0;
+  const chunkEst = chunks.map((ch) => {
+    const e = estimateSpeechSeconds(chunkText(dubCues, ch), profile);
+    estSum += e; availSum += availOf(ch);
+    return e;
+  });
   let globalRate = rate;
-  if (preTarget > 3 && preTts.size >= 3) {
-    const ratio = preSum / preTarget;
+  if (availSum > 3 && chunks.length >= 3) {
+    // 估时是「自然语速」下的,先按用户设定的基准语速折算,再和原口播窗口比。
+    const ratio = (estSum * rateScale(rate)) / availSum;
     if (ratio > TUNE.rateHi) globalRate = Math.min(50, rate + Math.min(TUNE.rateUpMax, Math.round((ratio - 1) * 100)));
     else if (ratio < TUNE.rateLo) globalRate = Math.max(-50, rate - Math.min(TUNE.rateDownMax, Math.round((1 - ratio) * 50)));
-    if (globalRate !== rate) onLog(`🎚️ 语速自适应:配音/原口播时长比 ${ratio.toFixed(2)} → 全片语速 ${globalRate > 0 ? '+' : ''}${globalRate}%`);
+    if (globalRate !== rate) onLog(`🎚️ 语速自适应:预估配音/原口播时长比 ${ratio.toFixed(2)} → 全片语速 ${globalRate > 0 ? '+' : ''}${globalRate}%`);
+  }
+  const scale = rateScale(globalRate);
+
+  // ── 合成前批量缩写:估时超出【窗口 × atempo 上限】的块才动文字。
+  //    atempo 能吃掉的部分不改文字(改了译文就干);吃不掉的才精简,而且一次调用改完。
+  const pending: Array<{ ci: number; k: number; text: string; budget: number }> = [];
+  chunks.forEach((ch, ci) => {
+    const est = chunkEst[ci] * scale;
+    const room = availOf(ch) * TUNE.atempoMax;
+    if (est <= room * 1.02 || est <= 0) return;
+    const keep = room / est; // 需要保留的比例
+    ch.items.forEach((k) => {
+      const t = dubCues[k].text;
+      if (t.length <= 6) return; // 太短的不动,砍了也省不出时间
+      pending.push({ ci, k, text: t, budget: Math.max(6, Math.floor(t.length * keep * 1.05)) });
+    });
+  });
+  if (pending.length > 0 && !signal?.aborted) {
+    onLog(`✂️ ${pending.length} 句预估超出画面窗口,合成前统一精简(避免配音拖过画面)`);
+    const shortened = await condenseBatch(pending.map((p) => ({ text: p.text, budget: p.budget })), onCost, signal);
+    pending.forEach((p, i) => {
+      const s = shortened[i];
+      if (s && s !== p.text) {
+        dubCues[p.k].text = s;
+        segs[dubCues[p.k].index].text = s; // 字幕也用精简后的文本
+      }
+    });
+    // 文本变了 → 估时重算(后面 fit 的权重要用新估时)
+    chunks.forEach((ch, ci) => { chunkEst[ci] = estimateSpeechSeconds(chunkText(dubCues, ch), profile); });
   }
 
   const makeSilence = async (dur: number, out: string): Promise<boolean> => {
@@ -504,90 +593,71 @@ async function synthAndAlign(
     return r.ok && fs.existsSync(out);
   };
 
-  for (let i = 0; i < segs.length; i++) {
+  // ── 逐块:合成 → 贴轴 → 归一化(含 atempo)→ 排进时间线 ──
+  for (let ci = 0; ci < chunks.length; ci++) {
     throwIfAborted(signal);
-    const seg = segs[i];
-    if (!seg.text.trim()) continue; // 被翻成空(导流句)→ 跳过,原位留空
+    const ch = chunks[ci];
+    const text = chunkText(dubCues, ch);
+    if (!text) continue;
 
-    // 起点静音:补到本句原始 start(硬锚点纠偏);若已越过 start 则不补(顺延)。
-    if (seg.start > cursor) {
-      const sil = path.join(assetDir, `sil_${i}.m4a`);
-      if (await makeSilence(seg.start - cursor, sil)) { pieces.push(sil); cursor = seg.start; }
+    // 起点静音:补到本块原始 start(硬锚点纠偏);若已越过 start 则不补(顺延)。
+    if (ch.start > cursor) {
+      const sil = path.join(assetDir, `sil_${ci}.m4a`);
+      if (await makeSilence(ch.start - cursor, sil)) { pieces.push(sil); cursor = ch.start; }
     }
-    const placeStart = Math.max(cursor, seg.start);
+    const placeStart = Math.max(cursor, ch.start);
 
-    // TTS 本句:全局率=基准 → 直接复用预测速那轮;否则按全局率重配(失败退回首轮结果)。
     let ttsPath = ''; let ttsDur = 0;
-    const cached = preTts.get(i);
-    if (globalRate === rate && cached) { ttsPath = cached.path; ttsDur = cached.dur; }
-    else {
-      for (const v of chain) {
-        const out = path.join(assetDir, `seg_${String(i).padStart(3, '0')}_g.mp3`);
-        const r = await synthesize(seg.text, out, v, globalRate, { signal });
-        if (r.chargedTokens) onCost?.(r.chargedTokens, r.costUsd || 0);
-        if (r.synthesized && r.durationSec > 0) { ttsPath = r.audioPath; ttsDur = r.durationSec; break; }
-      }
-      if (!ttsPath && cached) { ttsPath = cached.path; ttsDur = cached.dur; }
+    for (const v of chain) {
+      const out = path.join(assetDir, `chunk_${String(ci).padStart(3, '0')}.mp3`);
+      // ⚠️ signal 必须传:voiceChain × 最多 5 次重试 × 单次最长 60s,不传则停止要磨数分钟。
+      const r = await synthesize(text, out, v, globalRate, { signal });
+      // 豆包按字符实扣 —— 必须报出来。repost 的平台费是按 aiCostUsd 翻倍算的,
+      //   漏了 TTS 这笔就等于少收钱(不只是详情页少显示)。Edge 免费,chargedTokens 为空。
+      if (r.chargedTokens) onCost?.(r.chargedTokens, r.costUsd || 0);
+      if (r.synthesized && r.durationSec > 0) { ttsPath = r.audioPath; ttsDur = r.durationSec; break; }
     }
-    if (!ttsPath) { onLog(`⚠️ 第 ${i + 1} 句配音失败,跳过:${getLastTtsError().slice(0, 60)}`); continue; }
+    if (!ttsPath) { onLog(`⚠️ 第 ${ci + 1} 块配音失败,跳过:${getLastTtsError().slice(0, 60)}`); continue; }
 
-    const targetDur = Math.max(0.6, seg.end - seg.start);
-    // 超长治理【先提语速、后动文字】(真机反馈:直接 AI 压缩砍得太狠、译文太干):
-    //   ① 溢出 >60% → 同文本按 edge-tts 语速 +25% 重配一次(声库原生提速,比 atempo 自然,零改文字);
-    //   ② 提速后仍溢出 >90% → 才轻度 AI 压缩(只压到 1.6×窗口,后面还有 atempo+顺延消化);
-    //   ③ 最后 atempo ≤1.3x + 顺延靠句间空隙还债。
-    if (ttsDur > targetDur * 1.6 && !signal?.aborted) {
-      const outF = path.join(assetDir, `seg_${String(i).padStart(3, '0')}_f.mp3`);
-      for (const v of chain) {
-        const rf = await synthesize(seg.text, outF, v, Math.min(50, globalRate + TUNE.lineBoost), { signal });
-        if (rf.chargedTokens) onCost?.(rf.chargedTokens, rf.costUsd || 0);
-        if (rf.synthesized && rf.durationSec > 0 && rf.durationSec < ttsDur) {
-          onLog(`⏩ 第 ${i + 1} 句偏长,自动提速重配(${ttsDur.toFixed(1)}s→${rf.durationSec.toFixed(1)}s)`);
-          ttsPath = rf.audioPath; ttsDur = rf.durationSec;
-          break;
-        }
-      }
-    }
-    if (ttsDur > targetDur * 1.9 && seg.text.trim().length > 6 && !signal?.aborted) {
-      const budget = Math.max(6, Math.floor(seg.text.trim().length * ((targetDur * 1.6) / ttsDur)));
-      try {
-        const r = await callDeepSeek(
-          (TUNE.condensePrompt.trim() ? TUNE.condensePrompt.split('{{BUDGET}}').join(String(budget)) : '你是口播精简器。把给定句子用【同一种语言】略微精简:删冗余修饰和口头语,核心信息一个都不能丢,输出不超过 ' + budget + ' 个字符。只返回精简后的句子,不要引号、不要解释。'),
-          seg.text, false, 30_000, 'noobclawai-chat', 0.3);
-        onCost?.(r.tokens || 0, r.costUsd || 0);
-        const short = (r.content || '').trim().replace(/^["'「『]|["'」』]$/g, '').trim();
-        if (short && short.length < seg.text.trim().length) {
-          const out2 = path.join(assetDir, `seg_${String(i).padStart(3, '0')}_c.mp3`);
-          for (const v of chain) {
-            const r2 = await synthesize(short, out2, v, Math.min(50, globalRate + TUNE.lineBoost), { signal });
-            if (r2.chargedTokens) onCost?.(r2.chargedTokens, r2.costUsd || 0);
-            if (r2.synthesized && r2.durationSec > 0 && r2.durationSec < ttsDur) {
-              onLog(`✂️ 第 ${i + 1} 句仍超长,轻度精简重配(${ttsDur.toFixed(1)}s→${r2.durationSec.toFixed(1)}s)`);
-              ttsPath = r2.audioPath; ttsDur = r2.durationSec; seg.text = short;
-              break;
-            }
+    const targetDur = availOf(ch);
+    // 安全网:估时失准导致实测远超 atempo 能吃的范围时,**只**再提速重配一次(声库原生
+    //   提速比 atempo 自然)。上限一次,不再链式重试 —— 那正是旧版烧钱的地方。
+    if (ttsDur > targetDur * TUNE.atempoMax * 1.25 && !signal?.aborted) {
+      const boosted = Math.min(50, globalRate + TUNE.lineBoost);
+      if (boosted > globalRate) {
+        const outF = path.join(assetDir, `chunk_${String(ci).padStart(3, '0')}_f.mp3`);
+        for (const v of chain) {
+          const rf = await synthesize(text, outF, v, boosted, { signal });
+          if (rf.chargedTokens) onCost?.(rf.chargedTokens, rf.costUsd || 0);
+          if (rf.synthesized && rf.durationSec > 0 && rf.durationSec < ttsDur) {
+            onLog(`⏩ 第 ${ci + 1} 块偏长,提速重配(${ttsDur.toFixed(1)}s→${rf.durationSec.toFixed(1)}s)`);
+            ttsPath = rf.audioPath; ttsDur = rf.durationSec;
+            break;
           }
         }
-      } catch { /* 精简失败走 atempo+顺延兜底 */ }
+      }
     }
-    // 溢出压到原时长,真实压缩封顶 1.3x(听感仍自然;再多就只压 1.3、剩余顺延)。
+
+    // 溢出压到原窗口,真实压缩封顶 atempoMax(听感仍自然;再多就只压到上限、剩余顺延)。
     const tempo = ttsDur > targetDur ? Math.min(TUNE.atempoMax, ttsDur / targetDur) : 1;
-    // ⚠️ 必须把每句【归一化成 aac 48k 立体声】:TTS 出的是 mp3、静音片段是 aac,格式不统一
+    // ⚠️ 必须把每块【归一化成 aac 48k 立体声】:TTS 出的是 mp3、静音片段是 aac,格式不统一
     //    concat demuxer -c copy 会失败。这一步同时做 atempo(需要时),一趟 ffmpeg 搞定。
-    const norm = path.join(assetDir, `seg_${String(i).padStart(3, '0')}_n.m4a`);
+    const norm = path.join(assetDir, `chunk_${String(ci).padStart(3, '0')}_n.m4a`);
     const filt = tempo > 1.005 ? `atempo=${tempo.toFixed(3)}` : 'anull';
     const nr = await runFfmpeg(['-y', '-i', ttsPath, '-filter:a', filt, '-ar', '48000', '-ac', '2', '-c:a', 'aac', '-b:a', '128k', norm], { timeoutMs: 30_000, signal });
-    if (!nr.ok || !fs.existsSync(norm)) { onLog(`⚠️ 第 ${i + 1} 句音频归一化失败,跳过`); continue; }
+    if (!nr.ok || !fs.existsSync(norm)) { onLog(`⚠️ 第 ${ci + 1} 块音频归一化失败,跳过`); continue; }
     const effDur = tempo > 1.005 ? ttsDur / tempo : ttsDur;
     pieces.push(norm);
-    // 记字幕 cue(最终时间轴)。
-    cues.push({ text: seg.text, start: placeStart, end: placeStart + effDur });
+    // 块内各句按估时权重分摊,得出最终字幕时间轴。
+    for (const f of distributeChunk(dubCues, ch, placeStart, effDur, profile)) {
+      cues.push({ text: f.text, start: f.start, end: f.end });
+    }
     cursor = placeStart + effDur;
 
-    // 尾部补静音到下一句原始 start(说得短时保持后续同步)。
-    const nextStart = i + 1 < segs.length ? segs[i + 1].start : cursor;
+    // 尾部补静音到下一块原始 start(说得短时保持后续同步)。
+    const nextStart = ci + 1 < chunks.length ? chunks[ci + 1].start : cursor;
     if (nextStart > cursor) {
-      const sil = path.join(assetDir, `siltail_${i}.m4a`);
+      const sil = path.join(assetDir, `siltail_${ci}.m4a`);
       if (await makeSilence(nextStart - cursor, sil)) { pieces.push(sil); cursor = nextStart; }
     }
   }
@@ -805,12 +875,12 @@ export async function runRepostPipeline(
 
       // ── STEP 4:配音 + 对齐 ──
       throwIfAborted(signal);
-      tracker.start('voice', '🎤 逐句配音并对齐原时间轴…');
+      tracker.start('voice', '🎤 配音并对齐原时间轴…');
       const voice = input.voice || 'zh-CN-YunjianNeural';
       // 说清是哪家配音:豆包按字数计费、Edge 免费,用户有权在日志里一眼看到。
       tracker.progress(`🎤 配音:${voiceProviderLabel(voice)} · 音色 ${voice}`);
       const rate = typeof input.voiceRate === 'number' ? input.voiceRate : 0;
-      aligned = await synthAndAlign(translated, voice, rate, assetDir, srcDur, (m) => tracker.progress(m), signal, (tk, usd) => { tracker.addTokens(tk, usd); aiCostUsd += usd; });
+      aligned = await synthAndAlign(translated, voice, rate, assetDir, srcDur, targetLabel, (m) => tracker.progress(m), signal, (tk, usd) => { tracker.addTokens(tk, usd); aiCostUsd += usd; });
       if (!aligned) { const err = '配音失败(edge-tts 不可用或全部句子合成失败)'; tracker.fail('voice', err); return { ok: false, error: err }; }
       tracker.done('voice', `✅ 配音就绪 · ${aligned.cues.length} 句 · 共 ${aligned.totalDur.toFixed(1)}s`);
     }
