@@ -77,7 +77,12 @@ async function pollTtsJob(jobId: string, token: string, signal?: AbortSignal): P
       const j: any = await r.json().catch(() => ({}));
       if (j?.status === 'done') return j;
       if (j?.status === 'failed') { _lastTtsError = `豆包长文本合成失败:${String(j?.error || '').slice(0, 140)}`; return null; }
-      if (r.status === 404) { _lastTtsError = '豆包长文本任务已过期'; return null; }
+      // 4xx 是确定性错误(job 过期 404 / 登录失效 401 / 不是本人 403),再轮也不会变 —— 立刻退出,
+      //   否则要空转到 7 分钟超时才报错,用户干等。5xx/429 是瞬时的,继续轮询。
+      if (r.status >= 400 && r.status < 500) {
+        _lastTtsError = r.status === 404 ? '豆包长文本任务已过期' : `豆包长文本查询失败(${r.status})`;
+        return null;
+      }
       // queued / processing → 继续轮询
     } catch {
       // 单次查询抖动不算失败,下一轮再试
@@ -100,8 +105,10 @@ async function synthDoubao(text: string, outPath: string, voice: string, rate?: 
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ text: clean, voice, speedRatio, encoding: 'mp3', ...(isLong ? { async: true } : {}) }),
-      // 短文本在线合成:60s 足够。长文本这一发只是「提交」,后端立刻回 202。
-      signal: signal || AbortSignal.timeout(120_000),
+      // 短文本在线合成:120s 足够。长文本这一发只是「提交」,后端立刻回 202。
+      // ⚠️ 必须 any([signal, timeout]):旧代码是 `signal || timeout`,一旦上层传了 signal
+      //    这个 fetch 就【彻底没有超时】—— 上游挂住时整条任务无限期卡在这里。
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000),
     });
     if (!resp.ok && resp.status !== 202) {
       const j: any = await resp.json().catch(() => ({}));

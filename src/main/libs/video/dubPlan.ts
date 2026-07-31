@@ -27,37 +27,66 @@ export interface SpeechProfile {
   numberWeight: number;
   /** 连续大写(缩写,逐字母念)惩罚权重 */
   acronymWeight: number;
+  /**
+   * 是否按【字】计长度。中日韩=按字符,其它=按单词。
+   * ⚠️ 给 LLM 下长度预算时必须用对单位:英文一句 40 字符 ≈ 7 个词,
+   *    把 40 当成「40 个词」发给模型 = 等于没约束,该精简的一句都不会精简。
+   */
+  cjk: boolean;
 }
 
-const PROFILES: Array<{ re: RegExp; p: SpeechProfile }> = [
-  { re: /繁體|繁体|zh-TW|zh-HK|Traditional/i, p: { cps: 4.1, pauseWeight: 0.30, numberWeight: 0.22, acronymWeight: 0.12 } },
-  { re: /中文|简体|汉语|漢語|Chinese|zh/i, p: { cps: 4.2, pauseWeight: 0.30, numberWeight: 0.22, acronymWeight: 0.12 } },
-  { re: /日本|日語|日语|Japanese|ja/i, p: { cps: 4.0, pauseWeight: 0.28, numberWeight: 0.20, acronymWeight: 0.12 } },
-  { re: /한국|韓語|韩语|Korean|ko/i, p: { cps: 4.3, pauseWeight: 0.28, numberWeight: 0.20, acronymWeight: 0.12 } },
-  { re: /Deutsch|德语|德語|German|de/i, p: { cps: 11.8, pauseWeight: 0.24, numberWeight: 0.25, acronymWeight: 0.28 } },
-  { re: /Русск|俄语|俄語|Russian|ru/i, p: { cps: 10.8, pauseWeight: 0.24, numberWeight: 0.24, acronymWeight: 0.24 } },
-  { re: /Türk|土耳其|Turkish|tr/i, p: { cps: 12.0, pauseWeight: 0.24, numberWeight: 0.24, acronymWeight: 0.26 } },
-  { re: /Español|西班牙|Spanish|es/i, p: { cps: 13.2, pauseWeight: 0.24, numberWeight: 0.26, acronymWeight: 0.30 } },
-  { re: /Português|葡萄牙|Portuguese|pt/i, p: { cps: 13.0, pauseWeight: 0.24, numberWeight: 0.26, acronymWeight: 0.30 } },
-  { re: /Français|法语|法語|French|fr/i, p: { cps: 12.8, pauseWeight: 0.24, numberWeight: 0.26, acronymWeight: 0.30 } },
-  { re: /Italiano|意大利|Italian|it/i, p: { cps: 13.0, pauseWeight: 0.24, numberWeight: 0.26, acronymWeight: 0.30 } },
-  { re: /Indonesia|印尼|印度尼西亚|id/i, p: { cps: 12.5, pauseWeight: 0.24, numberWeight: 0.26, acronymWeight: 0.28 } },
-  { re: /Tiếng Việt|越南|Vietnamese|vi/i, p: { cps: 12.0, pauseWeight: 0.26, numberWeight: 0.24, acronymWeight: 0.26 } },
-  { re: /ไทย|泰语|泰語|Thai|th/i, p: { cps: 11.0, pauseWeight: 0.26, numberWeight: 0.24, acronymWeight: 0.26 } },
-  { re: /العربية|阿拉伯|Arabic|ar/i, p: { cps: 12.0, pauseWeight: 0.26, numberWeight: 0.24, acronymWeight: 0.26 } },
-];
-
-const EN_PROFILE: SpeechProfile = { cps: 13.5, pauseWeight: 0.24, numberWeight: 0.26, acronymWeight: 0.32 };
+const CJK_BASE = { pauseWeight: 0.30, numberWeight: 0.22, acronymWeight: 0.12, cjk: true };
+const LATIN_BASE = { pauseWeight: 0.24, numberWeight: 0.26, acronymWeight: 0.30, cjk: false };
 
 /**
- * 按目标语言标签(如 '中文' / 'English' / '日本語')取语速档案。
- * 匹配不到 → 按文本本身是否含 CJK 兜底,再不行按英文。
+ * ⚠️ 语言名和两字母语言码【必须分开匹配】。放在同一个正则里靠数组顺序碰运气会错:
+ *    `'Bahasa Indonesia'` 里含 `es` → 命中西班牙语;`'Mandarin'` 含 `ar` → 命中阿拉伯语。
+ *    所以 `names` 只放能独立成词的自然语言名,`codes` 走【整串相等或 `xx-YY` 前缀】的精确比对。
+ */
+const PROFILES: Array<{ names: RegExp; codes: string[]; p: SpeechProfile }> = [
+  { names: /繁體|繁体|Traditional\s*Chinese/i, codes: ['zh-tw', 'zh-hk', 'zh-hant'], p: { cps: 4.1, ...CJK_BASE } },
+  { names: /简体|中文|汉语|漢語|Chinese/i, codes: ['zh', 'zh-cn', 'zh-hans'], p: { cps: 4.2, ...CJK_BASE } },
+  { names: /日本語|日本语|日语|Japanese/i, codes: ['ja', 'jp'], p: { cps: 4.0, ...CJK_BASE } },
+  { names: /한국어|韓語|韩语|韩国语|Korean/i, codes: ['ko', 'kr'], p: { cps: 4.3, ...CJK_BASE } },
+  { names: /Deutsch|德语|德語|German/i, codes: ['de'], p: { cps: 11.8, ...LATIN_BASE, numberWeight: 0.25, acronymWeight: 0.28 } },
+  { names: /Русск|俄语|俄語|Russian/i, codes: ['ru'], p: { cps: 10.8, ...LATIN_BASE, numberWeight: 0.24, acronymWeight: 0.24 } },
+  { names: /Türk|土耳其|Turkish/i, codes: ['tr'], p: { cps: 12.0, ...LATIN_BASE, numberWeight: 0.24, acronymWeight: 0.26 } },
+  { names: /Español|Espanol|西班牙|Spanish/i, codes: ['es'], p: { cps: 13.2, ...LATIN_BASE } },
+  { names: /Português|Portugues|葡萄牙|Portuguese/i, codes: ['pt', 'pt-br'], p: { cps: 13.0, ...LATIN_BASE } },
+  { names: /Français|Francais|法语|法語|French/i, codes: ['fr'], p: { cps: 12.8, ...LATIN_BASE } },
+  { names: /Italiano|意大利|Italian/i, codes: ['it'], p: { cps: 13.0, ...LATIN_BASE } },
+  { names: /Indonesia|印尼|印度尼西亚/i, codes: ['id'], p: { cps: 12.5, ...LATIN_BASE, acronymWeight: 0.28 } },
+  { names: /Tiếng\s*Việt|越南|Vietnamese/i, codes: ['vi'], p: { cps: 12.0, ...LATIN_BASE, pauseWeight: 0.26, numberWeight: 0.24, acronymWeight: 0.26 } },
+  { names: /ไทย|泰语|泰語|Thai/i, codes: ['th'], p: { cps: 11.0, ...LATIN_BASE, pauseWeight: 0.26, numberWeight: 0.24, acronymWeight: 0.26 } },
+  { names: /العربية|阿拉伯|Arabic/i, codes: ['ar'], p: { cps: 12.0, ...LATIN_BASE, pauseWeight: 0.26, numberWeight: 0.24, acronymWeight: 0.26 } },
+];
+
+const EN_PROFILE: SpeechProfile = { cps: 13.5, ...LATIN_BASE, acronymWeight: 0.32 };
+const ZH_PROFILE: SpeechProfile = { cps: 4.2, ...CJK_BASE };
+
+/**
+ * 按目标语言标签(如 '简体中文' / 'English' / 'Bahasa Indonesia' / 'zh-TW')取语速档案。
+ * 先按语言名匹配,再按语言码精确匹配;都不中 → 按文本本身是否含 CJK 兜底,再不行按英文。
  */
 export function speechProfileFor(langLabel: string, sampleText = ''): SpeechProfile {
-  const label = String(langLabel || '');
-  for (const { re, p } of PROFILES) if (re.test(label)) return p;
-  if (/[぀-ヿ一-鿿가-힯]/.test(sampleText)) return PROFILES[1].p;
+  const label = String(langLabel || '').trim();
+  for (const { names, p } of PROFILES) if (names.test(label)) return p;
+  const code = label.toLowerCase();
+  for (const { codes, p } of PROFILES) {
+    if (codes.some((c) => code === c || code.startsWith(`${c}-`) || code.startsWith(`${c}_`))) return p;
+  }
+  if (/[぀-ヿ一-鿿가-힯]/.test(sampleText)) return ZH_PROFILE;
   return EN_PROFILE;
+}
+
+/**
+ * 文本的「长度单位」数:中日韩按非空白字符,其它按单词。
+ * 给 LLM 下长度预算、判断是否短到不值得精简,都必须用这个,不能直接用 String.length。
+ */
+export function textUnits(text: string, p: SpeechProfile): number {
+  const t = String(text || '').trim();
+  if (!t) return 0;
+  return p.cjk ? nonSpaceCount(t) : (t.split(/\s+/).filter(Boolean).length || 1);
 }
 
 function nonSpaceCount(text: string): number {

@@ -28,7 +28,8 @@ import { resolveBgmPath } from './bgm';
 import { getVideoConfig } from './videoConfig';
 import { synthesize, getVoiceFallbacks, getLastTtsError, alignSentencesToCues, voiceProviderLabel, type TtsCue } from './tts';
 import {
-  speechProfileFor, estimateSpeechSeconds, rateScale, makeChunks, chunkText, distributeChunk, type DubCue,
+  speechProfileFor, estimateSpeechSeconds, rateScale, makeChunks, chunkText, distributeChunk, textUnits,
+  type DubCue,
 } from './dubPlan';
 import { resolvePublishCaption } from './publishCaptionWriter';
 import { callDeepSeek } from './scriptWriter';
@@ -569,8 +570,11 @@ async function synthAndAlign(
     const keep = room / est; // 需要保留的比例
     ch.items.forEach((k) => {
       const t = dubCues[k].text;
-      if (t.length <= 6) return; // 太短的不动,砍了也省不出时间
-      pending.push({ ci, k, text: t, budget: Math.max(6, Math.floor(t.length * keep * 1.05)) });
+      // ⚠️ 预算单位必须跟着语言走(中日韩=字,其它=词)—— prompt 里也是这么说的。
+      //    用 String.length 当「词数」发给模型 = 上限虚高几倍,等于没约束。
+      const units = textUnits(t, profile);
+      if (units <= (profile.cjk ? 6 : 3)) return; // 太短的不动,砍了也省不出时间
+      pending.push({ ci, k, text: t, budget: Math.max(profile.cjk ? 6 : 3, Math.floor(units * keep * 1.05)) });
     });
   });
   if (pending.length > 0 && !signal?.aborted) {
