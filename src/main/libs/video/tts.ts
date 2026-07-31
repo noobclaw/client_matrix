@@ -23,7 +23,6 @@
  */
 
 import fs from 'fs';
-import path from 'path';
 import { EdgeTTS, type WordBoundary } from 'edge-tts-universal';
 import { runFfmpeg, probeDuration } from './ffmpegRuntime';
 import { getTtsVoice } from './config';
@@ -50,72 +49,26 @@ export function voiceProviderLabel(voice: string | undefined): string {
  * 豆包(火山)大模型语音合成:走后端代理 /api/tts/synthesize(key 不下发、按字符×2 计费)。
  * 成功写 mp3 到 outPath;任何失败返回 null → 调用方回退 edge-tts(用户拍板的兜底策略)。
  */
-/** 豆包单次合成的字节上限(官方 1024,留 10% 余量防 UTF-8 边界和标点膨胀)。 */
-const DOUBAO_MAX_BYTES = 900;
-
-function byteLen(str: string): number {
-  return Buffer.byteLength(str, 'utf8');
-}
-
 /**
- * 按【字节】把长文切成豆包吃得下的片。优先在句末标点断,再退到逗号,最后才硬切 ——
- * 硬切会把词劈开导致读音断裂,只在单句本身就超长时才用。
+ * 豆包(火山)大模型语音合成:走后端代理 /api/tts/synthesize(key 不下发、按字符×2 计费)。
+ *
+ * 长度不用管:后端按字节自动分流 —— ≤1024 字节走在线合成 HTTP,超了自动改走火山的
+ * 异步长文本接口(单次 10 万字符),返回体形状一致。客户端这边不再做任何切分。
  */
-function splitForDoubao(text: string): string[] {
-  const clean = (text || '').trim();
-  if (!clean) return [];
-  if (byteLen(clean) <= DOUBAO_MAX_BYTES) return [clean];
-
-  // 先按句末标点粗切(保留标点,否则合成出来没有停顿)
-  const rough = clean.split(/(?<=[。！？!?；;\n])/).map((x) => x.trim()).filter(Boolean);
-  const out: string[] = [];
-  let buf = '';
-  const flush = () => { if (buf.trim()) out.push(buf.trim()); buf = ''; };
-
-  for (const piece of rough) {
-    // 单句本身就超限 → 再按逗号切;还超就按字节硬切
-    if (byteLen(piece) > DOUBAO_MAX_BYTES) {
-      flush();
-      const sub = piece.split(/(?<=[,，、:：])/).map((x) => x.trim()).filter(Boolean);
-      let sbuf = '';
-      for (const t of sub) {
-        if (byteLen(t) > DOUBAO_MAX_BYTES) {
-          if (sbuf) { out.push(sbuf); sbuf = ''; }
-          // 硬切:按字符累加到字节上限
-          let cur = '';
-          for (const ch of Array.from(t)) {
-            if (byteLen(cur + ch) > DOUBAO_MAX_BYTES) { out.push(cur); cur = ''; }
-            cur += ch;
-          }
-          if (cur) out.push(cur);
-        } else if (byteLen(sbuf + t) > DOUBAO_MAX_BYTES) {
-          out.push(sbuf); sbuf = t;
-        } else {
-          sbuf += t;
-        }
-      }
-      if (sbuf) out.push(sbuf);
-      continue;
-    }
-    if (byteLen(buf + piece) > DOUBAO_MAX_BYTES) flush();
-    buf += piece;
-  }
-  flush();
-  return out.filter(Boolean);
-}
-
-/** 调一次豆包合成,音频落到 outPath。失败返回 null(原因写进 _lastTtsError)。 */
-async function synthDoubaoOnce(
-  text: string, outPath: string, voice: string, speedRatio: number, signal?: AbortSignal,
-): Promise<{ ok: boolean; tokens: number; costUsd: number } | null> {
+async function synthDoubao(text: string, outPath: string, voice: string, rate?: number, signal?: AbortSignal): Promise<{ ok: boolean; tokens: number; costUsd: number } | null> {
   const token = getNoobClawAuthToken();
   if (!token) return null;
+  // edge 的 rate 是百分比偏移(-50..50),豆包是倍率(0.1..2.0)。
+  const speedRatio = Math.max(0.5, Math.min(2, 1 + (Number(rate) || 0) / 100));
+  const clean = (text || '').trim();
+  if (!clean) return null;
   try {
     const resp = await fetch(`${apiBase()}/api/tts/synthesize`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ text, voice, speedRatio, encoding: 'mp3' }),
-      signal: signal || AbortSignal.timeout(60_000),
+      body: JSON.stringify({ text: clean, voice, speedRatio, encoding: 'mp3' }),
+      // 长文本走异步接口(提交+轮询+下载),比在线合成慢得多 → 给 5 分钟,别在这掐断。
+      signal: signal || AbortSignal.timeout(300_000),
     });
     if (!resp.ok) {
       const j: any = await resp.json().catch(() => ({}));
@@ -130,58 +83,6 @@ async function synthDoubaoOnce(
   } catch (e) {
     _lastTtsError = `豆包配音异常:${String((e as Error)?.message || e).slice(0, 100)}`;
     return null;
-  }
-}
-
-/**
- * 豆包合成。超过单次字节上限时【自动分片再拼接】。
- *
- * ⚠️ 为什么必须在这里做:豆包接口单次只收 1024 字节(中文一个字 3 字节 ≈ 340 字),
- *   而模板速生这类链路是整段文案一次提交,必然 400「单次合成上限 1024 字节」。
- *   放在调用方各自处理就要改四条管线,还容易漏;在这里切,对所有调用方透明。
- *   分片按句末标点断,拼接走 ffmpeg concat(裸拼 mp3 字节会带上每片的帧头,部分播放器
- *   会读出错误时长,进而让字幕对不齐)。
- */
-async function synthDoubao(text: string, outPath: string, voice: string, rate?: number, signal?: AbortSignal): Promise<{ ok: boolean; tokens: number; costUsd: number } | null> {
-  // edge 的 rate 是百分比偏移(-50..50),豆包是倍率(0.1..2.0)。
-  const speedRatio = Math.max(0.5, Math.min(2, 1 + (Number(rate) || 0) / 100));
-  const parts = splitForDoubao(text);
-  if (parts.length === 0) return null;
-  if (parts.length === 1) return synthDoubaoOnce(parts[0], outPath, voice, speedRatio, signal);
-
-  const dir = path.dirname(outPath);
-  const base = path.basename(outPath, path.extname(outPath));
-  const tmpFiles: string[] = [];
-  let tokens = 0;
-  let costUsd = 0;
-  try {
-    for (let i = 0; i < parts.length; i++) {
-      if (signal?.aborted) return null;
-      const seg = path.join(dir, `${base}_db${String(i).padStart(2, '0')}.mp3`);
-      const r = await synthDoubaoOnce(parts[i], seg, voice, speedRatio, signal);
-      if (!r?.ok) {
-        _lastTtsError = `豆包配音分片 ${i + 1}/${parts.length} 失败${_lastTtsError ? `:${_lastTtsError.slice(0, 100)}` : ''}`;
-        return null;
-      }
-      tokens += r.tokens;
-      costUsd += r.costUsd;
-      tmpFiles.push(seg);
-    }
-    const listPath = path.join(dir, `${base}_db.txt`);
-    fs.writeFileSync(
-      listPath,
-      tmpFiles.map((f) => `file '${f.split(String.fromCharCode(92)).join('/').split("'").join("'" + String.fromCharCode(92) + "''")}'`).join('\n'),
-      'utf8',
-    );
-    tmpFiles.push(listPath);
-    const cat = await runFfmpeg(
-      ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c:a', 'libmp3lame', '-q:a', '4', outPath],
-      { timeoutMs: 120_000, signal },
-    );
-    if (!cat.ok || !fs.existsSync(outPath)) { _lastTtsError = '豆包配音分片拼接失败'; return null; }
-    return { ok: true, tokens, costUsd };
-  } finally {
-    for (const f of tmpFiles) { try { fs.unlinkSync(f); } catch { /* ignore */ } }
   }
 }
 
