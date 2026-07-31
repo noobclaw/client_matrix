@@ -199,6 +199,8 @@ export interface StoryboardOptions {
   allowText?: boolean[];
   /** 额外的固定参考图(如用户上传的定妆图),每张都会带上。 */
   referenceImages?: string[];
+  /** 中断信号:用户点停止时立刻放弃出图,别让整条卡在这一步。 */
+  signal?: AbortSignal;
 }
 
 /** 滚动参考:除固定参考图外,再带最近这么多张【已生成的历史帧】。 */
@@ -232,6 +234,8 @@ const GROUP_BATCH = 6;
 /** 异步任务轮询间隔 / 上限。6 张一批实测几十秒,给到 4 分钟足够。 */
 const POLL_INTERVAL_MS = 3_000;
 const POLL_MAX_MS = 240_000;
+/** 提交请求的超时。新后端异步模式秒回 202;老后端会同步硬跑,超了就回落逐张。 */
+const SUBMIT_TIMEOUT_MS = 25_000;
 
 /**
  * 真组图:一次请求出一批(≤GROUP_BATCH 张),走服务端异步任务绕开 Cloudflare 100s。
@@ -246,11 +250,20 @@ async function generateGroupBatch(
   shots: string[],
   opts: StoryboardOptions,
   refs: string[],
+  signal?: AbortSignal,
 ): Promise<{ images: string[]; chargedTokens: number } | null> {
+  // ⚠️ 提交必须带超时。老后端不认 async,会把它当同步请求整批跑完 —— 那是个几分钟的
+  //    长请求,撞 Cloudflare 100s 之后连接就吊在那儿。没有超时的话整条出片卡死在
+  //    「故事板生成中… 1/N」,用户只能杀进程。超时 → 返回 null → 回落逐张,照常出片。
+  const submitCtrl = new AbortController();
+  const submitTimer = setTimeout(() => submitCtrl.abort(), SUBMIT_TIMEOUT_MS);
+  const onAbort = () => { try { submitCtrl.abort(); } catch { /* ignore */ } };
+  signal?.addEventListener('abort', onAbort, { once: true });
   try {
     const resp = await fetch(`${apiBase()}/api/image/storyboard`, {
       method: 'POST',
       headers,
+      signal: submitCtrl.signal,
       body: JSON.stringify({
         shots,
         character: opts.character || '',
@@ -276,8 +289,15 @@ async function generateGroupBatch(
 
     const deadline = Date.now() + POLL_MAX_MS;
     while (Date.now() < deadline) {
+      if (signal?.aborted) return null;
       await sleep(POLL_INTERVAL_MS);
-      const pr = await fetch(`${apiBase()}/api/image/storyboard/status/${encodeURIComponent(jobId)}`, { headers });
+      const pollCtrl = new AbortController();
+      const pollTimer = setTimeout(() => pollCtrl.abort(), 20_000);
+      let pr: Response;
+      try {
+        pr = await fetch(`${apiBase()}/api/image/storyboard/status/${encodeURIComponent(jobId)}`,
+          { headers, signal: pollCtrl.signal });
+      } finally { clearTimeout(pollTimer); }
       if (!pr.ok) return null;           // 404/403 → 别再等了
       const pj: any = await pr.json();
       if (pj?.status === 'done') {
@@ -289,6 +309,9 @@ async function generateGroupBatch(
     return null;                          // 超时 → 回落逐张
   } catch {
     return null;
+  } finally {
+    clearTimeout(submitTimer);
+    signal?.removeEventListener('abort', onAbort);
   }
 }
 
@@ -323,11 +346,13 @@ export async function generateStoryboard(
       const batch = idxAll.slice(b, b + GROUP_BATCH);
       onProgress?.(total - pending.size, total);
       const refs = [...fixedRefs, ...history.slice(-ROLLING_REF_COUNT)].slice(-MAX_REFS);
+      if (opts.signal?.aborted) break;
       const r = await generateGroupBatch(
         headers,
         batch.map((i) => shots[i]),
         { ...opts, allowText: opts.allowText ? batch.map((i) => opts.allowText![i] === true) : undefined },
         refs,
+        opts.signal,
       );
       // 张数对不上就整批退回逐张 —— 按下标硬塞会把图挂到错的镜上,比慢更糟。
       if (!r || r.images.length !== batch.length) { lastError = lastError || 'group_failed'; continue; }
@@ -347,8 +372,11 @@ export async function generateStoryboard(
     if (!shots[i]) { failedIndices.push(i); lastError = 'empty_prompt'; continue; }
     // 相邻镜的连续性比「和第一张像」更重要 → 取最近的历史帧,不是永远第 1 张。
     const refs = [...fixedRefs, ...history.slice(-ROLLING_REF_COUNT)].slice(-MAX_REFS);
+    if (opts.signal?.aborted) { failedIndices.push(i); continue; }
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 90_000); // 单张 < CF 100s,绝不触发 524
+    const onAbortOne = () => { try { ctrl.abort(); } catch { /* ignore */ } };
+    opts.signal?.addEventListener('abort', onAbortOne, { once: true });
     try {
       const resp = await fetch(`${apiBase()}/api/image/storyboard`, {
         method: 'POST',
@@ -383,7 +411,7 @@ export async function generateStoryboard(
     } catch (e) {
       lastError = String((e as any)?.message || e).slice(0, 200);
       failedIndices.push(i);
-    } finally { clearTimeout(timer); }
+    } finally { clearTimeout(timer); opts.signal?.removeEventListener('abort', onAbortOne); }
   }
   onProgress?.(total, total);
   return {

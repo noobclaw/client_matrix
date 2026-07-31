@@ -61,14 +61,6 @@ function frameOpener(type: ShotType, shotSize?: string): string {
   }
 }
 
-/** 首帧的否定项。带文字的镜(图表/文字卡/Logo)不能禁文字,否则出来是空白板。 */
-function frameNegatives(type: ShotType): string {
-  const base = '不要 3D 渲染感、不要卡通、不要插画风、不要塑料质感;不要水印、不要 logo 角标';
-  return shotAllowsText(type)
-    ? `${base};画面里的文字必须清晰、拼写正确、排版工整`
-    : `${base};画面里不要出现任何文字或字幕`;
-}
-
 export interface FramePromptOptions {
   /** 内容语言,决定人物/实景的本地化。 */
   lang?: string;
@@ -88,34 +80,54 @@ export interface FramePromptOptions {
  */
 export function buildFramePrompt(shot: StoryShot, opts: FramePromptOptions = {}): string {
   const visual = (opts.isLastFrame ? shot.visualLast : shot.visualFirst) || shot.visualFirst || '';
-  const parts: string[] = [];
-
-  // 1. 镜头结构声明(开头第一句 —— 最大的质量杠杆)
-  parts.push(frameOpener(shot.type, opts.shotSize));
-  if (opts.aspect) parts.push(`画幅 ${opts.aspect}`);
-  if (opts.isLastFrame) parts.push('这是镜头结束时刻的画面');
-
-  // 2. 画面内容(用户脚本写的,或 AI 设计的)
-  if (visual) parts.push(`画面:${visual}`);
-
-  // 3. 图内文字(只有 allowText 的镜才给)
-  if (shotAllowsText(shot.type) && shot.onScreenText) {
-    parts.push(`画面中的文字内容:「${shot.onScreenText}」`);
-  }
-
-  // 4. 摄影/画质术语
-  parts.push(opts.styleLock || DEFAULT_STYLE_LOCK);
-
-  // 5. 本地化(有人物或实景时才有意义)
   const region = regionOf(opts.lang);
-  if (region && (shot.type === 'person' || shot.type === 'scene')) {
-    parts.push(`若出现人物,为亚洲/${region}人面孔与气质;若为街景/室内/商业空间等实景,呈现当代${region}的环境风格;通用物体与自然风景保持中性`);
-  }
+  const allowText = shotAllowsText(shot.type);
+  const aspectLine = opts.aspect === '16:9' ? '横屏 16:9'
+    : opts.aspect === '1:1' ? '方形 1:1'
+    : opts.aspect === '9:16' ? '竖屏 9:16'
+    : '竖屏';
 
-  // 6. 否定项
-  parts.push(frameNegatives(shot.type));
+  // 结构对齐图文出图那套【分节编号】的写法(backend/src/routes/imageGen.ts buildImagePrompt)——
+  // 同一个 Seedream,那套是产品里跑了很久验证过好用的;原来这里是一行逗号串,信息全挤在一起。
+  return `请生成一张【视频故事板】画面(单帧,不是拼图、不是九宫格、不是分屏)。
 
-  return parts.join('。') + '。';
+镜头类型：${frameOpener(shot.type, opts.shotSize)}${opts.isLastFrame ? '（这是镜头结束时刻的画面）' : ''}
+
+画面内容：
+${visual || '（未指定,按镜头类型给一张贴题的写实画面）'}
+${allowText && shot.onScreenText ? `
+画面中要出现的文字：「${shot.onScreenText}」` : ''}
+
+设计要求：
+
+1. 摄影风格
+   - 写实摄影,不是插画、不是 3D 渲染
+   - ${opts.styleLock || DEFAULT_STYLE_LOCK}
+   - 光线来源明确,明暗有层次,不要平光糊成一片
+
+2. 画面构成
+   - 主体在画面中的位置、朝向、动作严格按上面的画面内容
+   - 有前景/中景/背景的空间层次,不要贴片感
+   - 构图干净,主体清晰,次要元素不要抢视线
+
+3. 文字
+${allowText
+  ? `   - 画面中的文字必须清晰、字形正确、排版工整,不要错字乱码
+   - 文字与画面融为一体(是画面里真实存在的标题/图表标注/标识),不是后期贴上去的字幕
+   - 不要水印、不要台标、不要平台 logo 角标`
+  : `   - 画面里不要出现任何文字、字幕、标签
+   - 不要水印、不要台标、不要 logo 角标`}
+${region && (shot.type === 'person' || shot.type === 'scene') ? `
+4. 地域观感
+   - 若出现人物,为亚洲/${region}人的面孔与气质
+   - 若为街景、室内、商业空间等实景,呈现当代${region}的环境风格
+   - 通用物体与自然风景保持中性
+` : ''}
+${region && (shot.type === 'person' || shot.type === 'scene') ? '5' : '4'}. 技术规格
+   - ${aspectLine}构图,主体不要被裁切
+   - 高清画质,细节扎实
+   - 不要 3D 渲染感、不要卡通、不要插画风、不要塑料质感
+   - 不要多余的边框、不要分割线、不要把多个画面拼在一张图里`;
 }
 
 /** 运镜词表 —— 逐镜轮换,避免全片同一种推近。分镜表给了 motion 时优先用它。 */

@@ -19,7 +19,7 @@ import { randomUUID } from 'crypto';
 import { getHomePath } from '../platformAdapter';
 import { isFfmpegAvailable, setVideoAbortSignal, runFfmpeg, probeDuration } from './ffmpegRuntime';
 import {
-  synthesize, synthesizeWhole, getLastTtsError, getVoiceFallbacks,
+  synthesize, synthesizeWhole, getLastTtsError, getVoiceFallbacks, isDoubaoVoice,
   alignSentencesToCues, groupWordCues,
 } from './tts';
 import { getTtsVoice } from './config';
@@ -1244,8 +1244,18 @@ async function runVideoPipeline(
       //   按【去标点字符流】把每句锚到 cue 真实时间戳,不累积误差;对不齐 → 回退下面的逐句路径。
       //   字幕直接用整段 cue(全局时间轴,比逐句拼接更准)。下游 audios/sceneDurations/subtitleCues
       //   形状与逐句路径完全一致 —— 分镜/compose 无感知。
+      // ⚠️ 豆包音色【跳过整段路径】。整段合成是纯 edge-tts 实现(synthesizeWhole 直接调
+      //    runEdgeTts,不认豆包 id),把 zh_female_xxx 塞给微软必然 "Invalid voice",
+      //    然后 5 次重试 × 音色链白等十几秒,日志还刷一片吓人的红字,最后才回退逐句 ——
+      //    而逐句那条本来就认豆包。而且整段路径靠 edge 的词边界 cue 切句,
+      //    豆包接口不返回 cue,就算合成成功也对不齐,这条路对豆包根本不通。
       let wholeDone = false;
+      const skipWhole = isDoubaoVoice(primary);
+      if (skipWhole) {
+        tracker.progress('🎙️ 豆包音色:逐句合成(整段合成仅 Edge 音色支持)');
+      }
       try {
+        if (skipWhole) throw new Error('SKIP_WHOLE_FOR_DOUBAO');
         const masterMp3 = path.join(assetDir, 'narr_master.mp3');
         let whole: Awaited<ReturnType<typeof synthesizeWhole>> | null = null;
         let usedWholeVoice = voiceChain[0];
@@ -1254,7 +1264,7 @@ async function runVideoPipeline(
           throwIfAborted(signal);
           // ⚠️ 这段原来全程无日志:synthesizeWhole 内部 60s×5 重试 × 多个备用音色 → 连不上微软 TTS 时
           //   会静默 grind 十几分钟,UI 看着像「卡死无报错」。这里每个音色尝试前后都打日志 + 抛出 TTS 错因。
-          tracker.progress(`配音合成中(音色 ${v}${voiceChain.length > 1 ? ` · ${vi + 1}/${voiceChain.length}` : ''})… 连微软 TTS,网络慢会重试,请稍候`);
+          tracker.progress(`配音合成中(音色 ${v}${voiceChain.length > 1 ? ` · ${vi + 1}/${voiceChain.length}` : ''})… 网络慢会重试,请稍候`);
           // ⚠️ signal 必须传:synthesizeWhole 内部 60s × 5 次重试,不传的话点停止要在
           //    这一个音色上磨到 5 分钟,只有换音色时才会碰到上面那句 throwIfAborted。
           const w = await synthesizeWhole(sentences.join('\n'), masterMp3, v, input.voiceRate, { signal });
@@ -1494,6 +1504,8 @@ async function runVideoPipeline(
             aspect: input.aspect,
             // 图表/文字卡/Logo 这类镜必须允许画面内出现文字,否则出来是空白板。
             allowText: aiShots ? aiShots.map((s) => shotAllowsText(s.type)) : undefined,
+            // 出图是分钟级的一步,不接 signal 的话点停止要干等它跑完。
+            signal,
           },
           (done, total) => { if (done < total) tracker.progress(`🎨 故事板生成中… ${done + 1}/${total} 张`); },
         );
