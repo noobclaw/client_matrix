@@ -83,6 +83,8 @@ export { alignSentencesToCues } from './ttsAlign';
 
 export interface TtsResult {
   ok: boolean;
+  /** 失败原因(供上层直接展示给用户)。成功时为空。 */
+  error?: string;
   /** 音频文件路径(成功是真人声,失败是静音兜底)。 */
   audioPath: string;
   durationSec: number;
@@ -283,8 +285,6 @@ function sleep(ms: number): Promise<void> {
 
 /** synthesize() 的可选控制项(不传 = 老行为)。 */
 export interface SynthesizeOpts {
-  /** 豆包 → Edge 降级时的通知(换掉了用户选的音色,必须让他在日志里看见)。 */
-  onFallback?: (msg: string) => void;
   /** 用户停止信号:当次 WebSocket 立即掀桌,重试循环立即退出(不再退避睡眠)。 */
   signal?: AbortSignal;
   /** 重试次数上限(默认 5)。多段流水(爆帖逐段配音)可调小,防失败时静默磨太久。 */
@@ -306,13 +306,16 @@ export async function synthesize(text: string, outPath: string, voice?: string, 
       const dur = await probeDuration(outPath);
       return { ok: true, audioPath: outPath, durationSec: dur > 0 ? dur : estDur, synthesized: true };
     }
-    // 回退:豆包音色没有 edge 对应体,按语言取 edge 默认音色。
-    // ⚠️ 这一步会【换掉用户选的音色】,必须说出来 —— 原来是静默的,用户听到成片
-    //    不是自己选的声音却在日志里找不到任何线索,只能怀疑「是不是又回滚成 edge 了」。
-    const fallbackVoice = /^en[_-]/i.test(useVoice) ? 'en-US-AriaNeural' : 'zh-CN-YunjianNeural';
-    _lastTtsError = `豆包音色 ${useVoice} 合成失败,已改用 Edge 免费音色 ${fallbackVoice}(这一句不计费)`;
-    opts?.onFallback?.(_lastTtsError);
-    return synthesize(clean, outPath, fallbackVoice, rate, opts);
+    // ⚠️ 豆包合成失败【不回退 Edge】。回退等于把用户选的音色悄悄换成另一个人的声音,
+    //    出来的片子他根本不会要 —— 而钱已经花在出图/生成上了。宁可这一步失败让他重试,
+    //    也不交一条声音不对的成片。(用户 2026-07-31 明确要求)
+    return {
+      ok: false,
+      audioPath: outPath,
+      durationSec: estDur,
+      synthesized: false,
+      error: `豆包音色 ${useVoice} 合成失败${_lastTtsError ? `:${_lastTtsError.slice(0, 120)}` : ''}`,
+    };
   }
 
   if (clean) {

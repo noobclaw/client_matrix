@@ -1267,7 +1267,7 @@ async function runVideoPipeline(
           tracker.progress(`配音合成中(${voiceProviderLabel(v)} · 音色 ${v}${voiceChain.length > 1 ? ` · ${vi + 1}/${voiceChain.length}` : ''})… 网络慢会重试,请稍候`);
           // ⚠️ signal 必须传:synthesizeWhole 内部 60s × 5 次重试,不传的话点停止要在
           //    这一个音色上磨到 5 分钟,只有换音色时才会碰到上面那句 throwIfAborted。
-          const w = await synthesizeWhole(sentences.join('\n'), masterMp3, v, input.voiceRate, { signal, onFallback: (m: string) => tracker.progress(`⚠️ ${m}`) });
+          const w = await synthesizeWhole(sentences.join('\n'), masterMp3, v, input.voiceRate, { signal });
           if (w.ok) { whole = w; usedWholeVoice = v; break; }
           const reason = getLastTtsError();
           tracker.progress(`音色 ${v} 整段合成未成功${reason ? `(${reason.slice(0, 110)})` : ''}${vi < voiceChain.length - 1 ? ',换下一个音色…' : ''}`);
@@ -1324,7 +1324,7 @@ async function runVideoPipeline(
         for (const v of tryOrder) {
           // ⚠️ signal 必须传:synthesize 内部有 voiceChain × 最多 5 次重试 × 单次最长 60s,
           //    不传的话点了停止要磨数分钟才走到下一句的 throwIfAborted。
-          const r = await synthesize(sentences[i], outMp3, v, input.voiceRate, { signal, onFallback: (m: string) => tracker.progress(`⚠️ ${m}`) });
+          const r = await synthesize(sentences[i], outMp3, v, input.voiceRate, { signal });
           if (r.synthesized) { got = r; usedVoice = v; break; }
           lastReason = getLastTtsError() || lastReason;
         }
@@ -1355,10 +1355,16 @@ async function runVideoPipeline(
         const triedMsg = voiceChain.length > 1
           ? ` · 已对该句尝试全部 ${voiceChain.length} 个备用音色,均合成失败`
           : '';
+        // 报错要分供应商:豆包失败说微软限流是误导,用户会照着错方向排查半天。
+        //   豆包失败【不会】悄悄换成 Edge 出片 —— 换掉的是用户选的声音,那条片子他不会要。
+        const isDb = isDoubaoVoice(stickyVoice || voiceChain[0]);
         const err = `配音失败:第 ${failIdx + 1}/${sentences.length} 句无法合成语音${triedMsg}`
           + (lastReason ? `(${lastReason.slice(0, 160)})` : '')
-          + '。已终止出片,不会生成无配音的视频;平台基础费将自动退回。'
-          + '常见原因:网络无法访问微软在线 TTS 接口,或当前为微软上游限流期(2026-04 起已知问题),请检查网络/代理后重试。';
+          + '。已终止出片,不会生成无配音、或换了音色的视频;平台基础费将自动退回。'
+          + (isDb
+            ? '当前用的是豆包真人音色。常见原因:豆包语音服务未配置/额度不足,或上游临时不可用。'
+              + '需要立刻出片的话,可在向导里改用 Edge 免费音色重试。'
+            : '常见原因:网络无法访问微软在线 TTS 接口,或当前为微软上游限流期(2026-04 起已知问题),请检查网络/代理后重试。');
         tracker.fail('tts', err);
         return { ok: false, error: err };
       }
