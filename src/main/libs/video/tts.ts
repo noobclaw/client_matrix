@@ -55,7 +55,7 @@ export function voiceProviderLabel(voice: string | undefined): string {
  * 长度不用管:后端按字节自动分流 —— ≤1024 字节走在线合成 HTTP,超了自动改走火山的
  * 异步长文本接口(单次 10 万字符),返回体形状一致。客户端这边不再做任何切分。
  */
-async function synthDoubao(text: string, outPath: string, voice: string, rate?: number, signal?: AbortSignal): Promise<{ ok: boolean; tokens: number; costUsd: number } | null> {
+async function synthDoubao(text: string, outPath: string, voice: string, rate?: number, signal?: AbortSignal): Promise<{ ok: boolean; tokens: number; costUsd: number; sentences?: TtsCue[] } | null> {
   const token = getNoobClawAuthToken();
   if (!token) return null;
   // edge 的 rate 是百分比偏移(-50..50),豆包是倍率(0.1..2.0)。
@@ -79,7 +79,32 @@ async function synthDoubao(text: string, outPath: string, voice: string, rate?: 
     const b64 = typeof j?.audioBase64 === 'string' ? j.audioBase64 : '';
     if (!b64) { _lastTtsError = '豆包配音返回空音频'; return null; }
     fs.writeFileSync(outPath, Buffer.from(b64, 'base64'));
-    return { ok: true, tokens: Number(j?.chargedTokens) || 0, costUsd: Number(j?.costUsd) || 0 };
+    // 长文本接口开了 enable_timestamp → 回 sentences[]{text,start,end,words[]}(秒)。
+    //   有它就能把整段音频按【真实时间戳】切回每一句 —— 电影级每镜时长、字幕落点都不再靠估算。
+    //   ⚠️ 优先摊平逐字 words:alignSentencesToCues 是按【字符流】对齐的,粒度越细误差越小;
+    //      句级只有 N 个锚点,句内字符只能均分,长句里字幕仍会飘。没有 words 才退回句级。
+    const rawSents: any[] = Array.isArray(j?.sentences) ? j.sentences : [];
+    const flatWords: TtsCue[] = [];
+    for (const x of rawSents) {
+      if (!Array.isArray(x?.words)) continue;
+      for (const w of x.words) {
+        const t = String(w?.text || '');
+        const st = Number(w?.start) || 0;
+        const en = Number(w?.end) || 0;
+        if (t && en > st) flatWords.push({ text: t, start: st, end: en });
+      }
+    }
+    const sentences: TtsCue[] | undefined = flatWords.length
+      ? flatWords
+      : (rawSents
+          .map((x: any) => ({ text: String(x?.text || ''), start: Number(x?.start) || 0, end: Number(x?.end) || 0 }))
+          .filter((x: TtsCue) => x.text && x.end > x.start) || undefined);
+    return {
+      ok: true,
+      tokens: Number(j?.chargedTokens) || 0,
+      costUsd: Number(j?.costUsd) || 0,
+      sentences: sentences && sentences.length ? sentences : undefined,
+    };
   } catch (e) {
     _lastTtsError = `豆包配音异常:${String((e as Error)?.message || e).slice(0, 100)}`;
     return null;
@@ -324,6 +349,8 @@ export async function synthesize(text: string, outPath: string, voice?: string, 
       return {
         ok: true, audioPath: outPath, durationSec: dur > 0 ? dur : estDur, synthesized: true,
         chargedTokens: d.tokens, costUsd: d.costUsd,
+        // 豆包长文本带回的句级时间戳(短文走在线接口时没有)→ 字幕直接用真时间,不再估算。
+        cues: d.sentences,
       };
     }
     // ⚠️ 豆包合成失败【不回退 Edge】。回退等于把用户选的音色悄悄换成另一个人的声音,
@@ -464,6 +491,9 @@ export interface WholeTtsResult {
   durationSec: number;
   /** 原始逐条 cue(未 group,相对整段起点),切句对齐 + 字幕都用它。 */
   rawCues: TtsCue[];
+  /** 服务端实扣积分(仅豆包;Edge 免费恒为 0/undefined)。不带上来的话整段路径的钱会漏计。 */
+  chargedTokens?: number;
+  costUsd?: number;
 }
 
 /**
@@ -474,14 +504,29 @@ export async function synthesizeWhole(text: string, outPath: string, voice: stri
   const clean = (text || '').trim();
   const fail = (): WholeTtsResult => ({ ok: false, audioPath: outPath, durationSec: 0, rawCues: [] });
   if (!clean) return fail();
-  // ⚠️ 整段路径是【纯 edge-tts 实现】(下面直接 runEdgeTts),完全不认豆包音色 id。
-  //   把 zh_female_xxx 丢给微软必然 "Invalid voice",然后 5 次重试 × 音色链白等十几秒,
-  //   日志刷一片红字,最后才回退逐句 —— 而逐句本来就认豆包。
-  //   而且整段路径靠 edge 的词边界 cue 切句,豆包接口不返回 cue,就算合成成功也对不齐。
-  //   守卫放在这里(不是各调用方)才能覆盖全部管线:pipeline 和 thread-pipeline 都调它。
+  // ── 豆包:走长文本接口整段合成,用它返回的时间戳当 cue ──────────────────────
+  //  以前这里直接拒绝豆包,因为整段路径是纯 edge 实现、且豆包不给词边界。
+  //  现在后端对超 1024 字节的文本自动走火山【异步长文本】接口并开了 enable_timestamp,
+  //  回的是逐字时间戳 —— 精度不输 edge 的词边界。于是豆包也能整段:
+  //    · 一次合成,韵律比逐句拼接自然(句与句之间没有接缝)
+  //    · 切句和字幕都用真实时间戳,不再按字数估
   if (isDoubaoVoice(voice)) {
-    _lastTtsError = '豆包音色不支持整段合成(仅 Edge 音色支持),已改用逐句合成';
-    return fail();
+    const d = await synthDoubao(clean, outPath, voice, rate, opts?.signal);
+    if (!d?.ok) return fail();
+    if (!d.sentences || d.sentences.length === 0) {
+      // 没拿到时间戳(短文走了在线接口 / 上游没回)→ 整段切不回每句,让调用方退回逐句。
+      _lastTtsError = '豆包整段合成未返回时间戳(短文本走在线接口),改用逐句合成';
+      return fail();
+    }
+    const dur = await probeDuration(outPath);
+    return {
+      ok: true,
+      audioPath: outPath,
+      durationSec: dur > 0 ? dur : estimateDuration(clean),
+      rawCues: d.sentences,
+      chargedTokens: d.tokens,
+      costUsd: d.costUsd,
+    };
   }
   const MAX_ATTEMPTS = Math.max(1, opts?.maxAttempts ?? 5);
   let lastDetail = '';

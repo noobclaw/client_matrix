@@ -82,7 +82,57 @@ const REPOST_STEPS = [
 ];
 
 // ASR 返回的一条字幕(时间戳单位=秒)。
-interface Seg { start: number; end: number; text: string }
+interface AsrWord { text: string; start: number; end: number }
+interface Seg {
+  start: number;
+  end: number;
+  text: string;
+  /** 词级时间戳(火山 bigmodel ASR)。用来把粗 utterance 重切成字幕粒度的句子。 */
+  words?: AsrWord[];
+}
+
+/** 单句字幕的目标上限(中文字符数)。超过就该切,否则一屏塞不下、也停留太久。 */
+const SUB_MAX_CHARS = 18;
+/** 词间静音超过这个秒数就当一个自然停顿,优先在这里切。 */
+const PAUSE_GAP_SEC = 0.45;
+
+/**
+ * 把 ASR 的粗 utterance 按【词级时间戳】重切成字幕粒度的句子。
+ *
+ * ⚠️ 为什么必须做:火山返回的 utterance 是整句甚至整段 —— 实测 16 秒的视频只切出 2 条,
+ *   每条 8 秒。译文音频往这 8 秒里一灌,画面早换了配音还在读上一句,字幕也是一大坨挂 8 秒。
+ *   词级时间戳才是对齐的真基准(KrillinAI 的 TimestampMatcher 同思路:句子匹配回词的时间轴)。
+ *
+ * 切点优先级:① 句末标点 → ② 词间明显停顿 → ③ 字数超上限硬切。
+ * 没有 words 的段(老后端 / 非火山 ASR)原样保留,不做任何改动。
+ */
+function resplitByWords(segs: Seg[]): Seg[] {
+  const out: Seg[] = [];
+  for (const seg of segs) {
+    const ws = seg.words;
+    if (!ws || ws.length < 2) { out.push(seg); continue; }
+    let buf: AsrWord[] = [];
+    const flush = () => {
+      if (buf.length === 0) return;
+      const text = buf.map((w) => w.text).join('').trim();
+      if (text) out.push({ start: buf[0].start, end: buf[buf.length - 1].end, text });
+      buf = [];
+    };
+    for (let i = 0; i < ws.length; i++) {
+      const w = ws[i];
+      buf.push(w);
+      const cur = buf.map((x) => x.text).join('');
+      const endsSentence = /[。！？!?;；…]$/.test(w.text.trim());
+      const nextGap = i + 1 < ws.length ? ws[i + 1].start - w.end : 0;
+      const longPause = nextGap >= PAUSE_GAP_SEC;
+      // 逗号处只在已经攒够一半长度时才切,免得切得太碎
+      const softBreak = /[,，、:：]$/.test(w.text.trim()) && cur.length >= SUB_MAX_CHARS / 2;
+      if (endsSentence || longPause || softBreak || cur.length >= SUB_MAX_CHARS) flush();
+    }
+    flush();
+  }
+  return out.filter((s) => s.text && s.end > s.start);
+}
 
 const VIDEO_EXTS = new Set(['.mp4', '.mov', '.m4v', '.webm', '.mkv', '.avi']);
 
@@ -719,10 +769,18 @@ export async function runRepostPipeline(
       const asrSegments = asr.segments!;
       tracker.addTokens(asr.tokens || 0, asr.costUsd || 0); // 显示;翻倍靠下面累计 aiCostUsd
       aiCostUsd += asr.costUsd || 0;
-      const regrouped = regroupSegments(asrSegments);
+      // 先按词级时间戳把粗 utterance 拆细,再走原有的重组 —— 顺序不能反:
+      //   regroupSegments 是【合并】逻辑(把碎句并成适合翻译的长度),拿 2 条 8 秒的粗段
+      //   去合并,合出来还是 2 条,锚点密度一点没变。
+      const fine = resplitByWords(asrSegments);
+      const gained = fine.length - asrSegments.length;
+      if (gained > 0) {
+        tracker.progress(`⏱ 按词级时间戳细分:${asrSegments.length} 条 → ${fine.length} 条(锚点更密,配音和字幕贴得更准)`);
+      }
+      const regrouped = regroupSegments(fine);
       tracker.done('transcribe', subsSegs
-        ? `✅ 源字幕就绪(免转写费)· ${asrSegments.length} 条 → 重组 ${regrouped.length} 句`
-        : `✅ 转写完成 · ${asrSegments.length} 条 → 重组 ${regrouped.length} 句`);
+        ? `✅ 源字幕就绪(免转写费)· ${asrSegments.length} 条 → 细分 ${fine.length} → 重组 ${regrouped.length} 句`
+        : `✅ 转写完成 · ${asrSegments.length} 条 → 细分 ${fine.length} → 重组 ${regrouped.length} 句`);
 
       // ── STEP 3:翻译 ──
       throwIfAborted(signal);

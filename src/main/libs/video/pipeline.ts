@@ -1252,15 +1252,16 @@ async function runVideoPipeline(
       //    而逐句那条本来就认豆包。而且整段路径靠 edge 的词边界 cue 切句,
       //    豆包接口不返回 cue,就算合成成功也对不齐,这条路对豆包根本不通。
       let wholeDone = false;
-      // 豆包不走整段路径(守卫也下沉到了 synthesizeWhole 内部)。
-      // ⚠️ 这里【不能用 throw 来跳过】—— 之前那么写,跳过会被下面的通用 catch 抓住,
-      //    在日志里报成「整段配音异常,回退逐句合成」,看着像出了故障,其实是我们主动跳的。
-      const skipWhole = isDoubaoVoice(primary);
-      if (skipWhole) {
-        tracker.progress('🎙️ 豆包真人音色:逐句合成(整段合成仅 Edge 音色支持,豆包接口不返回词边界)');
+      // 豆包现在也走整段:后端对超 1024 字节的文本自动改走火山【异步长文本】接口,
+      //   并开了 enable_timestamp → 回逐字时间戳,精度不输 edge 词边界。
+      //   于是「一次合成 + 按真实时间戳切句」对两家都成立:韵律没有句间接缝,
+      //   字幕落点是真时间而不是按字数估。拿不到时间戳(短文走了在线接口)时
+      //   synthesizeWhole 返回失败 → 自动落到下面的逐句路径。
+      if (isDoubaoVoice(primary)) {
+        tracker.progress('🎙️ 豆包真人音色:整段一次合成(长文本接口带时间戳,切句和字幕用真实时间)');
       }
       try {
-        if (!skipWhole) {
+        {
         const masterMp3 = path.join(assetDir, 'narr_master.mp3');
         let whole: Awaited<ReturnType<typeof synthesizeWhole>> | null = null;
         let usedWholeVoice = voiceChain[0];
@@ -1300,8 +1301,17 @@ async function runVideoPipeline(
                 subtitleCues.push({ text: c.text, start: c.start, end: c.end });
               }
               wholeDone = true;
+              // 豆包整段是按字符实扣的 —— 不计进来,账单里有扣费、任务页却是 0。
+              //   Edge 免费,chargedTokens 为空,这段自然跳过。
+              if (whole.chargedTokens && whole.chargedTokens > 0) {
+                tracker.addTokens(whole.chargedTokens, whole.costUsd || whole.chargedTokens / 1_000_000);
+                ttsTokens += whole.chargedTokens;
+              }
               const vTag = usedWholeVoice !== voiceChain[0] ? `,备用音色 ${usedWholeVoice}` : '';
-              tracker.done('tts', `配音完成(整段 1 次合成 + 切 ${sentences.length} 段,省 ${sentences.length - 1} 次请求${vTag})`);
+              const costTag = whole.chargedTokens && whole.chargedTokens > 0
+                ? ` · ${sentences.reduce((a, x) => a + x.length, 0)} 字,扣 ${whole.chargedTokens.toLocaleString()} 积分`
+                : ' · Edge 免费音色,不计费';
+              tracker.done('tts', `配音完成(整段 1 次合成 + 按时间戳切 ${sentences.length} 段${vTag})${costTag}`);
             }
           }
         }
