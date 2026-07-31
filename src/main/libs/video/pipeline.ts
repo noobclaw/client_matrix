@@ -1252,6 +1252,7 @@ async function runVideoPipeline(
       //    而逐句那条本来就认豆包。而且整段路径靠 edge 的词边界 cue 切句,
       //    豆包接口不返回 cue,就算合成成功也对不齐,这条路对豆包根本不通。
       let wholeDone = false;
+      // 守卫已下沉到 synthesizeWhole 内部(它对豆包音色直接返回失败),这里只负责说人话。
       const skipWhole = isDoubaoVoice(primary);
       if (skipWhole) {
         tracker.progress('🎙️ 豆包真人音色:逐句合成(整段合成仅 Edge 音色支持)。按字数计费,失败自动退');
