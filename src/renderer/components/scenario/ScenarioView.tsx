@@ -184,9 +184,8 @@ const platformDisplayName = (id: string): string => {
   return tab ? i18nService.t(tab.labelKey) : String(id);
 };
 
-/** 走「自动发帖」向导的平台(币安广场 + 交易所广场三家)。它们共用 binancePostRunner:
+/** 走「自动发帖」向导的平台判定(币安广场 + 交易所广场三家)。它们共用 binancePostRunner:
  *  后端剧本 id 一律是 `${platform}_post`,所以这里加平台不需要改 runner。 */
-const SQUARE_POST_PLATFORMS = new Set<string>(['binance', 'gate', 'bitget', 'bybit']);
 const isSquarePostScenario = (scenarioId: string): boolean =>
   /^(binance|gate|bitget|bybit)_post$/.test(String(scenarioId || ''));
 
