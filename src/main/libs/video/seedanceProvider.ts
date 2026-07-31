@@ -69,7 +69,7 @@ export interface GenerateSeedanceOptions {
    * pipeline 据此实时累加「上次消耗」(否则要等整个 generateSeedanceClips 跑完才累加,
    * 用户看不到顶部消耗跟着进度涨)。
    */
-  onProgress?: (msg: string, chargedTokens?: number) => void;
+  onProgress?: (msg: string, chargedTokens?: number, costUsd?: number) => void;
 }
 
 const MIME_BY_EXT: Record<string, string> = {
@@ -96,7 +96,7 @@ function authHeaders(): Record<string, string> | null {
   return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
 }
 
-interface CreateResult { taskId: string; chargeId: string; chargedTokens: number; }
+interface CreateResult { taskId: string; chargeId: string; chargedTokens: number; costUsd: number; }
 
 /** 提交一个 Seedance 片段任务。返回 taskId+chargeId,或抛错(含 402 余额不足)。 */
 async function createClip(
@@ -121,7 +121,12 @@ async function createClip(
     }
     const json: any = await resp.json();
     if (!json?.taskId) throw new Error('服务端未返回 taskId');
-    return { taskId: json.taskId, chargeId: json.chargeId || '', chargedTokens: Number(json.chargedTokens) || 0 };
+    return {
+      taskId: json.taskId, chargeId: json.chargeId || '',
+      chargedTokens: Number(json.chargedTokens) || 0,
+      // 服务端权威美元数。拿不到(老后端)才退回 tokens/1e6 —— 那个是 $1/M 的假设,会少算。
+      costUsd: Number(json.costUsd) || 0,
+    };
   } finally {
     clearTimeout(timer);
   }
@@ -178,6 +183,8 @@ export interface StoryboardResult {
   images: string[];
   /** 服务端按张实扣的积分(失败/未配置为 0);计入「本次消耗」总额。 */
   chargedTokens: number;
+  /** 服务端权威 USD 成本。0 = 老后端没回,调用方自行折算。 */
+  costUsd: number;
   /** 失败原因(服务端返回的 error/detail 或异常信息),供进度展示排查;成功为空。 */
   error?: string;
   /** 出图失败的镜序号(0-based)。调用方可据此在分镜表上标红,而不是静默降级。 */
@@ -257,7 +264,7 @@ async function generateGroupBatch(
   opts: StoryboardOptions,
   refs: string[],
   signal?: AbortSignal,
-): Promise<{ images: string[]; chargedTokens: number } | null> {
+): Promise<{ images: string[]; chargedTokens: number; costUsd: number } | null> {
   // ⚠️ 提交必须带超时。老后端不认 async,会把它当同步请求整批跑完 —— 那是个几分钟的
   //    长请求,撞 Cloudflare 100s 之后连接就吊在那儿。没有超时的话整条出片卡死在
   //    「故事板生成中… 1/N」,用户只能杀进程。超时 → 返回 null → 回落逐张,照常出片。
@@ -286,7 +293,7 @@ async function generateGroupBatch(
     if (resp.status === 200) {
       const j: any = await resp.json();
       const imgs = Array.isArray(j?.images) ? j.images.filter((x: any) => typeof x === 'string' && x) : [];
-      return imgs.length ? { images: imgs, chargedTokens: Number(j?.chargedTokens) || 0 } : null;
+      return imgs.length ? { images: imgs, chargedTokens: Number(j?.chargedTokens) || 0, costUsd: Number(j?.costUsd) || 0 } : null;
     }
     if (resp.status !== 202) return null;
     const started: any = await resp.json();
@@ -308,7 +315,7 @@ async function generateGroupBatch(
       const pj: any = await pr.json();
       if (pj?.status === 'done') {
         const imgs = Array.isArray(pj?.images) ? pj.images.filter((x: any) => typeof x === 'string' && x) : [];
-        return imgs.length ? { images: imgs, chargedTokens: Number(pj?.chargedTokens) || 0 } : null;
+        return imgs.length ? { images: imgs, chargedTokens: Number(pj?.chargedTokens) || 0, costUsd: Number(pj?.costUsd) || 0 } : null;
       }
       if (pj?.status === 'failed') return null;
     }
@@ -326,7 +333,7 @@ export async function generateStoryboard(
   onProgress?: (done: number, total: number) => void,
 ): Promise<StoryboardResult> {
   const headers = authHeaders();
-  if (!headers) return { images: [], chargedTokens: 0, error: '未登录', failedIndices: [] };
+  if (!headers) return { images: [], chargedTokens: 0, costUsd: 0, error: '未登录', failedIndices: [] };
   // ⚠️ 不能先 filter 再用下标:上层(pipeline)按 shot 索引挂首帧,过滤会让整条 images 错位。
   //    空 prompt 的位置直接判失败,保持下标对齐。
   const shots = (opts.shots || []).map((s) => (typeof s === 'string' ? s.trim() : ''));
@@ -334,6 +341,7 @@ export async function generateStoryboard(
   const images: string[] = new Array(total).fill('');
   const failedIndices: number[] = [];
   let chargedTokens = 0;
+  let chargedUsd = 0;
   let okCount = 0;
   let lastError = '';
   // 固定参考图(如定妆图):每张都带,锁主体。
@@ -375,6 +383,7 @@ export async function generateStoryboard(
       //    整批丢弃回落逐张 = 同一批图付两次钱(实测 8 镜的故事板被收了 11 张)。
       //    组图是顺序生成,返回的第 k 张对应本批第 k 镜;不够的那几镜留给下面逐张补。
       chargedTokens += r.chargedTokens;
+      chargedUsd += r.costUsd;
       const got = Math.min(r.images.length, batch.length);
       for (let k = 0; k < got; k++) {
         const idx = batch[k];
@@ -435,6 +444,7 @@ export async function generateStoryboard(
       const json: any = await resp.json();
       const imgs = Array.isArray(json?.images) ? json.images.filter((s: any) => typeof s === 'string' && s) : [];
       chargedTokens += Number(json?.chargedTokens) || 0;
+      chargedUsd += Number(json?.costUsd) || 0;
       if (imgs[0]) { images[i] = imgs[0]; okCount++; history.push(imgs[0]); }
       else { lastError = json?.error || 'empty'; failedIndices.push(i); }
     } catch (e) {
@@ -446,6 +456,7 @@ export async function generateStoryboard(
   return {
     images,
     chargedTokens,
+    costUsd: chargedUsd,
     error: okCount > 0 ? undefined : (lastError || 'all_failed'),
     failedIndices,
   };
@@ -456,13 +467,13 @@ async function generateOne(
   idx: number, scene: SeedanceSceneSpec, imageUrls: string[],
   ratio: string, resolution: string | undefined, tier: string | undefined, destDir: string, timeoutSec: number,
   signal: AbortSignal | undefined,
-  onProgress?: (m: string, chargedTokens?: number) => void,
+  onProgress?: (m: string, chargedTokens?: number, costUsd?: number) => void,
 ): Promise<SeedanceClipResult> {
   const duration = Math.max(4, Math.min(12, Math.round(scene.durationSec || 5)));
   // 故事板模式:该镜有首帧图 → 用它做 i2v(图生视频,更稳);否则用全局参考图 / 纯文生视频。
   const imgs = (scene.keyframeDataUrl && scene.keyframeDataUrl.length > 0) ? [scene.keyframeDataUrl] : imageUrls;
   try {
-    const { taskId, chargeId, chargedTokens } = await createClip(scene.prompt, imgs, duration, ratio, resolution, tier);
+    const { taskId, chargeId, chargedTokens, costUsd } = await createClip(scene.prompt, imgs, duration, ratio, resolution, tier);
     // 每镜【先扣费再生成】(服务端 /seedance/create 原子扣费),把这笔扣费显出来 ——
     // 否则用户只看到"生成中"、看不到扣费,会以为没收钱(失败镜服务端会自动退)。
     onProgress?.(chargedTokens > 0
@@ -480,7 +491,7 @@ async function generateOne(
         // 镜真成功落盘 → 把该镜 chargedTokens 透给 onProgress,pipeline 实时累加进「上次消耗」。
         //   失败镜走不到这条 emit(上方 return path:null),所以语义仍是「只计成功镜」,
         //   跟服务端「有 token 输出不退、0 输出才退」的退款策略对齐。
-        onProgress?.(`✅ 第 ${idx + 1} 镜 AI 片段就绪`, chargedTokens);
+        onProgress?.(`✅ 第 ${idx + 1} 镜 AI 片段就绪`, chargedTokens, costUsd);
         return { path: outPath, chargedTokens };
       }
       // 失败镜:服务端按 chargeId 自动退款,不计入实扣总额。

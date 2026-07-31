@@ -1536,7 +1536,8 @@ async function runVideoPipeline(
         // 故事板首帧也是真金白银(Seedream 按张扣)—— 计入「本次消耗」,
         // 否则进度里图扣了费、总额却只剩 DeepSeek 写稿那几百,严重对不上。
         if (storyboard.chargedTokens > 0) {
-          tracker.addTokens(storyboard.chargedTokens, storyboard.chargedTokens / 1_000_000);
+          // 用服务端回的权威 costUsd;老后端没回才退回 tokens/1e6(那是 $1/M 的假设,会少算 1/3)。
+          tracker.addTokens(storyboard.chargedTokens, storyboard.costUsd || storyboard.chargedTokens / 1_000_000);
         }
         if (okFrames > 0) {
           const sbDir = path.join(destDir, '故事板');
@@ -1620,8 +1621,9 @@ async function runVideoPipeline(
         //   「只计成功镜」(原 generateSeedanceClips 返回后再 reduce 累加的做法跟用户
         //   逐镜「已扣 X 积分」日志严重对不上 —— 任务跑完前顶部一直是 0)。
         //   costUsd 按 1 USDT=1M tokens 折算(= 积分/1e6)供 $ 展示。
-        onProgress: (m, charged) => {
-          if (charged && charged > 0) tracker.addTokens(charged, charged / 1_000_000);
+        onProgress: (m, charged, usd) => {
+          // 用服务端回的权威 costUsd;老后端没回才退回 tokens/1e6($1/M 的假设,会少算 1/3)。
+          if (charged && charged > 0) tracker.addTokens(charged, usd || charged / 1_000_000);
           tracker.progress(m);
         },
         signal,
