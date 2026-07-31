@@ -1237,6 +1237,8 @@ async function runVideoPipeline(
       //   必然触发整片重来 → 三个 voice 轮完耗尽彻底失败。句级 fallback 把失败隔离到单句,救场率高。
       const primary = input.voice || getTtsVoice();
       const voiceChain = getVoiceFallbacks(primary);
+      // 本步配音累计实扣(豆包);收尾时报个总数,方便和账单逐条对账。
+      let ttsTokens = 0;
 
       // ── 「一口气」优先路径:整段只发 1 次 edge-tts 请求,再按 cue 时间戳切回每句 ──
       //   请求数 N→1,从根上躲过 edge-tts「按 voice 间歇拒发」(N 句里中任一即失败 vs 单次)。
@@ -1325,7 +1327,17 @@ async function runVideoPipeline(
           // ⚠️ signal 必须传:synthesize 内部有 voiceChain × 最多 5 次重试 × 单次最长 60s,
           //    不传的话点了停止要磨数分钟才走到下一句的 throwIfAborted。
           const r = await synthesize(sentences[i], outMp3, v, input.voiceRate, { signal });
-          if (r.synthesized) { got = r; usedVoice = v; break; }
+          if (r.synthesized) {
+            got = r; usedVoice = v;
+            // 豆包按字符实扣 —— 计进「本次消耗」并逐句报出来,否则用户在账单里看到
+            //   一串扣费、任务页却一分不含,只能怀疑是不是重复扣了。Edge 免费恒为 0。
+            if (r.chargedTokens && r.chargedTokens > 0) {
+              tracker.addTokens(r.chargedTokens, r.costUsd || r.chargedTokens / 1_000_000);
+              ttsTokens += r.chargedTokens;
+              tracker.progress(`   第 ${i + 1} 句配音 ${sentences[i].length} 字 · 扣 ${r.chargedTokens.toLocaleString()} 积分`);
+            }
+            break;
+          }
           lastReason = getLastTtsError() || lastReason;
         }
         if (!got) { failIdx = i; break; }
@@ -1368,7 +1380,8 @@ async function runVideoPipeline(
         tracker.fail('tts', err);
         return { ok: false, error: err };
       }
-      tracker.done('tts', `配音完成(${synthCount} 句全部真人语音${stickyVoice !== voiceChain[0] ? `,含备用音色 ${stickyVoice}` : ''})`);
+      tracker.done('tts', `配音完成(${synthCount} 句全部真人语音${stickyVoice !== voiceChain[0] ? `,含备用音色 ${stickyVoice}` : ''})`
+        + (ttsTokens > 0 ? ` · 共 ${sentences.reduce((a, x) => a + x.length, 0)} 字,合计扣 ${ttsTokens.toLocaleString()} 积分` : ' · Edge 免费音色,不计费'));
       } // end if (!wholeDone) — 逐句 fallback
     } else {
       // 纯画面:分镜表标了时长就用它(用户/解析器定的镜头节奏);没有才退回按字数估。

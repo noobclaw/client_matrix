@@ -91,6 +91,14 @@ export interface TtsResult {
   /** true = 真 TTS;false = 静音兜底。 */
   synthesized: boolean;
   /**
+   * 本次合成【服务端实扣】的积分(仅豆包;Edge 免费恒为 0)。
+   * ⚠️ 以前这个数在 synthesize() 里被丢掉了 —— 于是账单里一串「豆包真人配音」扣费,
+   *    任务页的「本次消耗」却一分不含,用户对不上账,只能怀疑重复扣费。
+   */
+  chargedTokens?: number;
+  /** 本次合成的服务端权威 USD 成本(同上,仅豆包)。 */
+  costUsd?: number;
+  /**
    * edge-tts 词边界出的短语级字幕 cue(相对本句起点)。真 TTS 且字幕解析成功才有;
    * 静音兜底 / 解析失败为 undefined,上层退回估算。
    */
@@ -304,7 +312,10 @@ export async function synthesize(text: string, outPath: string, voice?: string, 
     const d = await synthDoubao(clean, outPath, useVoice, rate, opts?.signal);
     if (d?.ok) {
       const dur = await probeDuration(outPath);
-      return { ok: true, audioPath: outPath, durationSec: dur > 0 ? dur : estDur, synthesized: true };
+      return {
+        ok: true, audioPath: outPath, durationSec: dur > 0 ? dur : estDur, synthesized: true,
+        chargedTokens: d.tokens, costUsd: d.costUsd,
+      };
     }
     // ⚠️ 豆包合成失败【不回退 Edge】。回退等于把用户选的音色悄悄换成另一个人的声音,
     //    出来的片子他根本不会要 —— 而钱已经花在出图/生成上了。宁可这一步失败让他重试,
