@@ -112,10 +112,20 @@ export default function StoryboardReviewModal(props: StoryboardReviewModalProps)
             <div className="text-base font-semibold dark:text-white">
               {isZh ? '分镜表 · 开跑前确认' : 'Storyboard — review before running'}
             </div>
-            <div className="text-[12px] text-gray-500 dark:text-gray-400 mt-0.5">
-              {isZh
-                ? '口播逐字照念，画面按「画面」列生成。勾了「要动」的镜才会生成视频（按秒收费），其余用首帧 + 运镜。'
-                : 'Narration is read verbatim; visuals follow the Visual column. Only shots marked “Animate” generate video (charged per second).'}
+            <div className="text-[12px] text-gray-500 dark:text-gray-400 mt-0.5 leading-relaxed">
+              {isZh ? (
+                <>
+                  下面每一行是一个镜头。<span className="text-gray-700 dark:text-gray-300">念出来的字就是你写的原话，一个字不改</span>；画面按你在「画面」里写的内容生成。<br />
+                  默认每个镜头出一张图，再给它加上缓缓推近的效果 —— 几乎不花钱。
+                  想让哪个镜头<span className="text-gray-700 dark:text-gray-300">真的动起来</span>（人在走、车在开），就勾上「要动」，那一格改用 AI 生成视频，<span className="text-fuchsia-600 dark:text-fuchsia-400">按秒收费</span>。
+                </>
+              ) : (
+                <>
+                  Each row below is one shot. <span className="text-gray-700 dark:text-gray-300">The narration is read exactly as you wrote it</span>, and the visual follows what you put in the Visual column.<br />
+                  By default every shot is a still image with a slow push-in, which costs almost nothing.
+                  Tick “Animate” on the shots you want to <span className="text-gray-700 dark:text-gray-300">actually move</span> — those are generated as AI video and <span className="text-fuchsia-600 dark:text-fuchsia-400">charged per second</span>.
+                </>
+              )}
             </div>
           </div>
           <button
@@ -182,6 +192,17 @@ export default function StoryboardReviewModal(props: StoryboardReviewModalProps)
                 </div>
               )}
 
+              {/* 表头:没有它,那一串数字和标签用户根本不知道是什么 */}
+              {shots.length > 0 && (
+                <div className="flex items-center gap-2 px-3 pb-1.5 text-[11px] text-gray-400 dark:text-gray-500">
+                  <span className="w-7 shrink-0">#</span>
+                  <span className="w-14 shrink-0">{isZh ? '秒' : 'Sec'}</span>
+                  <span className="w-[68px] shrink-0">{isZh ? '画面类型' : 'Type'}</span>
+                  <span className="flex-1 min-w-0">{isZh ? '念什么 / 画什么' : 'Narration / Visual'}</span>
+                  <span className="shrink-0">{isZh ? '生成视频' : 'Animate'}</span>
+                  <span className="w-[92px] shrink-0" />
+                </div>
+              )}
               <div className="space-y-2">
                 {shots.map((s, i) => {
                   const meta = TYPE_META[s.type] || TYPE_META.scene;
@@ -206,22 +227,31 @@ export default function StoryboardReviewModal(props: StoryboardReviewModalProps)
                         <select
                           value={s.type}
                           onChange={(e) => patch(i, { type: e.target.value as ShotType })}
-                          className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] border-0 ${meta.cls}`}
+                          className={`w-[68px] shrink-0 rounded px-1 py-0.5 text-[11px] border-0 ${meta.cls}`}
                         >
                           {TYPE_ORDER.map((t) => (
                             <option key={t} value={t}>{isZh ? TYPE_META[t].zh : TYPE_META[t].en}</option>
                           ))}
                         </select>
                         <div
-                          className="flex-1 min-w-0 truncate text-[13px] dark:text-gray-200 cursor-pointer"
+                          className="flex-1 min-w-0 cursor-pointer"
                           onClick={() => setExpanded(isOpen ? null : i)}
-                          title={s.narration || s.visualFirst}
+                          title={`${isZh ? '念' : 'Say'}: ${s.narration}
+${isZh ? '画面' : 'Visual'}: ${s.visualFirst}`}
                         >
-                          {s.narration || <span className="text-gray-400">{isZh ? '（无口播）' : '(no narration)'}</span>}
+                          <div className="truncate text-[13px] dark:text-gray-200">
+                            <span className="text-gray-400 mr-1">{isZh ? '念' : 'Say'}</span>
+                            {s.narration || <span className="text-gray-400">{isZh ? '（这一镜不说话）' : '(silent)'}</span>}
+                          </div>
+                          {/* 画面是这一镜真正会被画出来的东西 —— 藏在展开里等于没有 */}
+                          <div className="truncate text-[12px] text-gray-500 dark:text-gray-400">
+                            <span className="text-gray-400 mr-1">{isZh ? '画' : 'See'}</span>
+                            {s.visualFirst || <span className="text-amber-500">{isZh ? '（没写画面，AI 会自己发挥）' : '(no visual — AI will improvise)'}</span>}
+                          </div>
                         </div>
                         <label
                           className="shrink-0 flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400 cursor-pointer"
-                          title={isZh ? '勾选后这一镜会用 AI 生成视频（按秒收费）；不勾则用首帧 + 运镜' : 'Generate AI video for this shot (charged per second); otherwise use the still frame + camera move'}
+                          title={isZh ? '勾上 = 这一镜用 AI 生成会动的视频，按秒收费；不勾 = 出一张图慢慢推近，几乎不花钱' : 'Ticked = AI-generated moving video for this shot, charged per second. Unticked = a still image with a slow push-in, nearly free.'}
                         >
                           <input
                             type="checkbox"

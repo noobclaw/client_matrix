@@ -66,6 +66,12 @@ export interface BgmPreviewState {
   preview: () => void;
   openFolder: () => void;
   setPreviewErr: (s: string) => void;
+  /**
+   * 每点一次试听自增。作为 <audio> 的 key 强制重挂 —— 否则第二次点同一首/同一个音色时,
+   * setPreviewUrl 设的是同一个值,React 不重渲染,autoPlay 不会再触发,
+   * 用户看到的就是「按钮点了没反应,得切走再切回来才行」。
+   */
+  nonce: number;
 }
 
 /**
@@ -77,11 +83,13 @@ export function useBgmPreview(bgmPath: string, isZh: boolean): BgmPreviewState {
   const [previewErr, setPreviewErr] = useState('');
   const [loading, setLoading] = useState(false);
   const [opening, setOpening] = useState(false);
+  const [nonce, setNonce] = useState(0);
 
   useEffect(() => { setPreviewErr(''); setPreviewUrl(''); }, [bgmPath]);
 
   const preview = async () => {
     if (!bgmPath || loading) return;
+    setNonce((n) => n + 1);   // 再点一次要能重播,见 BgmPreviewState.nonce
     setLoading(true);
     setPreviewErr('');
     try {
@@ -114,7 +122,7 @@ export function useBgmPreview(bgmPath: string, isZh: boolean): BgmPreviewState {
     }
   };
 
-  return { previewUrl, previewErr, loading, opening, preview, openFolder, setPreviewErr };
+  return { previewUrl, previewErr, loading, opening, preview, openFolder, setPreviewErr, nonce };
 }
 
 /**
@@ -138,12 +146,14 @@ export function useVoicePreview(voice: string, rate: number | undefined, lang: s
   const [previewUrl, setPreviewUrl] = useState('');
   const [previewErr, setPreviewErr] = useState('');
   const [loading, setLoading] = useState(false);
+  const [nonce, setNonce] = useState(0);
 
   // 换音色/语速就清掉播放器,避免听到的还是上一个音色。
   useEffect(() => { setPreviewErr(''); setPreviewUrl(''); }, [voice, rate]);
 
   const preview = async () => {
     if (!voice || loading) return;
+    setNonce((n) => n + 1);   // 再点一次要能重播,见 BgmPreviewState.nonce
     const key = `${voice}|${rate ?? ''}`;
     // 听过的直接回放,不再合成、不再扣费。
     const cached = voiceSampleCache.get(key);
@@ -174,7 +184,7 @@ export function useVoicePreview(voice: string, rate: number | undefined, lang: s
 
   return {
     previewUrl, previewErr, loading, opening: false,
-    preview, openFolder: () => { /* 配音没有目录可开 */ }, setPreviewErr,
+    preview, openFolder: () => { /* 配音没有目录可开 */ }, setPreviewErr, nonce,
   };
 }
 
@@ -242,6 +252,7 @@ export function BgmPreviewPlayer({ isZh, bgmPath, state, showCloudHint }: BgmPre
     <div className="mt-1.5 space-y-1.5">
       {state.previewUrl && (
         <audio
+          key={`${bgmPath}|${state.nonce}`}
           controls
           autoPlay
           src={state.previewUrl}

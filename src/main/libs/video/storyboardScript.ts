@@ -194,9 +194,10 @@ function cleanShot(raw: any, fallbackSeconds: number): StoryShot | null {
     bgmMood: str(raw.bgm_mood ?? raw.bgmMood, 40) || undefined,
     sfx: str(raw.sfx, 120) || undefined,
     type,
-    // animate 默认 false(不烧视频钱);脚本明确要求「动/运镜」的镜由 LLM 置 true 作为建议值,
-    // 最终以用户在分镜表勾选为准。
-    animate: raw.animate === true,
+    // ⚠️ 恒为 false,【不采纳 LLM 的判断】。分镜脚本几乎每场都写着景别运镜,LLM 会把整片
+    //    都判成「要动」—— 8 镜里 7 镜勾上就是几块钱,而用户从没点过头。
+    //    生成视频是花钱的事,只能由用户在分镜表上逐镜勾。
+    animate: false,
     locked,
   };
 }
@@ -245,7 +246,7 @@ const SHOT_SCHEMA_BLOCK = [
   '  "bgm_mood": string,         // 配乐情绪,只从这些里选:轻快/节拍/大气/舒缓/轻柔/悠闲/紧张/悬疑/欢快/开场/动感/新闻',
   '  "sfx": string,              // 音效提示。没有填 ""',
   '  "type": string,             // 只能是:chart(图表数据) | textcard(文字卡封面) | scene(实景空镜) | person(人物出镜) | logo(品牌标识) | transition(转场)',
-  '  "animate": boolean,         // 脚本明确要求画面运动/有动作/有运镜 → true;静态展示 → false',
+  '  "animate": false,           // 固定填 false(是否生成视频由用户自己勾,不用你判断)',
   '  "locked": string[]          // 原脚本里【明确写了】的字段名,如 ["narration","visual_first","on_screen_text"]。你自己推断补充的字段不要列进来',
   '}',
 ].join('\n');

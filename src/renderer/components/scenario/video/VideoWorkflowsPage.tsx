@@ -2512,15 +2512,22 @@ const VP_ACCENT: Record<string, string> = {
   teal: 'border-teal-500 bg-teal-500/10 text-teal-600 dark:text-teal-400 font-medium',
 };
 /** VoiceList — 音色列表的壳:一行触发按钮 + 展开的两列面板(照赛道选择器那套,比原生下拉好点)。 */
-const VoiceList: React.FC<{ open: boolean; setOpen: (v: boolean) => void; label: string; children: React.ReactNode }> = ({ open, setOpen, label, children }) => (
+const VoiceList: React.FC<{
+  open: boolean; setOpen: (v: boolean) => void; label: string; children: React.ReactNode;
+  /** 与下拉触发条【同一行】贴右的东西(试听按钮)。布局对齐背景音乐那一行。 */
+  trailing?: React.ReactNode;
+}> = ({ open, setOpen, label, children, trailing }) => (
   <div>
-    <button type="button" onClick={() => setOpen(!open)}
-      className="relative w-full text-left text-sm pl-3 pr-9 py-2.5 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 dark:text-gray-100 focus:outline-none">
-      {label}
-      <svg className={`absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-      </svg>
-    </button>
+    <div className="flex items-center gap-2">
+      <button type="button" onClick={() => setOpen(!open)}
+        className="relative flex-1 min-w-0 text-left text-sm pl-3 pr-9 py-2.5 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 dark:text-gray-100 focus:outline-none">
+        <span className="block truncate">{label}</span>
+        <svg className={`absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {trailing}
+    </div>
     {open && (
       <div className="mt-1 grid grid-cols-2 gap-1 p-1 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 max-h-72 overflow-y-auto">
         {children}
@@ -2631,7 +2638,7 @@ const VoicePicker: React.FC<{
               </button>
             ))}
           </div>
-          <VoiceList open={open} setOpen={setOpen} label={curLabel}>
+          <VoiceList open={open} setOpen={setOpen} label={curLabel} trailing={<BgmPreviewButtons isZh={isZh} bgmPath={value} state={voicePreview} tone={(['rose', 'fuchsia', 'amber', 'emerald', 'sky'].includes(accent) ? accent : 'sky') as any} showFolder={false} previewLabel={isZh ? '▶ 试听音色' : '▶ Preview'} />}>
             {sceneGroups.map(([sc, vs]) => (
               <React.Fragment key={sc}>
                 <div className="col-span-2 px-2 pt-2 pb-1 text-[11px] text-gray-400 dark:text-gray-500">{sc}</div>
@@ -2653,7 +2660,7 @@ const VoicePicker: React.FC<{
               </button>
             ))}
           </div>
-          <VoiceList open={open} setOpen={setOpen} label={curLabel}>
+          <VoiceList open={open} setOpen={setOpen} label={curLabel} trailing={<BgmPreviewButtons isZh={isZh} bgmPath={value} state={voicePreview} tone={(['rose', 'fuchsia', 'amber', 'emerald', 'sky'].includes(accent) ? accent : 'sky') as any} showFolder={false} previewLabel={isZh ? '▶ 试听音色' : '▶ Preview'} />}>
             {(VOICE_GROUPS[edgeGroupIdx] || VOICE_GROUPS[0]).voices.map((v) => (
               <button key={v.id} type="button" onClick={() => { onChange(v.id); setOpen(false); }} className={item(v.id === value)}>
                 {v.id === value ? '✓ ' : ''}{isZh ? v.zh : v.en}
@@ -2662,14 +2669,12 @@ const VoicePicker: React.FC<{
           </VoiceList>
         </>
       )}
-      {/* 试听条:与背景音乐同款。配音是现合成的,没有目录可开 → 不显示「文件夹」按钮。 */}
-      <BgmPreviewBar
+      {/* 播放器在下面一行;试听按钮已经和音色下拉并排(见 VoiceList 的 trailing)。 */}
+      <BgmPreviewPlayer
         isZh={isZh}
         bgmPath={value}
         state={voicePreview}
         tone={(['rose', 'fuchsia', 'amber', 'emerald', 'sky'].includes(accent) ? accent : 'sky') as any}
-        showFolder={false}
-        previewLabel={isZh ? '▶ 试听音色' : '▶ Preview voice'}
       />
     </div>
   );
