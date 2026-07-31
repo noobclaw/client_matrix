@@ -3375,11 +3375,12 @@ const VideoConfigModal: React.FC<{
       if (!api?.parseStoryboard) { setSbError(isZh ? '当前版本不支持分镜预览' : 'Storyboard preview unavailable'); return; }
       const r = await api.parseStoryboard({
         script: script.trim(),
-        scriptMode,
+        // 恒为 strict:只有「我有脚本」才走到这里(见 handleSubmit 的注释)。
+        scriptMode: 'strict',
         lang: scriptLang !== 'auto' ? scriptLang : undefined,
         targetSeconds: Math.min(targetSeconds, AI_MAX_SECONDS),
         // 有脚本时不拿赛道/人设干扰画面调性(用户脚本自己就定了调)。
-        styleHint: scriptMode === 'ai' ? [persona.trim(), trackLabel].filter(Boolean).join('、') || undefined : undefined,
+        styleHint: undefined,
       });
       if (!r?.ok || !Array.isArray(r.shots) || r.shots.length === 0) {
         setSbError(r?.error || (isZh ? '未解析出分镜' : 'no shots parsed'));
@@ -3437,7 +3438,12 @@ const VideoConfigModal: React.FC<{
    * 编辑老任务不弹(用户是来改配置的,不是来重排分镜的)。
    */
   const handleSubmit = async () => {
-    if (mode === 'pure_ai' && !isEdit && script.trim()) {
+    // 只有【我有脚本】(strict)才在提交前弹分镜表。
+    // ⚠️ 「我只有个想法」(ai)模式下用户填的是【方向提示】,口播稿这会儿还不存在(要等
+    //    pipeline 里 generateScript 写);拿提示词去 deriveStoryboard 会把它当口播逐字切开,
+    //    确认后这些分镜作为 storyboardShots 盖掉 AI 写的稿 —— 成片念的就成了那句提示词。
+    //    这条路让 pipeline 在运行时按 AI 写好的稿子派生分镜,才是对的。
+    if (mode === 'pure_ai' && !isEdit && scriptMode === 'strict' && script.trim()) {
       setSbShots([]);
       setSbWarnings([]);
       setSbFidelity(undefined);

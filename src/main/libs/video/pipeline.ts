@@ -1355,9 +1355,13 @@ async function runVideoPipeline(
       tracker.done('tts', `配音完成(${synthCount} 句全部真人语音${stickyVoice !== voiceChain[0] ? `,含备用音色 ${stickyVoice}` : ''})`);
       } // end if (!wholeDone) — 逐句 fallback
     } else {
-      // 纯画面:每镜时长 = clamp(字数 / 4.5, 5, 10) 秒,跟着分镜稿内容走。
+      // 纯画面:分镜表标了时长就用它(用户/解析器定的镜头节奏);没有才退回按字数估。
+      //   ⚠️ 无旁白时字数恒为 0,纯按字数估会让每一镜都卡在下限 5s、节奏全平。
       for (let i = 0; i < sentences.length; i++) {
-        sceneDurations.push(Math.max(5, Math.min(10, Math.ceil((sentences[i] || '').length / 4.5))));
+        const fromTable = aiShots?.[i]?.seconds;
+        sceneDurations.push(fromTable && fromTable > 0
+          ? Math.max(4, Math.min(12, Math.round(fromTable)))
+          : Math.max(5, Math.min(10, Math.ceil((sentences[i] || '').length / 4.5))));
       }
       tracker.done('tts', `纯画面模式 · 跳过配音,按分镜稿定时长(${sentences.length} 镜)`);
     }
@@ -2500,7 +2504,9 @@ async function runVideoPipeline(
     //   段间交叉淡入淡出拼成一条完整 BGM 轨 —— 叙事推进时音乐跟着变(悬疑开场 → 紧张冲突
     //   → 轻快反转 → 钢琴收尾),而不是整片循环同一首。
     //   条件不足(只有一段 / 曲库拉不到 / 切片失败)→ 内部返回 undefined,原样回落单曲。
-    if (aiShots && aiShots.some((s) => (s.bgmMood || '').trim())) {
+    // ⚠️ 必须先有 bgmPath:用户在向导里选了「无背景音乐」时,不能因为分镜表带了情绪
+    //    就擅自给他配上音乐。分段配乐只是把【他选的那一首】换成按情绪走的一条轨。
+    if (bgmPath && aiShots && aiShots.some((s) => (s.bgmMood || '').trim())) {
       const segs = aiShots.map((s, i) => ({ mood: s.bgmMood || '', seconds: sceneDurations[i] || s.seconds || 0 }));
       const moodTrack = await buildMoodBgmTrack(
         segs, assetDir, runFfmpeg, bgmPath, (m) => tracker.progress(m), signal,
