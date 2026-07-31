@@ -1806,12 +1806,17 @@ const VideoTaskDetail: React.FC<{
   };
 
   // 停止运行中的任务:abort 主进程 pipeline + kill ffmpeg/seedance/tts。终态由 store 刷新。
+  //
+  // ⚠️ abort 只能在【检查点】生效,链路里天然有不可打断的等待(在飞的网络请求、平台上传
+  //    轮询、下发 driver 的 sleep)。正常几秒到几十秒就过去,但用户看到的只是一个不动的
+  //    「停止中…」,体感就是「点了没用」。所以:停止中把按钮换成【强制停止】并显示已等秒数,
+  //    再点一次就本地收尾、不再干等 5 分钟兜底。
   const handleStop = () => {
     setStopping(true);
     try { videoTaskStore.stopTask(task.id); } catch {}
-    // 给主进程几秒走到步骤边界 / 子进程被 kill;按钮态兜底复位(真正终态由 store 回写)。
-    setTimeout(() => setStopping(false), 4000);
   };
+  // store 已把 run 收尾 → 退出停止态(正常路径下点完立刻就到)。
+  useEffect(() => { if (!isRunning && stopping) setStopping(false); }, [isRunning, stopping]);
 
   return (
     <div className="p-6 max-w-5xl mx-auto">

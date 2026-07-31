@@ -952,7 +952,7 @@ async function runVideoPipeline(
       //   ⚠️ 不在这里 markHotspotUsed —— 改到【发布后、≥1 平台成功(或仅存本地已出片)】才记一笔
       //   (用户要求:只有上传成功才算用过;发布全失败的选题下次还能重试)。见下方 publish 段。
       const usedIds = getUsedHotspots(input.taskId || '');
-      hotspotTopic = await pickHotspotTopic(sources, usedIds, 20, input.hotspotTrack || '');
+      hotspotTopic = await pickHotspotTopic(sources, usedIds, 20, input.hotspotTrack || '', signal);
       if (!hotspotTopic) {
         const err = '热搜成片:所选热点源暂无可用条目(稍后热榜刷新再试)';
         tracker.fail('script', err);
