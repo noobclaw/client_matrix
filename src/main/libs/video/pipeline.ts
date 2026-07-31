@@ -1577,14 +1577,18 @@ async function runVideoPipeline(
       //     那样一旦故事板整体失败,40 镜的长片会静默变成 40 次 Seedance 调用(几百块)。
       //     老链路有 45s 硬截兜着,现在上限解除了,这个口子必须堵死。
       //     没出首帧的镜改为【借邻镜首帧】(免费),见下面 assignVisuals。
+      // ⚠️ `!== false` 不是 `=== true`:电影级默认每一镜都生成视频。
+      //   老任务里存的 storyboardShots 可能带着 animate:false(那一版把默认改反了),
+      //   用 === true 会让它们重跑时整片退化成静图幻灯片 —— 那不是电影级。
+      //   只有【显式】标 false 的镜(纯静态展示)才不生成。
       const animateFlags: boolean[] = aiShots
-        ? aiShots.map((s) => s.animate === true)
+        ? aiShots.map((s) => s.animate !== false)
         : aiScenes.map(() => true);
       const animateIdx: number[] = [];
       animateFlags.forEach((on, i) => { if (on) animateIdx.push(i); });
       const stillCount = aiScenes.length - animateIdx.length;
       if (stillCount > 0) {
-        tracker.progress(`🖼️ ${stillCount} 镜使用故事板首帧 + 运镜(不生成视频,省这部分费用)`);
+        tracker.progress(`🖼️ ${stillCount} 镜为静态展示镜,用首帧 + 运镜(不生成视频)`);
       }
       // 既没有任何首帧、又一镜都没勾生成视频 → 后面无论如何拼不出画面。在【花钱之前】直接失败,
       //   而不是硬着头皮跑完再交一条黑屏片。

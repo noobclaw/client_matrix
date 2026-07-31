@@ -318,8 +318,9 @@ export default function StoryboardReviewModal(props: StoryboardReviewModalProps)
                               />
                             </Row>
                           </div>
-                          {s.animate && (
-                            <Row label={isZh ? '运动（只在生成视频时用）' : 'Motion (video only)'} locked={isLocked(s, 'motion')} isZh={isZh}>
+                          {/* 每一镜都会生成视频 → 运动始终可编辑,不再按 animate 条件显示。 */}
+                          {(
+                            <Row label={isZh ? '景别运镜' : 'Camera'} locked={isLocked(s, 'motion')} isZh={isZh}>
                               <input
                                 value={s.motion || ''}
                                 onChange={(e) => patch(i, { motion: e.target.value })}
