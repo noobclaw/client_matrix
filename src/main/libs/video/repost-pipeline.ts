@@ -91,20 +91,24 @@ interface Seg {
   words?: AsrWord[];
 }
 
-/** 单句字幕的目标上限(中文字符数)。超过就该切,否则一屏塞不下、也停留太久。 */
-const SUB_MAX_CHARS = 18;
-/** 词间静音超过这个秒数就当一个自然停顿,优先在这里切。 */
-const PAUSE_GAP_SEC = 0.45;
+/**
+ * 词间静音超过这个秒数,就当说话人换了一句 —— 有些语言/口语里句末没有标点,
+ * 停顿是唯一可靠的句界信号。
+ */
+const SENTENCE_PAUSE_SEC = 0.6;
 
 /**
- * 把 ASR 的粗 utterance 按【词级时间戳】重切成字幕粒度的句子。
+ * 把 ASR 的粗 utterance 按【词级时间戳】切成【句】。
  *
- * ⚠️ 为什么必须做:火山返回的 utterance 是整句甚至整段 —— 实测 16 秒的视频只切出 2 条,
- *   每条 8 秒。译文音频往这 8 秒里一灌,画面早换了配音还在读上一句,字幕也是一大坨挂 8 秒。
- *   词级时间戳才是对齐的真基准(KrillinAI 的 TimestampMatcher 同思路:句子匹配回词的时间轴)。
+ * ⚠️ 只切句,不按字数切。配音的落位单位就是句:整句翻译、整句放回原位置。
+ *   按字数切会把一句话劈成几个片段分别送去翻译 —— 丢上下文,译文质量直接崩,
+ *   而且拼回来的语序可能是错的。字幕要分屏是【显示】层面的事,不该动翻译单元。
  *
- * 切点优先级:① 句末标点 → ② 词间明显停顿 → ③ 字数超上限硬切。
- * 没有 words 的段(老后端 / 非火山 ASR)原样保留,不做任何改动。
+ * 为什么还要切:火山返回的 utterance 可能是整段(实测 16 秒只回 2 条)。一条里含
+ *   好几句时,译文音频会被灌进整段的时间窗,画面早换了配音还在读上一句。
+ *
+ * 句界判据:① 句末标点 ② 词间静音 ≥SENTENCE_PAUSE_SEC。
+ * 没有 words 的段(老后端 / 非火山 ASR)原样保留。
  */
 function resplitByWords(segs: Seg[]): Seg[] {
   const out: Seg[] = [];
@@ -114,20 +118,23 @@ function resplitByWords(segs: Seg[]): Seg[] {
     let buf: AsrWord[] = [];
     const flush = () => {
       if (buf.length === 0) return;
-      const text = buf.map((w) => w.text).join('').trim();
+      // 拉丁系词之间要空格,CJK 不要 —— 直接 join('') 会把英文拼成 "Thetrashis"。
+      const text = buf.reduce((acc, w) => {
+        const t = w.text;
+        if (!acc) return t;
+        const cjk = /[぀-ヿ㐀-鿿가-힯]/;
+        const needSpace = !cjk.test(acc.slice(-1)) && !cjk.test(t[0] || '') && !/^[,.!?;:'")\]]/.test(t);
+        return needSpace ? `${acc} ${t}` : acc + t;
+      }, '').trim();
       if (text) out.push({ start: buf[0].start, end: buf[buf.length - 1].end, text });
       buf = [];
     };
     for (let i = 0; i < ws.length; i++) {
       const w = ws[i];
       buf.push(w);
-      const cur = buf.map((x) => x.text).join('');
-      const endsSentence = /[。！？!?;；…]$/.test(w.text.trim());
+      const endsSentence = /[。！？!?…]$/.test(w.text.trim());
       const nextGap = i + 1 < ws.length ? ws[i + 1].start - w.end : 0;
-      const longPause = nextGap >= PAUSE_GAP_SEC;
-      // 逗号处只在已经攒够一半长度时才切,免得切得太碎
-      const softBreak = /[,，、:：]$/.test(w.text.trim()) && cur.length >= SUB_MAX_CHARS / 2;
-      if (endsSentence || longPause || softBreak || cur.length >= SUB_MAX_CHARS) flush();
+      if (endsSentence || nextGap >= SENTENCE_PAUSE_SEC) flush();
     }
     flush();
   }
