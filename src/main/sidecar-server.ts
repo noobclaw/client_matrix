@@ -1411,6 +1411,30 @@ const server = http.createServer(async (req, res) => {
               return writeJSON(res, 200, { valid: [], rejected: [] });
             }
           }
+          case 'video:previewVoice': {
+            // 配音试听:用选中音色合成一句短样例,回 data URL。
+            // ⚠️ 豆包音色按字符计费 → 样例句必须短(见 voiceSample.ts)。main.ts 同名 handler 须保持一致。
+            const osMod = require('os'); const fsMod = require('fs'); const pathMod = require('path');
+            let tmpFile = '';
+            try {
+              const { synthesize } = await import('./libs/video/tts');
+              const { voiceSampleText } = await import('./libs/video/voiceSample');
+              const a = (args[0] || {}) as { voice?: string; rate?: number; lang?: string };
+              const voice = String(a.voice || '').trim();
+              if (!voice) return writeJSON(res, 200, { ok: false, error: 'no_voice' });
+              const text = voiceSampleText(a.lang, voice);
+              tmpFile = pathMod.join(osMod.tmpdir(), `voice_preview_${Date.now()}.mp3`);
+              const r = await synthesize(text, tmpFile, voice, a.rate);
+              if (!r?.ok || !fsMod.existsSync(tmpFile)) return writeJSON(res, 200, { ok: false, error: 'synth_failed' });
+              const b64 = fsMod.readFileSync(tmpFile).toString('base64');
+              if (!b64) return writeJSON(res, 200, { ok: false, error: 'empty_audio' });
+              return writeJSON(res, 200, { ok: true, dataUrl: `data:audio/mpeg;base64,${b64}`, text });
+            } catch (e) {
+              return writeJSON(res, 200, { ok: false, error: String((e as Error)?.message || e).slice(0, 200) });
+            } finally {
+              try { if (tmpFile && fsMod.existsSync(tmpFile)) fsMod.unlinkSync(tmpFile); } catch { /* ignore */ }
+            }
+          }
           case 'video:parseStoryboard': {
             // 电影级分镜表预览:只跑解析(LLM,几分钱),不出图、不生成视频。
             // ⚠️ Tauri 是主发布路径 —— main.ts 的 ipcMain 同名 handler 必须与这里保持一致。

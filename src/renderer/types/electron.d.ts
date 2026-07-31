@@ -562,6 +562,10 @@ interface IElectronAPI {
       fidelity?: number;
       warnings?: string[];
     }>;
+    /** 配音试听:用选中音色合成一句短样例,回 data URL 直接播。 */
+    previewVoice: (args: { voice: string; rate?: number; lang?: string }) => Promise<{
+      ok: boolean; error?: string; dataUrl?: string; text?: string;
+    }>;
     pickImages: (max: number) => Promise<string[]>;
     pickVideos: (max: number) => Promise<string[]>;
     pickLocalFolder: () => Promise<{ dir: string; videoCount: number; imageCount: number } | null>;

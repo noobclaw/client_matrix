@@ -42,6 +42,7 @@ import {
 } from '../../../services/videoTaskStore';
 import { videoQueue, VIDEO_TASK_LIMIT } from '../../../services/videoQueue';
 import StoryboardReviewModal from './StoryboardReviewModal';
+import BgmPreviewBar, { useBgmPreview, useVoicePreview } from './BgmPreviewBar';
 
 // 订阅 store 的 React hook:任意视图都能拿到最新任务列表 + 运行记录并自动重渲染。
 function useVideoStore(): { tasks: VideoTask[]; runs: VideoRunRecord[] } {
@@ -2538,8 +2539,12 @@ const VoicePicker: React.FC<{
   onChange: (id: string) => void;
   accent?: string;
   targetLang?: string;
-}> = ({ isZh, value, onChange, accent = 'sky', targetLang }) => {
+  /** 语速(试听时用同一档,听到的就是成片里的效果)。 */
+  rate?: number;
+}> = ({ isZh, value, onChange, accent = 'sky', targetLang, rate }) => {
   const { doubaoVoices, doubaoEnabled } = useVoiceGroups();
+  // 配音试听:跟 BGM 同一套 UI(见 BgmPreviewBar)。放在 VoicePicker 里 = 所有向导一次生效。
+  const voicePreview = useVoicePreview(value, rate, targetLang, isZh);
   const isDoubaoId = (id: string) => /_(male|female)_/i.test(id) && !/Neural$/i.test(id);
   const [engine, setEngine] = useState<'doubao' | 'edge'>(() => (isDoubaoId(value) ? 'doubao' : 'edge'));
   useEffect(() => { setEngine(isDoubaoId(value) ? 'doubao' : 'edge'); /* eslint-disable-next-line */ }, [value]);
@@ -2652,6 +2657,15 @@ const VoicePicker: React.FC<{
           </VoiceList>
         </>
       )}
+      {/* 试听条:与背景音乐同款。配音是现合成的,没有目录可开 → 不显示「文件夹」按钮。 */}
+      <BgmPreviewBar
+        isZh={isZh}
+        bgmPath={value}
+        state={voicePreview}
+        tone={(['rose', 'fuchsia', 'amber', 'emerald', 'sky'].includes(accent) ? accent : 'sky') as any}
+        showFolder={false}
+        previewLabel={isZh ? '▶ 试听音色' : '▶ Preview voice'}
+      />
     </div>
   );
 };
@@ -2797,50 +2811,6 @@ function scriptLangDisplay(code: string | undefined, isZh: boolean): string | nu
 // value 用 builtin:<id> token 传给主进程,bgm.ts 还原成 resources/bgm/<id>.mp3。
 // id 必须与 client/resources/bgm/<id>.mp3 文件名(去扩展名)一致。
 const BUILTIN_BGM_PREFIX = 'builtin:';
-/**
- * resolveBgmPreview — 把 bgmPath(builtin:/remote:/绝对路径)变成能播的 URL,
- * 失败时【一定带回原因】。以前每一步失败都回 '',界面上就是「点了没反应」,
- * 真机没法定位;现在每一环的错都往上抛给界面 + console。
- *
- * 链路:渲染端 → sidecar video:prepareBgmPreview(解析/按需下载 → 注册 localFileServer)
- *      → 回 http://127.0.0.1:PORT/api/local-file?token=… → 这里 fetch 成 blob 给 <audio>。
- */
-async function resolveBgmPreview(token: string): Promise<{ url: string; err: string }> {
-  if (!token) return { url: '', err: 'no_bgm_selected' };
-  if (!videoCreationService.available) return { url: '', err: 'video_ipc_unavailable(主进程没挂上)' };
-  let raw = '';
-  try {
-    raw = await videoCreationService.prepareBgmPreview(token);
-  } catch (e) {
-    return { url: '', err: 'ipc_threw: ' + String((e as Error)?.message || e).slice(0, 120) };
-  }
-  try { console.info('[bgm-preview] token=' + token + ' raw=' + String(raw).slice(0, 160)); } catch { /* ignore */ }
-  if (!raw) {
-    // 空 = sidecar 要么不认这个 channel(装的包里 sidecar 比界面旧,未知 channel 一律回 null),
-    // 要么解析确实没结果。再问一次【只解析路径】的老 channel 就能区分这两种,省一轮猜。
-    let probe = '';
-    try { probe = await videoCreationService.resolveBgmPath(token); } catch { probe = '(threw)'; }
-    return { url: '', err: 'sidecar_returned_empty; resolveBgmPath=' + (probe || '(empty)') };
-  }
-  if (raw.startsWith('ERR:')) return { url: '', err: raw.slice(4) };
-  if (!/^https?:/i.test(raw)) return { url: raw, err: '' };        // data: URL 直接播
-  try {
-    const r = await fetch(raw);
-    if (!r.ok) return { url: '', err: 'http_' + r.status + ' from local-file' };
-    const b = await r.blob();
-    if (!b.size) return { url: '', err: 'empty_body(0 字节)' };
-    return { url: URL.createObjectURL(b), err: '' };
-  } catch (e) {
-    // fetch 拿不到就退回直接把 http URL 交给 <audio>(webview 能直连 sidecar 时仍可播)
-    try { console.warn('[bgm-preview] fetch failed, falling back to direct src', e); } catch { /* ignore */ }
-    return { url: raw, err: '' };
-  }
-}
-/** 试听出错时给用户看的一行(带原始原因,方便截图定位)。 */
-function bgmPreviewMsg(err: string, isZh: boolean): string {
-  if (err === 'no_bgm_selected') return isZh ? '先选一首背景音乐再试听' : 'Pick a track first';
-  return (isZh ? '试听失败:' : 'Preview failed: ') + err;
-}
 
 const BUILTIN_BGM: { id: string; zh: string; en: string }[] = [
   { id: 'bgm-01', zh: '内置曲目 1', en: 'Track 1' },
@@ -3257,44 +3227,8 @@ const VideoConfigModal: React.FC<{
   // BGM「打开文件夹」:原内嵌试听在部分环境播放不稳,改为直接打开该 BGM 所在【目录】,
   // 用户自己进去双击试听。后端返回的是目录(不下载、不要求文件已存在),比定位单文件健壮:
   // 内置 → 打开随包 bgm 目录(8 首都在);云端 → 打开缓存目录(已下载的在);上传 → 文件目录。
-  const [bgmOpening, setBgmOpening] = useState(false);
-  const openBgmFolder = async (token: string) => {
-    if (!token || bgmOpening) return;
-    setBgmOpening(true);
-    try {
-      const dir = await videoCreationService.resolveBgmPath(token); // 现在返回目录
-      if (dir) {
-        try { (window as any).electron?.shell?.openPath?.(dir); } catch { /* ignore */ }
-        setBgmPreviewErr('');
-      } else {
-        setBgmPreviewErr(isZh ? '打开失败：找不到 BGM 目录' : 'Failed: BGM folder not found');
-      }
-    } catch {
-      setBgmPreviewErr(isZh ? '打开失败：无法打开 BGM 目录' : 'Failed to open the BGM folder');
-    } finally {
-      setBgmOpening(false);
-    }
-  };
-  // BGM 内嵌试听:解析成可播 URL(云端按需下载),用 <audio controls autoPlay> 直接播。
-  const [bgmPreviewUrl, setBgmPreviewUrl] = useState('');
-  const [bgmPreviewErr, setBgmPreviewErr] = useState('');
-  const [bgmPreviewLoading, setBgmPreviewLoading] = useState(false);
-  const previewBgm = async (token: string) => {
-    if (!token || bgmPreviewLoading) return;
-    setBgmPreviewLoading(true);
-    setBgmPreviewErr('');
-    try {
-      const r = await resolveBgmPreview(token);
-      if (r.url) setBgmPreviewUrl(r.url);
-      if (r.err) setBgmPreviewErr(bgmPreviewMsg(r.err, isZh));
-    } catch {
-      setBgmPreviewErr(isZh ? '试听失败' : 'Preview failed');
-    } finally {
-      setBgmPreviewLoading(false);
-    }
-  };
-  // 切换曲目时清掉上一首的「打开失败」红字 + 试听播放器,避免残留误导(选 A → 切 B 仍在)。
-  useEffect(() => { setBgmPreviewErr(''); setBgmPreviewUrl(''); }, [bgmPath]);
+  // 试听 + 打开文件夹:全站统一实现,见 BgmPreviewBar.tsx。
+  const bgmPreview = useBgmPreview(bgmPath, isZh);
 
   const togglePlatform = (p: Platform) => setPlatforms((prev) => ({ ...prev, [p]: !prev[p] }));
 
@@ -3430,7 +3364,9 @@ const VideoConfigModal: React.FC<{
     setSbLoading(true);
     setSbError(null);
     try {
-      const api = (window as any).electronAPI?.video;
+      // ⚠️ 必须是 window.electron —— Electron 的 preload 用 exposeInMainWorld('electron', …),
+      //    Tauri 的 shim 也装在 window.electron。全仓都走这个,写成 electronAPI 一定拿不到。
+      const api = (window as any).electron?.video;
       if (!api?.parseStoryboard) { setSbError(isZh ? '当前版本不支持分镜预览' : 'Storyboard preview unavailable'); return; }
       const r = await api.parseStoryboard({
         script: script.trim(),
@@ -3894,30 +3830,23 @@ const VideoConfigModal: React.FC<{
                 </Field>
               )}
 
-              {/* 纯AI 费用说明。
-                  ⚠️ 老版本按【整片秒数 × 每秒价】估,那是"每一镜都生成视频"的口径。分镜表链路下
-                     默认【一镜都不生成视频】(用故事板首帧 + 运镜,只收出图费),只有用户点名要动的
-                     镜才按秒计费 —— 再按整片秒数报价会把用户吓跑,而且是错的。 */}
-              {mode === 'pure_ai' && aiCreditsPerSec != null && aiUsdPerSec != null && (() => {
-                const estSec = Math.min(AI_MAX_SECONDS, scriptMode === 'strict' ? Math.max(1, strictEstSec) : targetSeconds);
-                const maxCredits = Math.round(aiCreditsPerSec * estSec);
-                const maxUsd = aiUsdPerSec * estSec;
-                return (
-                  <div className="mt-3 rounded-lg border border-fuchsia-500/30 bg-fuchsia-500/5 px-3 py-2.5 text-sm">
-                    <span className="text-fuchsia-600 dark:text-fuchsia-400 font-semibold">💎 {isZh ? '费用说明' : 'Cost'}</span>
-                    <div className="mt-1 text-[12px] dark:text-gray-200">
-                      {isZh
-                        ? '默认按分镜出故事板首帧 + 运镜成片，只收出图费（每镜几毛）。'
-                        : 'By default each shot uses a storyboard frame + camera move — you only pay for images.'}
-                    </div>
-                    <div className="text-[11px] text-gray-400 mt-1">
-                      {isZh
-                        ? `若整片每一镜都改成 AI 生成视频，上限约 ${maxCredits.toLocaleString()} 积分（≈$${maxUsd.toFixed(2)}，${seedanceResolution} · ${estSec}s）。实际按真实时长逐镜扣。`
-                        : `If every shot were AI-generated video, up to ~${maxCredits.toLocaleString()} credits (≈$${maxUsd.toFixed(2)}, ${seedanceResolution} · ${estSec}s). Charged per real shot length.`}
-                    </div>
+              {/* 纯AI 费用。只报【单价】——总价在分镜表那一步按用户勾了几镜实时算,
+                  在这里按整片秒数估既吓人又不准(默认一镜都不生成视频)。 */}
+              {mode === 'pure_ai' && aiCreditsPerSec != null && aiUsdPerSec != null && (
+                <div className="mt-3 rounded-lg border border-fuchsia-500/30 bg-fuchsia-500/5 px-3 py-2.5 text-sm">
+                  <span className="text-fuchsia-600 dark:text-fuchsia-400 font-semibold">💎 {isZh ? '生成视频' : 'AI video'}</span>
+                  <span className="ml-2 dark:text-gray-200">
+                    {isZh
+                      ? `约 $${aiUsdPerSec.toFixed(2)}/秒（${Math.round(aiCreditsPerSec).toLocaleString()} 积分/秒，${seedanceResolution}）`
+                      : `~$${aiUsdPerSec.toFixed(2)}/s (${Math.round(aiCreditsPerSec).toLocaleString()} credits/s, ${seedanceResolution})`}
+                  </span>
+                  <div className="text-[11px] text-gray-400 mt-1">
+                    {isZh
+                      ? '只有在分镜表里勾了「要动」的镜才按秒收费，其余只收出图费。'
+                      : 'Only shots you mark as Animate are charged per second; the rest only cost an image.'}
                   </div>
-                );
-              })()}
+                </div>
+              )}
             </>
           )}
 
@@ -4126,7 +4055,7 @@ const VideoConfigModal: React.FC<{
               {/* 配音音色 + 语速 —— 普通模式恒显示;Seedance 仅在开了「AI 配音」时显示 */}
               {(mode !== 'pure_ai' || aiNarration) && (
               <Field label={isZh ? '配音音色' : 'Voice'} hint={voiceEngineHint(voice, isZh)}>
-                <VoicePicker isZh={isZh} value={voice} onChange={setVoice} accent="rose" targetLang={scriptLang} />
+                <VoicePicker isZh={isZh} value={voice} onChange={setVoice} accent="rose" targetLang={scriptLang} rate={voiceRate} />
                 <div className="flex gap-2 mt-2">
                   {RATE_OPTIONS.map((r) => (
                     <button
@@ -4212,33 +4141,8 @@ const VideoConfigModal: React.FC<{
                           </optgroup>
                         )}
                       </select>
-                      <button
-                        type="button"
-                        onClick={() => previewBgm(bgmPath)}
-                        disabled={bgmPreviewLoading}
-                        className="shrink-0 px-4 py-2 rounded-lg text-xs font-medium text-white transition-colors disabled:opacity-60 bg-rose-500 hover:bg-rose-600"
-                      >
-                        {bgmPreviewLoading ? (isZh ? '⏳ 加载中…' : '⏳') : (isZh ? '▶ 试听' : '▶ Preview')}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => openBgmFolder(bgmPath)}
-                        disabled={bgmOpening}
-                        className="shrink-0 px-3 py-2 rounded-lg text-xs font-medium transition-colors disabled:opacity-60 border border-rose-400 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10"
-                      >
-                        {bgmOpening ? (isZh ? '⏳' : '⏳') : (isZh ? '📂 文件夹' : '📂 Folder')}
-                      </button>
                     </div>
-                    {bgmPreviewUrl && (
-                      <audio controls autoPlay src={bgmPreviewUrl} onCanPlay={(e) => { const el = e.currentTarget; el.play().catch(() => setBgmPreviewErr(bgmPreviewMsg('autoplay_blocked(点播放器上的 ▶ 手动播)', isZh))); }} className="w-full h-9"
-                        onError={() => setBgmPreviewErr(bgmPreviewMsg('audio_decode_failed(格式不支持/文件坏)', isZh))} />
-                    )}
-                    {bgmPreviewErr && (<div className="text-[11px] text-red-500 break-all">{bgmPreviewErr}</div>)}
-                    {bgmIsRemote && (
-                      <div className="text-[11px] text-gray-400">
-                        {isZh ? '☁️ 云端曲目首次打开文件夹/合成时自动下载并缓存，之后复用不再下载。' : '☁️ Cloud track downloads on first open/compose, then cached.'}
-                      </div>
-                    )}
+                    <BgmPreviewBar isZh={isZh} bgmPath={bgmPath} state={bgmPreview} tone="rose" showCloudHint />
                   </div>
                 )}
 
@@ -4253,31 +4157,7 @@ const VideoConfigModal: React.FC<{
                 )}
                 {/* 上传曲目的「试听 + 打开文件夹」。 */}
                 {bgmIsUpload && (
-                  <div className="mt-2 space-y-1.5">
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => previewBgm(bgmPath)}
-                        disabled={bgmPreviewLoading}
-                        className="flex-1 px-3 py-1.5 rounded-lg text-xs font-medium text-white transition-colors disabled:opacity-60 bg-rose-500 hover:bg-rose-600"
-                      >
-                        {bgmPreviewLoading ? (isZh ? '⏳ 加载中…' : '⏳') : (isZh ? '▶ 试听' : '▶ Preview')}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => openBgmFolder(bgmPath)}
-                        disabled={bgmOpening}
-                        className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-60 border border-rose-400 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10"
-                      >
-                        {bgmOpening ? '⏳' : (isZh ? '📂 文件夹' : '📂 Folder')}
-                      </button>
-                    </div>
-                    {bgmPreviewUrl && (
-                      <audio controls autoPlay src={bgmPreviewUrl} onCanPlay={(e) => { const el = e.currentTarget; el.play().catch(() => setBgmPreviewErr(bgmPreviewMsg('autoplay_blocked(点播放器上的 ▶ 手动播)', isZh))); }} className="w-full h-9"
-                        onError={() => setBgmPreviewErr(bgmPreviewMsg('audio_decode_failed(格式不支持/文件坏)', isZh))} />
-                    )}
-                    {bgmPreviewErr && (<div className="text-[11px] text-red-500 break-all">{bgmPreviewErr}</div>)}
-                  </div>
+                  <BgmPreviewBar isZh={isZh} bgmPath={bgmPath} state={bgmPreview} tone="rose" />
                 )}
                 {bgmPath && (
                   <div className="flex gap-2 mt-2">
@@ -5088,18 +4968,9 @@ export const HotspotVideoModal: React.FC<{
   // BGM 默认选中第 1 首内置曲目(新建任务,跟在线素材/模板速生一致);编辑老任务沿用其已存值(空也保留)。
   const [bgmPath, setBgmPath] = useState<string>(isEdit ? (ei.bgmPath || '') : `${BUILTIN_BGM_PREFIX}${BUILTIN_BGM[0].id}`);
   // BGM 内嵌试听(与其它向导同款,复用 prepareBgmPreview)。
-  const [bgmPreviewUrl, setBgmPreviewUrl] = useState('');
-  const [bgmPreviewErr, setBgmPreviewErr] = useState('');
-  const [bgmPreviewLoading, setBgmPreviewLoading] = useState(false);
-  const previewBgm = async () => {
-    if (bgmPreviewLoading) return;
-    setBgmPreviewLoading(true); setBgmPreviewErr(''); setBgmPreviewUrl('');
-    const r = await resolveBgmPreview(bgmPath);
-    setBgmPreviewUrl(r.url);
-    setBgmPreviewErr(r.err ? bgmPreviewMsg(r.err, isZh) : '');
-    setBgmPreviewLoading(false);
-  };
-  useEffect(() => { setBgmPreviewUrl(''); setBgmPreviewErr(''); }, [bgmPath]);
+  // 试听 + 打开文件夹:全站统一实现,见 BgmPreviewBar.tsx(以前每个向导各写一套,
+  //   只有主向导带「文件夹」按钮,其余选了曲子没法定位文件)。
+  const bgmPreview = useBgmPreview(bgmPath, isZh);
   // 云端曲库(跟模板速生 / 在线素材同源 static.noobclaw.com/bgm/manifest.json)。
   // 没这个时 hotspot 只能选 8 首内置;拉到后追加「云端曲库」optgroup。失败静默。
   const [remoteBgm, setRemoteBgm] = useState<RemoteBgm[]>([]);
@@ -5585,7 +5456,7 @@ export const HotspotVideoModal: React.FC<{
                 </select>
               </Field>
               <Field label={isZh ? '配音音色' : 'Voice'}>
-                <VoicePicker isZh={isZh} value={voice} onChange={setVoice} accent="amber" targetLang={scriptLang} />
+                <VoicePicker isZh={isZh} value={voice} onChange={setVoice} accent="amber" targetLang={scriptLang} rate={voiceRate} />
                 <div className="flex gap-2 mt-2">
                   {RATE_OPTIONS.map((r) => (
                     <button key={r.v} type="button" onClick={() => setVoiceRate(r.v)}
@@ -5612,16 +5483,7 @@ export const HotspotVideoModal: React.FC<{
                     </optgroup>
                   )}
                 </select>
-                {bgmPath && (
-                  <div className="mt-2 space-y-1.5">
-                    <button type="button" onClick={previewBgm} disabled={bgmPreviewLoading}
-                      className="w-full px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-fuchsia-500 hover:bg-fuchsia-600 disabled:opacity-60">
-                      {bgmPreviewLoading ? '⏳' : (isZh ? '▶ 试听' : '▶ Preview')}
-                    </button>
-                    {bgmPreviewUrl && (<audio controls autoPlay src={bgmPreviewUrl} onCanPlay={(e) => { const el = e.currentTarget; el.play().catch(() => setBgmPreviewErr(bgmPreviewMsg('autoplay_blocked(点播放器上的 ▶ 手动播)', isZh))); }} className="w-full h-9" onError={() => setBgmPreviewErr(bgmPreviewMsg('audio_decode_failed(格式不支持/文件坏)', isZh))} />)}
-                    {bgmPreviewErr && (<div className="text-[11px] text-red-500 break-all">{bgmPreviewErr}</div>)}
-                  </div>
-                )}
+                <BgmPreviewBar isZh={isZh} bgmPath={bgmPath} state={bgmPreview} tone="fuchsia" showCloudHint />
               </Field>
             </>
           )}
@@ -5860,18 +5722,9 @@ export const ThreadVideoModal: React.FC<{
   const [voiceRate, setVoiceRate] = useState<number>(ei.voiceRate ?? 0);
   const [bgmPath, setBgmPath] = useState<string>(isEdit ? (ei.bgmPath || '') : `${BUILTIN_BGM_PREFIX}${BUILTIN_BGM[0].id}`);
   // BGM 内嵌试听(与其它向导同款,复用 prepareBgmPreview)。
-  const [bgmPreviewUrl, setBgmPreviewUrl] = useState('');
-  const [bgmPreviewErr, setBgmPreviewErr] = useState('');
-  const [bgmPreviewLoading, setBgmPreviewLoading] = useState(false);
-  const previewBgm = async () => {
-    if (bgmPreviewLoading) return;
-    setBgmPreviewLoading(true); setBgmPreviewErr(''); setBgmPreviewUrl('');
-    const r = await resolveBgmPreview(bgmPath);
-    setBgmPreviewUrl(r.url);
-    setBgmPreviewErr(r.err ? bgmPreviewMsg(r.err, isZh) : '');
-    setBgmPreviewLoading(false);
-  };
-  useEffect(() => { setBgmPreviewUrl(''); setBgmPreviewErr(''); }, [bgmPath]);
+  // 试听 + 打开文件夹:全站统一实现,见 BgmPreviewBar.tsx(以前每个向导各写一套,
+  //   只有主向导带「文件夹」按钮,其余选了曲子没法定位文件)。
+  const bgmPreview = useBgmPreview(bgmPath, isZh);
   const [remoteBgm, setRemoteBgm] = useState<RemoteBgm[]>([]);
   useEffect(() => {
     let alive = true;
@@ -6191,7 +6044,7 @@ export const ThreadVideoModal: React.FC<{
           {step === 3 && (
             <>
               <Field label={isZh ? '配音音色' : 'Voice'}>
-                <VoicePicker isZh={isZh} value={voice} onChange={setVoice} accent="orange" />
+                <VoicePicker isZh={isZh} value={voice} onChange={setVoice} accent="orange" rate={voiceRate} />
                 <div className="flex gap-2 mt-2">
                   {RATE_OPTIONS.map((r) => (
                     <button key={r.v} type="button" onClick={() => setVoiceRate(r.v)}
@@ -6217,16 +6070,7 @@ export const ThreadVideoModal: React.FC<{
                     </optgroup>
                   )}
                 </select>
-                {bgmPath && (
-                  <div className="mt-2 space-y-1.5">
-                    <button type="button" onClick={previewBgm} disabled={bgmPreviewLoading}
-                      className="w-full px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-orange-500 hover:bg-orange-600 disabled:opacity-60">
-                      {bgmPreviewLoading ? '⏳' : (isZh ? '▶ 试听' : '▶ Preview')}
-                    </button>
-                    {bgmPreviewUrl && (<audio controls autoPlay src={bgmPreviewUrl} onCanPlay={(e) => { const el = e.currentTarget; el.play().catch(() => setBgmPreviewErr(bgmPreviewMsg('autoplay_blocked(点播放器上的 ▶ 手动播)', isZh))); }} className="w-full h-9" onError={() => setBgmPreviewErr(bgmPreviewMsg('audio_decode_failed(格式不支持/文件坏)', isZh))} />)}
-                    {bgmPreviewErr && (<div className="text-[11px] text-red-500 break-all">{bgmPreviewErr}</div>)}
-                  </div>
-                )}
+                <BgmPreviewBar isZh={isZh} bgmPath={bgmPath} state={bgmPreview} tone="sky" showCloudHint />
               </Field>
             </>
           )}
@@ -6394,18 +6238,9 @@ export const RepostVideoModal: React.FC<{ isZh: boolean; matrixMode?: boolean; o
   const [bgmPath, setBgmPath] = useState<string>((ei as any)?.bgmPath || '');
   const [bgmVolume, setBgmVolume] = useState<number>(typeof (ei as any)?.bgmVolume === 'number' ? (ei as any).bgmVolume : 0.18);
   // BGM 内嵌试听(复用 prepareBgmPreview:sidecar 流式 URL / 开发态 data:)。
-  const [bgmPreviewUrl, setBgmPreviewUrl] = useState('');
-  const [bgmPreviewErr, setBgmPreviewErr] = useState('');
-  const [bgmPreviewLoading, setBgmPreviewLoading] = useState(false);
-  const previewBgm = async () => {
-    if (bgmPreviewLoading) return;
-    setBgmPreviewLoading(true); setBgmPreviewErr(''); setBgmPreviewUrl('');
-    const r = await resolveBgmPreview(bgmPath);
-    setBgmPreviewUrl(r.url);
-    setBgmPreviewErr(r.err ? bgmPreviewMsg(r.err, isZh) : '');
-    setBgmPreviewLoading(false);
-  };
-  useEffect(() => { setBgmPreviewUrl(''); setBgmPreviewErr(''); }, [bgmPath]);
+  // 试听 + 打开文件夹:全站统一实现,见 BgmPreviewBar.tsx(以前每个向导各写一套,
+  //   只有主向导带「文件夹」按钮,其余选了曲子没法定位文件)。
+  const bgmPreview = useBgmPreview(bgmPath, isZh);
   const [subtitleFontSize, setSubtitleFontSize] = useState<number>(typeof (ei as any)?.subtitleFontSize === 'number' ? (ei as any).subtitleFontSize : 20);
   const pickTargetLang = (code: string) => {
     setTargetLang(code);
@@ -6639,16 +6474,7 @@ export const RepostVideoModal: React.FC<{ isZh: boolean; matrixMode?: boolean; o
                   <option value="">{isZh ? '无背景音乐' : 'None'}</option>
                   {BUILTIN_BGM.map((b) => (<option key={b.id} value={`${BUILTIN_BGM_PREFIX}${b.id}`}>🎵 {isZh ? b.zh : b.en}</option>))}
                 </select>
-                {bgmPath && (
-                  <div className="mt-2 space-y-1.5">
-                    <button type="button" onClick={previewBgm} disabled={bgmPreviewLoading}
-                      className="w-full px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-sky-500 hover:bg-sky-600 disabled:opacity-60">
-                      {bgmPreviewLoading ? '⏳' : (isZh ? '▶ 试听' : '▶ Preview')}
-                    </button>
-                    {bgmPreviewUrl && (<audio controls autoPlay src={bgmPreviewUrl} onCanPlay={(e) => { const el = e.currentTarget; el.play().catch(() => setBgmPreviewErr(bgmPreviewMsg('autoplay_blocked(点播放器上的 ▶ 手动播)', isZh))); }} className="w-full h-9" onError={() => setBgmPreviewErr(bgmPreviewMsg('audio_decode_failed(格式不支持/文件坏)', isZh))} />)}
-                    {bgmPreviewErr && (<div className="text-[11px] text-red-500 break-all">{bgmPreviewErr}</div>)}
-                  </div>
-                )}
+                <BgmPreviewBar isZh={isZh} bgmPath={bgmPath} state={bgmPreview} tone="sky" showCloudHint />
                 {bgmPath && (
                   <div className="flex gap-2 mt-2">
                     {BGM_VOLUME_OPTIONS.map((b) => (
@@ -6814,18 +6640,9 @@ export const LocalMixVideoModal: React.FC<{ isZh: boolean; matrixMode?: boolean;
   const [subtitleEnabled, setSubtitleEnabled] = useState<boolean>(isEdit ? (ei as any)?.subtitleEnabled !== false : true);
   const [bgmPath, setBgmPath] = useState<string>(isEdit ? (ei?.bgmPath || '') : `${BUILTIN_BGM_PREFIX}${BUILTIN_BGM[0].id}`);
   // BGM 内嵌试听(与其它向导同款,复用 prepareBgmPreview)。
-  const [bgmPreviewUrl, setBgmPreviewUrl] = useState('');
-  const [bgmPreviewErr, setBgmPreviewErr] = useState('');
-  const [bgmPreviewLoading, setBgmPreviewLoading] = useState(false);
-  const previewBgm = async () => {
-    if (bgmPreviewLoading) return;
-    setBgmPreviewLoading(true); setBgmPreviewErr(''); setBgmPreviewUrl('');
-    const r = await resolveBgmPreview(bgmPath);
-    setBgmPreviewUrl(r.url);
-    setBgmPreviewErr(r.err ? bgmPreviewMsg(r.err, isZh) : '');
-    setBgmPreviewLoading(false);
-  };
-  useEffect(() => { setBgmPreviewUrl(''); setBgmPreviewErr(''); }, [bgmPath]);
+  // 试听 + 打开文件夹:全站统一实现,见 BgmPreviewBar.tsx(以前每个向导各写一套,
+  //   只有主向导带「文件夹」按钮,其余选了曲子没法定位文件)。
+  const bgmPreview = useBgmPreview(bgmPath, isZh);
   const [bgmVolume, setBgmVolume] = useState<number>(typeof ei?.bgmVolume === 'number' ? ei.bgmVolume : 0.18);
   const pickBgmFile = async () => { const p = await videoCreationService.pickBgm(); if (p) setBgmPath(p); };
   // ── 对齐在线素材的画面/音频/字幕控件(本地混剪 pipeline 已消费这些字段,原来向导没暴露) ──
@@ -7144,7 +6961,7 @@ export const LocalMixVideoModal: React.FC<{ isZh: boolean; matrixMode?: boolean;
                     </select>
                   </Field>
                   <Field label={isZh ? '配音音色' : 'Voice'} hint={voiceEngineHint(voice, isZh)}>
-                    <VoicePicker isZh={isZh} value={voice} onChange={setVoice} accent="emerald" targetLang={scriptLang} />
+                    <VoicePicker isZh={isZh} value={voice} onChange={setVoice} accent="emerald" targetLang={scriptLang} rate={voiceRate} />
                     <div className="flex gap-2 mt-2">
                       {RATE_OPTIONS.map((r) => (
                         <button key={r.v} type="button" onClick={() => setVoiceRate(r.v)}
@@ -7161,8 +6978,9 @@ export const LocalMixVideoModal: React.FC<{ isZh: boolean; matrixMode?: boolean;
                   <button type="button" onClick={() => setBgmPath('')} className={`px-2 py-1.5 rounded-lg text-xs border ${!bgmPath ? 'border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium' : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-emerald-400'}`}>{isZh ? '无' : 'None'}</button>
                   <button type="button" onClick={() => { if (!bgmIsLibrary) setBgmPath(BUILTIN_BGM_PREFIX + BUILTIN_BGM[0].id); }} className={`px-2 py-1.5 rounded-lg text-xs border ${bgmIsLibrary ? 'border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium' : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-emerald-400'}`}>{isZh ? '曲库' : 'Library'}</button>
                   <button type="button" onClick={pickBgmFile} className={`px-2 py-1.5 rounded-lg text-xs border ${bgmIsUpload ? 'border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium' : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-emerald-400'}`}>{isZh ? '上传' : 'Upload'}</button>
-                  <button type="button" onClick={previewBgm} disabled={bgmPreviewLoading} className="px-2 py-1.5 rounded-lg text-xs font-medium text-white bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40">{bgmPreviewLoading ? '⏳' : (isZh ? '▶ 试听' : '▶ Play')}</button>
                 </div>
+                {/* 试听 + 文件夹:与其它向导同款(BgmPreviewBar)。原来这里只有一个「试听」小按钮挤在四宫格里。 */}
+                <BgmPreviewBar isZh={isZh} bgmPath={bgmPath} state={bgmPreview} tone="emerald" showCloudHint />
                 {bgmIsLibrary && (
                   <select value={bgmPath} onChange={(e) => { if (e.target.value) setBgmPath(e.target.value); }}
                     className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm dark:text-white">
@@ -7192,9 +7010,6 @@ export const LocalMixVideoModal: React.FC<{ isZh: boolean; matrixMode?: boolean;
                     ))}
                   </div>
                 )}
-
-                {bgmPreviewUrl && (<audio controls autoPlay src={bgmPreviewUrl} onCanPlay={(e) => { const el = e.currentTarget; el.play().catch(() => setBgmPreviewErr(bgmPreviewMsg('autoplay_blocked(点播放器上的 ▶ 手动播)', isZh))); }} className="mt-2 w-full h-9" onError={() => setBgmPreviewErr(bgmPreviewMsg('audio_decode_failed(格式不支持/文件坏)', isZh))} />)}
-                {bgmPreviewErr && (<div className="mt-1 text-[11px] text-red-500 break-all">{bgmPreviewErr}</div>)}
               </Field>
             </>
           )}
@@ -7461,28 +7276,8 @@ export const TemplateSpeedModal: React.FC<{ isZh: boolean; matrixMode?: boolean;
     const p = await videoCreationService.pickBgm();
     if (p) setBgmPath(p);
   };
-  const [bgmOpening, setBgmOpening] = useState(false);
-  const openBgmFolder = async (token: string) => {
-    if (!token || bgmOpening) return;
-    setBgmOpening(true);
-    try {
-      const dir = await videoCreationService.resolveBgmPath(token);
-      if (dir) { try { (window as any).electron?.shell?.openPath?.(dir); } catch { /* ignore */ } }
-    } finally { setBgmOpening(false); }
-  };
-  // BGM 内嵌试听:解析成可播 URL(云端按需下载),<audio autoPlay> 直接播。
-  const [bgmPreviewUrl, setBgmPreviewUrl] = useState('');
-  const [bgmPreviewErr, setBgmPreviewErr] = useState('');
-  const [bgmPreviewLoading, setBgmPreviewLoading] = useState(false);
-  const previewBgm = async (token: string) => {
-    if (bgmPreviewLoading) return;
-    setBgmPreviewLoading(true); setBgmPreviewErr(''); setBgmPreviewUrl('');
-    const r = await resolveBgmPreview(token);
-    setBgmPreviewUrl(r.url);
-    setBgmPreviewErr(r.err ? bgmPreviewMsg(r.err, isZh) : '');
-    setBgmPreviewLoading(false);
-  };
-  useEffect(() => { setBgmPreviewUrl(''); }, [bgmPath]);
+  // 试听 + 打开文件夹:全站统一实现,见 BgmPreviewBar.tsx。
+  const bgmPreview = useBgmPreview(bgmPath, isZh);
   const bgmIsBuiltin = bgmPath.startsWith(BUILTIN_BGM_PREFIX);
   const bgmIsRemote = bgmPath.startsWith(REMOTE_BGM_PREFIX);
   const bgmIsLibrary = bgmIsBuiltin || bgmIsRemote;
@@ -7805,7 +7600,7 @@ export const TemplateSpeedModal: React.FC<{ isZh: boolean; matrixMode?: boolean;
               {narration && (
                 <>
                   <Field label={isZh ? '配音音色' : 'Voice'}>
-                    <VoicePicker isZh={isZh} value={voice} onChange={setVoice} accent="fuchsia" targetLang={tplLang} />
+                    <VoicePicker isZh={isZh} value={voice} onChange={setVoice} accent="fuchsia" targetLang={tplLang} rate={voiceRate} />
                   </Field>
                   <Field label={isZh ? '语速' : 'Rate'}>
                     <div className="flex gap-2">
@@ -7870,17 +7665,8 @@ export const TemplateSpeedModal: React.FC<{ isZh: boolean; matrixMode?: boolean;
                           </optgroup>
                         )}
                       </select>
-                      <button type="button" onClick={() => previewBgm(bgmPath)} disabled={bgmPreviewLoading}
-                        className="shrink-0 px-3 py-2 rounded-lg text-xs font-medium text-white bg-fuchsia-500 hover:bg-fuchsia-600 disabled:opacity-60">
-                        {bgmPreviewLoading ? '⏳' : (isZh ? '▶ 试听' : '▶ Preview')}
-                      </button>
-                      <button type="button" onClick={() => openBgmFolder(bgmPath)} disabled={bgmOpening}
-                        className="shrink-0 px-2.5 py-2 rounded-lg text-xs font-medium border border-fuchsia-400 text-fuchsia-500 hover:bg-fuchsia-50 dark:hover:bg-fuchsia-500/10 disabled:opacity-60">
-                        {bgmOpening ? '⏳' : '📂'}
-                      </button>
                     </div>
-                    {bgmPreviewUrl && (<audio controls autoPlay src={bgmPreviewUrl} onCanPlay={(e) => { const el = e.currentTarget; el.play().catch(() => setBgmPreviewErr(bgmPreviewMsg('autoplay_blocked(点播放器上的 ▶ 手动播)', isZh))); }} className="w-full h-9" onError={() => setBgmPreviewErr(bgmPreviewMsg('audio_decode_failed(格式不支持/文件坏)', isZh))} />)}
-                    {bgmPreviewErr && (<div className="text-[11px] text-red-500 break-all">{bgmPreviewErr}</div>)}
+                    <BgmPreviewBar isZh={isZh} bgmPath={bgmPath} state={bgmPreview} tone="fuchsia" showCloudHint />
                   </div>
                 )}
                 {bgmIsUpload && (
@@ -7888,12 +7674,10 @@ export const TemplateSpeedModal: React.FC<{ isZh: boolean; matrixMode?: boolean;
                     <div className="flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 px-2.5 py-2">
                       <span className="text-sm">🎵</span>
                       <span className="flex-1 text-xs text-gray-600 dark:text-gray-300 truncate">{bgmPath.split(/[\\/]/).pop()}</span>
-                      <button type="button" onClick={() => previewBgm(bgmPath)} disabled={bgmPreviewLoading} className="text-xs text-fuchsia-500 hover:underline shrink-0">{bgmPreviewLoading ? '⏳' : (isZh ? '▶ 试听' : '▶ Preview')}</button>
                       <button type="button" onClick={pickBgm} className="text-xs text-fuchsia-500 hover:underline shrink-0">{isZh ? '更换' : 'Change'}</button>
                       <button type="button" onClick={() => setBgmPath('')} className="text-xs text-gray-400 hover:text-red-500 shrink-0">{isZh ? '移除' : 'Remove'}</button>
                     </div>
-                    {bgmPreviewUrl && (<audio controls autoPlay src={bgmPreviewUrl} onCanPlay={(e) => { const el = e.currentTarget; el.play().catch(() => setBgmPreviewErr(bgmPreviewMsg('autoplay_blocked(点播放器上的 ▶ 手动播)', isZh))); }} className="w-full h-9" onError={() => setBgmPreviewErr(bgmPreviewMsg('audio_decode_failed(格式不支持/文件坏)', isZh))} />)}
-                    {bgmPreviewErr && (<div className="text-[11px] text-red-500 break-all">{bgmPreviewErr}</div>)}
+                    <BgmPreviewBar isZh={isZh} bgmPath={bgmPath} state={bgmPreview} tone="fuchsia" />
                   </div>
                 )}
                 {bgmPath && (
