@@ -968,8 +968,7 @@ function templateBgmSummary(input: VideoCreationInput, isZh: boolean): string {
 function templateNarrationSummary(input: VideoCreationInput, isZh: boolean): string {
   const t = input.template;
   if (!t?.narration) return isZh ? '关(纯视觉)' : 'Off (silent)';
-  const voice = VOICE_GROUPS.flatMap((g) => g.voices).find((v) => v.id === (t.voice || input.voice));
-  const voiceName = voice ? (isZh ? voice.zh : voice.en) : (t.voice || input.voice || (isZh ? '默认音色' : 'Default'));
+  const voiceName = voiceDisplayLabel(t.voice || input.voice, isZh);
   const rate = RATE_OPTIONS.find((r) => r.v === (t.voiceRate ?? input.voiceRate ?? 0));
   const rateName = rate ? (isZh ? rate.zh : rate.en) : (isZh ? '正常' : 'Normal');
   const subPart = t.subtitleEnabled !== false ? (isZh ? ' · 烧字幕' : ' · subs') : (isZh ? ' · 不烧字幕' : ' · no subs');
@@ -1049,10 +1048,7 @@ const ConfigCard: React.FC<{ isZh: boolean; input: VideoCreationInput }> = ({ is
   if (input.engine === 'hotspot') {
     const srcMap: Record<string, string> = { weibo: isZh ? '微博热搜' : 'Weibo', douyin: isZh ? '抖音热搜' : 'Douyin', zhihu: isZh ? '知乎热榜' : 'Zhihu', baidu: isZh ? '百度热搜' : 'Baidu', bilibili: 'B站热搜', xueqiu: isZh ? '雪球热门股' : 'Xueqiu', hackernews: 'Hacker News', reddit: 'Reddit', googletrends: isZh ? 'Google 趋势' : 'Google Trends', youtube: isZh ? 'YouTube 热门' : 'YouTube', web3: 'Web3 资讯', tech: isZh ? '科技/AI' : 'Tech/AI' };
     const srcs = (((input as any).hotspotSources as string[]) || []).map((s) => srcMap[s] || s).join('、') || '-';
-    const voiceLabel = (() => {
-      const v = VOICE_GROUPS.flatMap((g) => g.voices).find((x) => x.id === input.voice);
-      return v ? (isZh ? v.zh : v.en) : (input.voice || (isZh ? '默认音色' : 'Default'));
-    })();
+    const voiceLabel = voiceDisplayLabel(input.voice, isZh);
     return (
       <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-3 space-y-2 text-xs">
         <Row label={`🔥 ${isZh ? '热点源' : 'Sources'}`}>{srcs}</Row>
@@ -1202,8 +1198,8 @@ function publishSummary(input: VideoCreationInput, isZh: boolean): string {
 
 /** 把配音音色 id 映射成可读名(查不到就回退原 id / 默认)。详情/记录共用。 */
 function voiceDisplayLabel(voiceId: string | undefined, isZh: boolean): string {
-  const v = VOICE_GROUPS.flatMap((g) => g.voices).find((x) => x.id === voiceId);
-  return v ? (isZh ? v.zh : v.en) : (voiceId || (isZh ? '默认音色' : 'Default'));
+  if (!voiceId) return isZh ? '默认音色' : 'Default';
+  return voiceDisplayName(voiceId, isZh);
 }
 
 /** 爆帖成片:创作语言标签。 */
@@ -1716,6 +1712,8 @@ const VideoTaskDetail: React.FC<{
   onOpenRecord: (id: string) => void;
   onEdit: () => void;
 }> = ({ isZh, task, latestRun, onBack, onOpenRecord, onEdit }) => {
+  // 豆包音色目录:详情页要用它把音色 id 显示成人话(否则印出 zh_female_xxx_bigtts)。
+  useDoubaoVoicesReady();
   const status = statusOf(task);
   const isRunning = status === 'running';
   const [actionError, setActionError] = useState<string | null>(null);
@@ -2450,6 +2448,51 @@ function voiceEngineHint(voice: string, isZh: boolean): string {
 }
 
 let _doubaoCache: { enabled: boolean; voices: Array<{ id: string; zh?: string; en?: string; lang?: string; scene?: string }> } | null = null;
+
+/**
+ * 音色 id → 人话名字。
+ *
+ * ⚠️ 必须同时查【豆包缓存】和【Edge 静态表】:豆包音色是服务端 tts_volc_voices 下发的,
+ *   不在 VOICE_GROUPS 里,只查静态表就会在任务详情页把 zh_female_sophie_uranus_bigtts
+ *   这种原始 id 直接印给用户看。
+ *   缓存还没拉到时(冷启动首屏)退回 id —— 拉到后组件重渲染就正常了。
+ */
+/** 拉一次豆包音色目录并填进模块级缓存。重复调用只发一次请求。 */
+let _doubaoLoading: Promise<void> | null = null;
+function ensureDoubaoVoices(): Promise<void> {
+  if (_doubaoCache) return Promise.resolve();
+  if (_doubaoLoading) return _doubaoLoading;
+  _doubaoLoading = videoCreationService.fetchDoubaoVoices()
+    .then((r) => { _doubaoCache = { enabled: r.enabled, voices: r.voices }; })
+    .catch(() => { _doubaoCache = { enabled: false, voices: [] }; })
+    .finally(() => { _doubaoLoading = null; });
+  return _doubaoLoading;
+}
+
+/**
+ * 详情/记录页用:确保豆包音色目录已加载,加载完触发一次重渲染。
+ * ⚠️ 缓存原来只在向导(useVoiceGroups)挂载时才填 —— 用户直接进任务详情页时缓存是空的,
+ *    voiceDisplayName 查不到就把 zh_female_sophie_uranus_bigtts 这种原始 id 印给用户看。
+ */
+function useDoubaoVoicesReady(): void {
+  const [, force] = React.useState(0);
+  React.useEffect(() => {
+    if (_doubaoCache) return;
+    let alive = true;
+    void ensureDoubaoVoices().then(() => { if (alive) force((n) => n + 1); });
+    return () => { alive = false; };
+  }, []);
+}
+
+function voiceDisplayName(voiceId: string, isZh: boolean): string {
+  const id = (voiceId || '').trim();
+  if (!id) return '';
+  const db = _doubaoCache?.voices?.find((v) => v.id === id);
+  if (db) return (isZh ? (db.zh || db.en) : (db.en || db.zh)) || id;
+  const edge = VOICE_GROUPS.flatMap((g) => g.voices).find((v) => v.id === id);
+  if (edge) return isZh ? edge.zh : edge.en;
+  return id;
+}
 /**
  * VoicePicker — 配音音色选择器:两级 tab + 列表,替代 158 项平铺的 <select>。
  *   第 1 级:引擎(🔥 豆包真人 / Edge 免费)—— 用户拍板的顶级维度。
@@ -2683,12 +2726,9 @@ const VoicePicker: React.FC<{
 function useVoiceGroups(): { groups: typeof VOICE_GROUPS; doubaoEnabled: boolean; defaultVoice: string; doubaoVoices: Array<{ id: string; zh?: string; en?: string; lang?: string; scene?: string }> } {
   const [db, setDb] = React.useState(_doubaoCache);
   React.useEffect(() => {
-    if (_doubaoCache) return;
+    if (_doubaoCache) { setDb(_doubaoCache); return; }
     let alive = true;
-    videoCreationService.fetchDoubaoVoices().then((r) => {
-      _doubaoCache = { enabled: r.enabled, voices: r.voices };
-      if (alive) setDb(_doubaoCache);
-    }).catch(() => { _doubaoCache = { enabled: false, voices: [] }; });
+    void ensureDoubaoVoices().then(() => { if (alive) setDb(_doubaoCache); });
     return () => { alive = false; };
   }, []);
   if (!db?.enabled || db.voices.length === 0) return { groups: VOICE_GROUPS, doubaoEnabled: false, defaultVoice: '', doubaoVoices: [] };
