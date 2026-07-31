@@ -1252,13 +1252,15 @@ async function runVideoPipeline(
       //    而逐句那条本来就认豆包。而且整段路径靠 edge 的词边界 cue 切句,
       //    豆包接口不返回 cue,就算合成成功也对不齐,这条路对豆包根本不通。
       let wholeDone = false;
-      // 守卫已下沉到 synthesizeWhole 内部(它对豆包音色直接返回失败),这里只负责说人话。
+      // 豆包不走整段路径(守卫也下沉到了 synthesizeWhole 内部)。
+      // ⚠️ 这里【不能用 throw 来跳过】—— 之前那么写,跳过会被下面的通用 catch 抓住,
+      //    在日志里报成「整段配音异常,回退逐句合成」,看着像出了故障,其实是我们主动跳的。
       const skipWhole = isDoubaoVoice(primary);
       if (skipWhole) {
-        tracker.progress('🎙️ 豆包真人音色:逐句合成(整段合成仅 Edge 音色支持)。按字数计费,失败自动退');
+        tracker.progress('🎙️ 豆包真人音色:逐句合成(整段合成仅 Edge 音色支持,豆包接口不返回词边界)');
       }
       try {
-        if (skipWhole) throw new Error('SKIP_WHOLE_FOR_DOUBAO');
+        if (!skipWhole) {
         const masterMp3 = path.join(assetDir, 'narr_master.mp3');
         let whole: Awaited<ReturnType<typeof synthesizeWhole>> | null = null;
         let usedWholeVoice = voiceChain[0];
@@ -1304,6 +1306,7 @@ async function runVideoPipeline(
           }
         }
         if (!wholeDone) tracker.progress('整段配音不可用(合成失败/切句对不齐),回退逐句合成…');
+        }
       } catch (e) {
         if (signal?.aborted) throw e;
         tracker.progress('整段配音异常,回退逐句合成…');
