@@ -92,19 +92,33 @@ async function pollTtsJob(jobId: string, token: string, signal?: AbortSignal): P
   return null;
 }
 
-async function synthDoubao(text: string, outPath: string, voice: string, rate?: number, signal?: AbortSignal): Promise<{ ok: boolean; tokens: number; costUsd: number; sentences?: TtsCue[] } | null> {
+async function synthDoubao(
+  text: string, outPath: string, voice: string, rate?: number, signal?: AbortSignal,
+  opts?: { needTimestamps?: boolean },
+): Promise<{ ok: boolean; tokens: number; costUsd: number; sentences?: TtsCue[] } | null> {
   const token = getNoobClawAuthToken();
   if (!token) return null;
   // edge 的 rate 是百分比偏移(-50..50),豆包是倍率(0.1..2.0)。
   const speedRatio = Math.max(0.5, Math.min(2, 1 + (Number(rate) || 0) / 100));
   const clean = (text || '').trim();
   if (!clean) return null;
+  // ⚠️【整段合成为什么一直失败】火山有两个合成接口:
+  //    · 在线同步 HTTP —— 快(几秒),但**不支持 enable_timestamp**,不回 sentences/words
+  //    · 异步长文本   —— 慢(提交+轮询),但支持时间戳,且没有长度下限
+  //    旧逻辑只按「>1024 字节」分流,而 45 秒视频的口播才 200 来字 ≈ 600 字节 → 永远走同步 →
+  //    永远拿不到时间戳 → synthesizeWhole 永远 fail → 每次都回退逐句。在线素材/热搜/模板
+  //    的整段合成因此**从来没成功过**。所以:【要时间戳就强制走异步,不看长度】。
+  //    计费不变(都按字符实扣),只是多等一会儿。
   const isLong = Buffer.byteLength(clean, 'utf8') > LONG_TEXT_BYTES;
+  const useAsync = isLong || !!opts?.needTimestamps;
   try {
     const resp = await fetch(`${apiBase()}/api/tts/synthesize`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ text: clean, voice, speedRatio, encoding: 'mp3', ...(isLong ? { async: true } : {}) }),
+      body: JSON.stringify({
+        text: clean, voice, speedRatio, encoding: 'mp3',
+        ...(useAsync ? { async: true, wantTimestamps: true } : {}),
+      }),
       // 短文本在线合成:120s 足够。长文本这一发只是「提交」,后端立刻回 202。
       // ⚠️ 必须 any([signal, timeout]):旧代码是 `signal || timeout`,一旦上层传了 signal
       //    这个 fetch 就【彻底没有超时】—— 上游挂住时整条任务无限期卡在这里。
@@ -552,16 +566,18 @@ export async function synthesizeWhole(text: string, outPath: string, voice: stri
   if (!clean) return fail();
   // ── 豆包:走长文本接口整段合成,用它返回的时间戳当 cue ──────────────────────
   //  以前这里直接拒绝豆包,因为整段路径是纯 edge 实现、且豆包不给词边界。
-  //  现在后端对超 1024 字节的文本自动走火山【异步长文本】接口并开了 enable_timestamp,
-  //  回的是逐字时间戳 —— 精度不输 edge 的词边界。于是豆包也能整段:
+  //  现在走火山【异步长文本】接口(开 enable_timestamp),回的是逐字时间戳 ——
+  //  精度不输 edge 的词边界。于是豆包也能整段:
   //    · 一次合成,韵律比逐句拼接自然(句与句之间没有接缝)
   //    · 切句和字幕都用真实时间戳,不再按字数估
+  //  ⚠️ needTimestamps 必须传:在线同步接口不支持时间戳,而 45 秒视频的口播 200 来字
+  //     根本到不了 1024 字节的分流线 —— 不强制走异步,整段合成对短口播永远失败。
   if (isDoubaoVoice(voice)) {
-    const d = await synthDoubao(clean, outPath, voice, rate, opts?.signal);
+    const d = await synthDoubao(clean, outPath, voice, rate, opts?.signal, { needTimestamps: true });
     if (!d?.ok) return fail();
     if (!d.sentences || d.sentences.length === 0) {
-      // 没拿到时间戳(短文走了在线接口 / 上游没回)→ 整段切不回每句,让调用方退回逐句。
-      _lastTtsError = '豆包整段合成未返回时间戳(短文本走在线接口),改用逐句合成';
+      // 强制走了异步接口还没回时间戳 = 上游没给,只能退回逐句(不是长度问题了)。
+      _lastTtsError = '豆包整段合成未返回时间戳(上游未回),改用逐句合成';
       return fail();
     }
     const dur = await probeDuration(outPath);
