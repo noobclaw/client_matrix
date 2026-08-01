@@ -111,6 +111,113 @@ interface Seg {
 const SENTENCE_PAUSE_SEC = 0.6;
 
 /**
+ * ── 切句(移植自 KrillinAI `pkg/util/subtitle.go` 的 protectSpecialNumbers +
+ *    splitByCompleteSentences)────────────────────────────────────────────────
+ *
+ * ⚠️【真机 bug 的根因,别再退回去】我们原来的句末判据是 `/[。！？!?…]$/` —— **没有半角
+ *   句号 `.`**。英文句子就是以 `.` 收尾,于是对英文源片整个切句层等于不工作,只能靠
+ *   「词间静音 ≥0.6s」兜底;语速快的口播句间没有 0.6s 停顿 → 三四句并成一个翻译单元 →
+ *   一条字幕塞三句中文同屏(真机:原片一句 "The water is overflowing",我们出
+ *   「水溢出来了。我的衣柜满出来了。行李箱满出来了。」)。
+ *
+ * KrillinAI 的做法是对的:句末标点表第一个就是 `"."`,再用一组「保护模式」先把不是句号
+ *   的点(小数、版本号、时间、域名、Mr./a.m.、列表编号)挡掉。下面按同一套模式移植。
+ */
+const PROTECT_PATTERNS: RegExp[] = [
+  /\d+\.[A-Za-z]/,                                   // 列表编号 "1.value"
+  /^[A-Za-z0-9-]+\.(?:com|org|net|edu|gov|io|ai|co|me|tv|app|dev|cn|jp|kr|uk|de|fr|es|it|ru|in|au|ca|br)$/i, // 域名
+  /^[ap]\.m\.$/i,                                    // a.m. / p.m.
+  /^\d{1,2}[:.]\d{2}\s*(?:[ap]\.?m\.?)?$/i,          // 时间 3.30 / 3:30pm
+  /^\d+\.\d+$/,                                      // 小数 1.3
+  /^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/,                  // 千位分隔 1,234.5
+  /^\d+(?:\.\d+)+$/,                                 // 版本号 2.5.1
+  /^(?:[A-Z][a-z]*\.){2,}$/,                         // U.S.A. 型缩写
+  /^(?:[A-Z]\.){2,}[A-Z]?$/,                         // U.S. 型缩写
+  /^(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|vs|etc|Inc|Ltd|Co|No|Fig|Approx)\.$/i, // 称谓/常用缩写
+  /^\d+\.$/,                                         // 列表编号 "1."
+  /^[A-Za-z]\.$/,                                    // 字母编号 "a."
+];
+
+/** 这个 token 里的点是「不该断句的点」吗(小数/缩写/域名/时间/编号)。 */
+function isProtectedToken(token: string): boolean {
+  const t = token.trim().replace(/^[("'「『【[]+/, ''); // 去掉前引号再判,别让 ("1.3" 漏网
+  return PROTECT_PATTERNS.some((re) => re.test(t));
+}
+
+/**
+ * 一个 token 是不是句子结尾。全角标点直接算;半角 `.` 先过保护模式。
+ * 宁可多切不可少切 —— 多切只是字幕短一点,少切就是三句挤一屏。
+ */
+function isSentenceEndToken(token: string): boolean {
+  const t = token.trim().replace(/["'」』』)\]]+$/, ''); // 尾引号/括号不影响判断
+  if (!t) return false;
+  if (/[。！？!?…；;]$/.test(t)) return true;
+  if (!/\.$/.test(t)) return false;
+  return !isProtectedToken(t);
+}
+
+/**
+ * 文本级保护模式(同上表,但不锚定、带 g,用于整段替换)。中文没有空格,不能按空白
+ * token 判句末 —— 必须走 Krillin 那套「保护 → 按标点插分隔符 → 还原」。
+ */
+const PROTECT_GLOBAL: RegExp[] = [
+  /\b\d+\.[A-Za-z]/g,
+  /\b[A-Za-z0-9-]+\.(?:com|org|net|edu|gov|io|ai|co|me|tv|app|dev|cn|jp|kr|uk|de|fr|es|it|ru|in|au|ca|br)\b/gi,
+  /\b[ap]\.m\./gi,
+  /\b\d{1,2}[:.]\d{2}\s*(?:[ap]\.?m\.?)?\b/gi,
+  // ⚠️ 版本号必须排在小数【前面】。`\b\d+\.\d+\b` 会先把 "2.5.1" 里的 "2.5" 吃掉,
+  //    剩一个孤零零的 ".1",于是 "Version 2.5.1" 被切成 "Version 2.5." + "1"。
+  //    (KrillinAI 原版就是小数在前,这个坑它也有。)
+  /\b\d+(?:\.\d+)+\b/g,
+  /\b\d{1,3}(?:,\d{3})+(?:\.\d+)?\b/g,
+  /\b\d+\.\d+\b/g,
+  /(?:[A-Z][a-z]*\.){2,}|(?:[A-Z]\.){2,}[A-Z]?/g,
+  /\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|vs|etc|Inc|Ltd|Co|No|Fig|Approx)\./gi,
+  /\b\d+\.\s/g,
+  /\b[A-Za-z]\.\s/g,
+];
+
+// 占位符/分隔符用 Unicode 私用区(正文绝不会出现)。⚠️ 用 fromCharCode 显式构造,别在源码里写
+// 字面量 —— 私用区字符在编码转换/复制粘贴里会被静默吃掉,那时保护就完全失效了。
+const PH_OPEN = String.fromCharCode(0xE000);
+const SPLIT_MARK = String.fromCharCode(0xE001);
+
+/**
+ * 把一段文本按句末标点拆成句子。用于**没有词级时间戳**的来源(SRT 字幕 / YouTube CC /
+ * 非火山 ASR / 后端没部署)—— 这些走不到 resplitByWords,以前整段只能当一句。
+ *
+ * 三步(移植 KrillinAI):① 把小数/版本号/域名/缩写/编号里的点换成占位符;
+ * ② 在 `.!?;。！？；` 连续标点后插分隔符再 split;③ 还原占位符。
+ * 拆不出多句时返回 [原文]。
+ */
+function splitTextSentences(text: string): string[] {
+  const raw = String(text || '').trim();
+  if (!raw) return [];
+
+  const kept: string[] = [];
+  let t = raw;
+  for (const re of PROTECT_GLOBAL) {
+    t = t.replace(re, (m) => {
+      kept.push(m);
+      return `${PH_OPEN}${kept.length - 1}${PH_OPEN}`;
+    });
+  }
+
+  const restore = (s: string) => s.replace(
+    new RegExp(`${PH_OPEN}(\\d+)${PH_OPEN}`, 'g'),
+    (_m, i) => kept[Number(i)] ?? '',
+  );
+
+  const parts = t
+    .replace(/([.!?;。！？；]+)/g, `$1${SPLIT_MARK}`)
+    .split(SPLIT_MARK)
+    .map((p) => restore(p).trim())
+    .filter(Boolean);
+
+  return parts.length > 0 ? parts : [raw];
+}
+
+/**
  * 把 ASR 的粗 utterance 按【词级时间戳】切成【句】。
  *
  * ⚠️ 只切句,不按字数切。配音的落位单位就是句:整句翻译、整句放回原位置。
@@ -120,8 +227,8 @@ const SENTENCE_PAUSE_SEC = 0.6;
  * 为什么还要切:火山返回的 utterance 可能是整段(实测 16 秒只回 2 条)。一条里含
  *   好几句时,译文音频会被灌进整段的时间窗,画面早换了配音还在读上一句。
  *
- * 句界判据:① 句末标点 ② 词间静音 ≥SENTENCE_PAUSE_SEC。
- * 没有 words 的段(老后端 / 非火山 ASR)原样保留。
+ * 句界判据:① 句末标点(含半角 `.`,见 isSentenceEndToken)② 词间静音 ≥SENTENCE_PAUSE_SEC。
+ * 没有 words 的段(老后端 / 非火山 ASR / SRT 来源)由 regroupSegments 按文本再拆一次。
  */
 function resplitByWords(segs: Seg[]): Seg[] {
   const out: Seg[] = [];
@@ -145,7 +252,7 @@ function resplitByWords(segs: Seg[]): Seg[] {
     for (let i = 0; i < ws.length; i++) {
       const w = ws[i];
       buf.push(w);
-      const endsSentence = /[。！？!?…]$/.test(w.text.trim());
+      const endsSentence = isSentenceEndToken(w.text);
       const nextGap = i + 1 < ws.length ? ws[i + 1].start - w.end : 0;
       if (endsSentence || nextGap >= SENTENCE_PAUSE_SEC) flush();
     }
@@ -367,7 +474,8 @@ async function transcribeAudio(
 
 // ── 句子重组:gap≤1s 合并 → 句末标点重切 → 时间按字符比例回摊 ──
 // (借鉴 Voice-Pro 的"先合完整句再翻/配音"思路,自研实现。翻译质量与配音韵律都更好。)
-const SENT_END = /[。！？.!?…]/;
+// ⚠️ 旧的 SENT_END = /[。！？.!?…]/ 已删除。它是「字符集包含」判定,对 "1.3"、"Dr."、
+//    "example.com" 全都会误判成句末;句末判定统一走 isSentenceEndToken(带保护模式)。
 function regroupSegments(segs: Seg[]): Seg[] {
   if (segs.length === 0) return [];
   // v2(真机 bug):抖音/TikTok 的自动字幕【没有标点】——老逻辑先并组再按句末标点切,
@@ -375,6 +483,30 @@ function regroupSegments(segs: Seg[]): Seg[] {
   // 现在沿【原始字幕条】滚动累积,三个断句条件任一命中即收句(时间轴用真实条边界,不再按字符比例摊):
   //   ① 本条以句末标点收尾;② 与下一条停顿 >1s;③ 累积口播量到上限(≈8s,无标点字幕的兜底)。
   const unitsOf = (t: string) => Array.from(t.replace(/\s/g, '')).reduce((acc, ch) => acc + (/[\u2e80-\u9fff\uac00-\ud7ff\u3040-\u30ff]/.test(ch) ? 1 : 0.5), 0);
+
+  // ⚠️【v3 真机 bug】这个函数只做【合并】,从不在一条内部拆句 —— 它判句末只看
+  //   `seg.text` 的最后一个字符。所以只要上游给来一条含好几句的粗段(火山对英文常常
+  //   一个 utterance 盖三四句;SRT / YouTube CC 更是整段一条,且**根本没有 words[]**、
+  //   走不到 resplitByWords),它就原样过去 → 一个翻译单元 → 一条字幕塞三句中文同屏。
+  //   所以进循环前先按句末标点把每条拆开,时间按字符数比例摊(没有词级时间戳时这是
+  //   唯一可用的近似)。拆完仍是「短句」,后面的合并逻辑会把该并的再并回去。
+  const presplit: Seg[] = [];
+  for (const seg of segs) {
+    const parts = splitTextSentences(seg.text);
+    if (parts.length <= 1) { presplit.push(seg); continue; }
+    const weights = parts.map((p) => Math.max(1, unitsOf(p)));
+    const total = weights.reduce((a, b) => a + b, 0);
+    const span = Math.max(0.001, seg.end - seg.start);
+    let cursor = seg.start;
+    parts.forEach((p, i) => {
+      const dur = (span * weights[i]) / total;
+      const end = i === parts.length - 1 ? seg.end : cursor + dur;
+      // words 不再往下传:已经按文本拆过了,原 words 跨了新边界会对不上。
+      presplit.push({ start: cursor, end, text: p });
+      cursor = end;
+    });
+  }
+
   const out: Seg[] = [];
   let buf = ''; let bStart = -1; let bEnd = 0;
   const flush = () => {
@@ -382,14 +514,16 @@ function regroupSegments(segs: Seg[]): Seg[] {
     if (t && bStart >= 0 && bEnd > bStart) out.push({ start: bStart, end: bEnd, text: t });
     buf = ''; bStart = -1;
   };
-  for (let i = 0; i < segs.length; i++) {
-    const seg = segs[i];
+  for (let i = 0; i < presplit.length; i++) {
+    const seg = presplit[i];
     if (!seg.text.trim()) continue;
     if (bStart < 0) bStart = seg.start;
     buf += (buf ? ' ' : '') + seg.text;
     bEnd = seg.end;
-    const gapNext = i + 1 < segs.length ? segs[i + 1].start - seg.end : 99;
-    const endsSent = SENT_END.test(seg.text.trim().slice(-1));
+    const gapNext = i + 1 < presplit.length ? presplit[i + 1].start - seg.end : 99;
+    // ⚠️ 用 isSentenceEndToken,不是 SENT_END —— 后者是「字符集包含」,对 "1.3" 这种
+    //   结尾也会判成句末;而且它对英文缩写没有任何防护。
+    const endsSent = isSentenceEndToken(seg.text.trim().split(/\s+/).pop() || '');
     if (endsSent || gapNext > TUNE.gapSplit || unitsOf(buf) >= TUNE.unitsSplit) flush();
   }
   flush();
