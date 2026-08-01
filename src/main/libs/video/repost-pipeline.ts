@@ -409,7 +409,7 @@ async function resolveSourceVideo(
 // ── 后端 ASR:上传音轨 → 带时间戳字幕 ──
 async function transcribeAudio(
   audioPath: string, durationSec: number, sourceLang: string, signal?: AbortSignal,
-): Promise<{ ok: boolean; segments?: Seg[]; language?: string; tokens?: number; costUsd?: number; error?: string; noSpeech?: boolean }> {
+): Promise<{ ok: boolean; segments?: Seg[]; sentences?: Seg[]; language?: string; tokens?: number; costUsd?: number; error?: string; noSpeech?: boolean }> {
   const token = getNoobClawAuthToken();
   if (!token) return { ok: false, error: '未登录 NoobClaw,无法转写' };
   if (signal?.aborted) return { ok: false, error: '已停止' };
@@ -457,12 +457,31 @@ async function transcribeAudio(
       return { ok: false, error: `转写失败:${resp.status}${detail ? ` · ${detail}` : ''}${resp.status === 502 || resp.status === 504 ? '(服务端网关错误,多为后端未部署最新版或进程重启,请检查服务端)' : ''}` };
     }
     const j: any = await resp.json();
+    // ⚠️【真机 bug,别再删】必须把 words 一起接下来。以前这里只 map 了 {start,end,text},
+    //    词级时间戳在 JSON 解析这一步就被丢掉 → seg.words 恒 undefined →
+    //    resplitByWords 第一行 `if (!ws || ws.length < 2) continue` 直接放行 =
+    //    **它从写出来那天起就是空转**,后端返不返回 words 结果都一样。
+    const mapWords = (s: any): AsrWord[] | undefined => (Array.isArray(s?.words)
+      ? s.words
+        .map((w: any) => ({ text: String(w?.text || ''), start: Number(w?.start) || 0, end: Number(w?.end) || 0 }))
+        .filter((w: AsrWord) => w.text)
+      : undefined);
+    const toSeg = (s: any): Seg => ({
+      start: Number(s.start) || 0, end: Number(s.end) || 0, text: String(s.text || '').trim(), words: mapWords(s),
+    });
     const segs: Seg[] = (Array.isArray(j?.segments) ? j.segments : [])
-      .map((s: any) => ({ start: Number(s.start) || 0, end: Number(s.end) || 0, text: String(s.text || '').trim() }))
-      .filter((s: Seg) => s.text && s.end > s.start);
+      .map(toSeg).filter((s: Seg) => s.text && s.end > s.start);
     if (segs.length === 0) return { ok: true, segments: [], noSpeech: true, tokens: 0, costUsd: 0 };
+    // 后端(新版)已经把【切好的句】一起回来了 —— 直接用,客户端不再自己切。
+    //   这样以后调切句规则只要改 admin + pm2 restart,不用重新打包客户端。
+    //   老后端没这个字段 → sentences=undefined → 下游退回本地切句(老行为)。
+    const sents: Seg[] = (Array.isArray(j?.sentences) ? j.sentences : [])
+      .map(toSeg).filter((s: Seg) => s.text && s.end > s.start);
     // ASR 端点已按真实时长扣了【一份】;返回 costUsd 供 pipeline 累计 →「token 消耗翻倍」时再扣一份。
-    return { ok: true, segments: segs, language: String(j?.language || '').trim(), tokens: Number(j?.chargedTokens) || 0, costUsd: Number(j?.costUsd) || 0 };
+    return {
+      ok: true, segments: segs, sentences: sents.length > 0 ? sents : undefined,
+      language: String(j?.language || '').trim(), tokens: Number(j?.chargedTokens) || 0, costUsd: Number(j?.costUsd) || 0,
+    };
   } catch (e: any) {
     // 用户点停止 → fetch 抛 AbortError。别报成「转写请求异常」(用户会以为是 bug/网络问题,
     // 还会被当成真失败去看退款);归一成「已停止」。超时同样是 AbortError,但那时 signal
@@ -470,6 +489,35 @@ async function transcribeAudio(
     if (signal?.aborted) return { ok: false, error: '已停止' };
     return { ok: false, error: `转写请求异常:${String(e?.message || e).slice(0, 120)}` };
   }
+}
+
+/**
+ * 让【后端】把粗段切成句(POST /api/asr/segment)。
+ *
+ * 为什么走后端:切句是纯计算,放客户端意味着改一个标点都要重新打包 + 用户重装。
+ *   搬到后端后,规则和阈值全在 admin(repost_sentence_* / repost_protect_patterns),
+ *   改完 pm2 restart 立即对所有已装客户端生效。
+ * 用在【源视频自带字幕】这条路(YouTube CC / 内嵌字幕轨 / 本地 SRT)—— 它不走 ASR 端点,
+ *   拿不到那边顺带返回的 sentences。纯计算、不计费。
+ * 任何失败都返回 null,调用方退回本地切句,绝不因此让出片失败。
+ */
+async function segmentViaBackend(segs: Seg[], signal?: AbortSignal): Promise<Seg[] | null> {
+  const token = getNoobClawAuthToken();
+  if (!token || segs.length === 0) return null;
+  try {
+    const resp = await fetch(`${apiBase()}/api/asr/segment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ segments: segs.map((s) => ({ start: s.start, end: s.end, text: s.text, words: s.words })) }),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000),
+    });
+    if (!resp.ok) return null;
+    const j: any = await resp.json();
+    const out: Seg[] = (Array.isArray(j?.sentences) ? j.sentences : [])
+      .map((s: any) => ({ start: Number(s.start) || 0, end: Number(s.end) || 0, text: String(s.text || '').trim() }))
+      .filter((s: Seg) => s.text && s.end > s.start);
+    return out.length > 0 ? out : null;
+  } catch { return null; }
 }
 
 // ── 句子重组:gap≤1s 合并 → 句末标点重切 → 时间按字符比例回摊 ──
@@ -990,18 +1038,35 @@ export async function runRepostPipeline(
       const asrSegments = asr.segments!;
       tracker.addTokens(asr.tokens || 0, asr.costUsd || 0); // 显示;翻倍靠下面累计 aiCostUsd
       aiCostUsd += asr.costUsd || 0;
-      // 先按词级时间戳把粗 utterance 拆细,再走原有的重组 —— 顺序不能反:
-      //   regroupSegments 是【合并】逻辑(把碎句并成适合翻译的长度),拿 2 条 8 秒的粗段
-      //   去合并,合出来还是 2 条,锚点密度一点没变。
-      const fine = resplitByWords(asrSegments);
-      const gained = fine.length - asrSegments.length;
-      if (gained > 0) {
-        tracker.progress(`⏱ 按词级时间戳细分:${asrSegments.length} 条 → ${fine.length} 条(锚点更密,配音和字幕贴得更准)`);
+      // ── 切句:优先【后端】,本地只做兜底 ────────────────────────────────
+      // 切句是纯计算,放客户端意味着改一个标点都要重新打包 + 用户重装(真机上就吃过这个亏:
+      //   句末判据漏了半角 `.`,英文三句并成一条字幕,只能重新出包)。现在规则全在服务端,
+      //   admin 改 repost_sentence_* / repost_protect_patterns → pm2 restart → 所有已装客户端
+      //   立即生效。老后端没这两个接口时自动退回下面的本地实现,行为不变。
+      let regrouped: Seg[];
+      let splitBy = '';
+      if (asr.sentences && asr.sentences.length > 0) {
+        // 走 ASR 端点时后端已经顺带切好了,直接用(零额外请求)。
+        regrouped = asr.sentences;
+        splitBy = '服务端';
+      } else {
+        // 源视频自带字幕这条路不走 ASR 端点 → 单独请后端切一次。
+        const remote = await segmentViaBackend(asrSegments, signal);
+        if (remote) {
+          regrouped = remote;
+          splitBy = '服务端';
+        } else {
+          // 本地兜底:先按词级时间戳把粗 utterance 拆细,再重组 —— 顺序不能反:
+          //   regroupSegments 是【合并】逻辑(把碎句并成适合翻译的长度),拿 2 条 8 秒的
+          //   粗段去合并,合出来还是 2 条,锚点密度一点没变。
+          const fine = resplitByWords(asrSegments);
+          regrouped = regroupSegments(fine);
+          splitBy = '本地兜底(后端切句不可用)';
+        }
       }
-      const regrouped = regroupSegments(fine);
       tracker.done('transcribe', subsSegs
-        ? `✅ 源字幕就绪(免转写费)· ${asrSegments.length} 条 → 细分 ${fine.length} → 重组 ${regrouped.length} 句`
-        : `✅ 转写完成 · ${asrSegments.length} 条 → 细分 ${fine.length} → 重组 ${regrouped.length} 句`);
+        ? `✅ 源字幕就绪(免转写费)· ${asrSegments.length} 条 → 切句 ${regrouped.length} 句 · ${splitBy}`
+        : `✅ 转写完成 · ${asrSegments.length} 条 → 切句 ${regrouped.length} 句 · ${splitBy}`);
 
       // ── STEP 3:翻译 ──
       throwIfAborted(signal);
