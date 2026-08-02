@@ -739,7 +739,7 @@ export async function runThreadPipeline(
       for (const v of getVoiceFallbacksWide(primary)) {
         if (deadVoices.has(v)) continue;
         throwIfAborted(signal);
-        const w = await synthesizeWhole(text, outPath, v, rate, { signal, maxAttempts: sawTtsTimeout ? 2 : 3 });
+        const w = await synthesizeWhole(text, outPath, v, rate, { signal, maxAttempts: sawTtsTimeout ? 2 : 3, onProgress: (m) => tracker.progress(m) });
         if (w.ok) {
           if (v !== primary) tracker.progress(`🎤 已改用备选音色 ${v}(原音色被上游拒发)`);
           return w;

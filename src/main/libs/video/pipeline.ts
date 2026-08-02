@@ -1271,7 +1271,7 @@ async function runVideoPipeline(
           tracker.progress(`配音合成中(${voiceProviderLabel(v)} · 音色 ${v}${voiceChain.length > 1 ? ` · ${vi + 1}/${voiceChain.length}` : ''})… 网络慢会重试,请稍候`);
           // ⚠️ signal 必须传:synthesizeWhole 内部 60s × 5 次重试,不传的话点停止要在
           //    这一个音色上磨到 5 分钟,只有换音色时才会碰到上面那句 throwIfAborted。
-          const w = await synthesizeWhole(sentences.join('\n'), masterMp3, v, input.voiceRate, { signal });
+          const w = await synthesizeWhole(sentences.join('\n'), masterMp3, v, input.voiceRate, { signal, onProgress: (m) => tracker.progress(m) });
           if (w.ok) { whole = w; usedWholeVoice = v; break; }
           const reason = getLastTtsError();
           tracker.progress(`音色 ${v} 整段合成未成功${reason ? `(${reason.slice(0, 110)})` : ''}${vi < voiceChain.length - 1 ? ',换下一个音色…' : ''}`);

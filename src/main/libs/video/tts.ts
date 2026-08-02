@@ -60,15 +60,33 @@ export function voiceProviderLabel(voice: string | undefined): string {
  *    `async:true`,后端立刻回 202 + job_id,客户端轮询 `/api/tts/job/:id` 取结果。
  */
 const LONG_TEXT_BYTES = 1024;          // 与后端 SYNC_MAX_BYTES 对齐
+
+/**
+ * 本进程内异步长文本接口是否已被判定不可用。
+ *
+ * ⚠️ 整段合成会按 voiceChain 逐个音色重试。长文本接口若真的挂了(真机:143 字的口播
+ *   轮询 300 秒仍未完成),每个音色都要重等一遍 —— 一条视频白白磨掉十几分钟才回退逐句。
+ *   一次失败就置位,本次进程后续直接跳过整段路径、立刻走逐句,别拿用户的时间试错。
+ */
+let _longTextBroken = false;
+export function isLongTextTtsBroken(): boolean { return _longTextBroken; }
 const JOB_POLL_INTERVAL_MS = 3_000;
 const JOB_POLL_MAX_MS = 420_000;       // 7 分钟(后端上游上限 5 分钟 + 下载余量)
 
-async function pollTtsJob(jobId: string, token: string, signal?: AbortSignal): Promise<any | null> {
+async function pollTtsJob(jobId: string, token: string, signal?: AbortSignal, onProgress?: (m: string) => void): Promise<any | null> {
   const deadline = Date.now() + JOB_POLL_MAX_MS;
+  const t0 = Date.now();
+  let lastTick = 0;
   while (Date.now() < deadline) {
     if (signal?.aborted) { _lastTtsError = '已停止'; return null; }
     await new Promise((r) => setTimeout(r, JOB_POLL_INTERVAL_MS));
     if (signal?.aborted) { _lastTtsError = '已停止'; return null; }
+    // 每 10 秒报一次等待时长 —— 长文本接口要 30~90 秒,不报的话界面就是「请稍候」然后死寂。
+    const waited = Math.round((Date.now() - t0) / 1000);
+    if (onProgress && waited - lastTick >= 10) {
+      lastTick = waited;
+      onProgress(`🎤 整段合成中… 已等 ${waited}s(长文本接口,通常 30~90s)`);
+    }
     try {
       const r = await fetch(`${apiBase()}/api/tts/job/${encodeURIComponent(jobId)}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -94,7 +112,7 @@ async function pollTtsJob(jobId: string, token: string, signal?: AbortSignal): P
 
 async function synthDoubao(
   text: string, outPath: string, voice: string, rate?: number, signal?: AbortSignal,
-  opts?: { needTimestamps?: boolean },
+  opts?: { needTimestamps?: boolean; onProgress?: (m: string) => void },
 ): Promise<{ ok: boolean; tokens: number; costUsd: number; sentences?: TtsCue[] } | null> {
   const token = getNoobClawAuthToken();
   if (!token) return null;
@@ -132,8 +150,12 @@ async function synthDoubao(
     let j: any = await resp.json();
     // 202 = 长文本 job 已入队 → 轮询取结果(绕开 Cloudflare 100s)。
     if (j?.job_id) {
-      const done = await pollTtsJob(String(j.job_id), token, signal);
-      if (!done) return null;
+      const done = await pollTtsJob(String(j.job_id), token, signal, opts?.onProgress);
+      if (!done) {
+        // 超时/上游失败 → 本进程别再走长文本了(见 _longTextBroken)。用户主动停止不算。
+        if (!signal?.aborted) _longTextBroken = true;
+        return null;
+      }
       j = done;
     }
     const b64 = typeof j?.audioBase64 === 'string' ? j.audioBase64 : '';
@@ -391,6 +413,12 @@ export interface SynthesizeOpts {
   signal?: AbortSignal;
   /** 重试次数上限(默认 5)。多段流水(爆帖逐段配音)可调小,防失败时静默磨太久。 */
   maxAttempts?: number;
+  /**
+   * 进度回调 —— 长等待期间往任务日志推一行,别让界面看着像卡死。
+   * ⚠️ 整段合成(synthesizeWhole)走豆包异步长文本接口:提交后要轮询 30~90 秒,
+   *    期间原来一个字都不输出,用户只看到「配音合成中…请稍候」然后没动静。
+   */
+  onProgress?: (msg: string) => void;
 }
 
 /**
@@ -573,7 +601,10 @@ export async function synthesizeWhole(text: string, outPath: string, voice: stri
   //  ⚠️ needTimestamps 必须传:在线同步接口不支持时间戳,而 45 秒视频的口播 200 来字
   //     根本到不了 1024 字节的分流线 —— 不强制走异步,整段合成对短口播永远失败。
   if (isDoubaoVoice(voice)) {
-    const d = await synthDoubao(clean, outPath, voice, rate, opts?.signal, { needTimestamps: true });
+    // 本进程已判定长文本接口不可用 → 直接失败让调用方走逐句,别再为每个备用音色重等一轮。
+    if (_longTextBroken) { _lastTtsError = '长文本接口本次不可用,直接逐句合成'; return fail(); }
+    opts?.onProgress?.('🎤 整段合成:已提交长文本任务,等待返回(带时间戳,切句和字幕用真实时间)');
+    const d = await synthDoubao(clean, outPath, voice, rate, opts?.signal, { needTimestamps: true, onProgress: opts?.onProgress });
     if (!d?.ok) return fail();
     if (!d.sentences || d.sentences.length === 0) {
       // 强制走了异步接口还没回时间戳 = 上游没给,只能退回逐句(不是长度问题了)。
