@@ -938,6 +938,51 @@ async function synthAndAlign(
   return { voiceTrackPath: finalTrack, totalDur: totalDur || cursor, cues };
 }
 
+// ── 合成阶段的超时与进度 ─────────────────────────────────────────────────────
+/**
+ * 按成片时长算 ffmpeg 超时。
+ *
+ * ⚠️【真机 bug】原来三处合成全写死 `timeoutMs: 600_000`(10 分钟)。24 分钟 / 2.83GB 的源片
+ *   要「冻结末帧延长 + 底部裁切 + boxblur 高斯 + ASS 烧字幕 + libx264 重编码」,实测跑了
+ *   638 秒被超时掐死,报成「合成失败(字幕烧录/编码出错)」—— 前面下载 13 分钟、配音 6 分钟
+ *   全白费,钱也扣了。搬运长视频是正常用法,不能用一个固定值卡死。
+ *
+ * 取 `时长 × 6`(boxblur + 字幕这套滤镜在慢机器上可能不到 1 倍速),下限 15 分钟、
+ *   上限 3 小时(真挂住时还是要有个头,不能无限等)。
+ *
+ * ⚠️ 拿不到时长(probeDuration 失败 / 坏容器)时**不能落到 15 分钟下限** —— 长度未知恰恰
+ *   最可能是长片,那样等于把上面这个坑原样挖回来。这种情况直接给 60 分钟。
+ */
+const COMPOSE_TIMEOUT_UNKNOWN_MS = 60 * 60_000;
+function composeTimeoutMs(durationSec: number): number {
+  const d = Number.isFinite(durationSec) && durationSec > 0 ? durationSec : 0;
+  if (d <= 0) return COMPOSE_TIMEOUT_UNKNOWN_MS;
+  return Math.min(3 * 3600_000, Math.max(15 * 60_000, Math.round(d * 6 * 1000)));
+}
+
+/**
+ * ffmpeg 进度上报:解析 stderr 的 `time=HH:MM:SS.xx`,对着总时长算百分比。
+ * 限流同下载:每涨 5% 或每 5 秒一条 —— 十几分钟的编码没有任何输出,看着也像卡死。
+ */
+function ffmpegProgress(totalSec: number, label: string, onLog: (m: string) => void): (line: string) => void {
+  let lastPct = -1;
+  let lastAt = 0;
+  const t0 = Date.now();
+  return (line: string) => {
+    const m = line.match(/time=(\d+):(\d{2}):(\d{2}(?:\.\d+)?)/);
+    if (!m) return;
+    const cur = parseInt(m[1], 10) * 3600 + parseInt(m[2], 10) * 60 + parseFloat(m[3]);
+    if (!Number.isFinite(cur) || !(totalSec > 0)) return;
+    const pct = Math.min(100, (cur / totalSec) * 100);
+    const now = Date.now();
+    if (pct < lastPct + 5 && now - lastAt < 5000) return;
+    lastPct = pct; lastAt = now;
+    const elapsed = (now - t0) / 1000;
+    const eta = pct > 1 ? Math.round((elapsed / pct) * (100 - pct)) : 0;
+    onLog(`🎞️ ${label} ${pct.toFixed(0)}% · 已用 ${Math.round(elapsed)}s${eta > 0 ? ` · 约剩 ${eta}s` : ''}`);
+  };
+}
+
 // ── 字幕存档:原字幕 / 译文字幕 / 译文纯文本,全落到成片同目录 ────────────────
 /** 秒 → SRT 时间码 `HH:MM:SS,mmm`。 */
 function toSrtTime(sec: number): string {
@@ -1252,7 +1297,10 @@ export async function runRepostPipeline(
       // 原片直发:保留原声,直接 remux(零转码 + faststart);容器不兼容再重编码兜底。
       const r = await runFfmpeg(['-y', '-i', sourceVideoPath, '-c', 'copy', '-movflags', '+faststart', outPath], { timeoutMs: 180_000, signal });
       if (!r.ok || !fs.existsSync(outPath)) {
-        const r2 = await runFfmpeg(['-y', '-i', sourceVideoPath, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', outPath], { timeoutMs: 600_000, signal });
+        const r2 = await runFfmpeg(
+          ['-y', '-i', sourceVideoPath, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', outPath],
+          { timeoutMs: composeTimeoutMs(srcDur), signal, onStderr: ffmpegProgress(srcDur, '转码', (m) => tracker.progress(m)) },
+        );
         if (!r2.ok || !fs.existsSync(outPath)) { const err = '合成失败(原片直发出错)'; tracker.fail('compose', err); return { ok: false, error: err }; }
       }
       tracker.done('compose', `📦 原片直发就绪(保留原声)· 📂 ${destDir}`);
@@ -1313,7 +1361,7 @@ export async function runRepostPipeline(
           '-map', '[v]', '-map', '1:a:0',
           '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
           '-c:a', 'aac', '-b:a', '160k', '-t', finalDur.toFixed(3), '-movflags', '+faststart', outPath,
-        ], { timeoutMs: 600_000, signal });
+        ], { timeoutMs: composeTimeoutMs(finalDur), signal, onStderr: ffmpegProgress(finalDur, '烧字幕合成', (m) => tracker.progress(m)) });
         if (!r.ok || !fs.existsSync(outPath)) { const err = '合成失败(字幕烧录/编码出错)'; tracker.fail('compose', err); return { ok: false, error: err }; }
       } else {
         const finalDur = aligned.totalDur;
@@ -1326,7 +1374,7 @@ export async function runRepostPipeline(
             '-map', '[v]', '-map', '1:a:0',
             '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
             '-c:a', 'aac', '-b:a', '160k', '-t', finalDur.toFixed(3), '-movflags', '+faststart', outPath,
-          ], { timeoutMs: 600_000, signal });
+          ], { timeoutMs: composeTimeoutMs(finalDur), signal, onStderr: ffmpegProgress(finalDur, '合成', (m) => tracker.progress(m)) });
           if (!r.ok || !fs.existsSync(outPath)) { const err = '合成失败(换音轨/延长画面出错)'; tracker.fail('compose', err); return { ok: false, error: err }; }
         } else {
           // 配音不长于视频:换音轨,画面能 copy 就 copy(零转码最快)。
@@ -1342,7 +1390,7 @@ export async function runRepostPipeline(
             '-map', '0:v:0', '-map', '1:a:0',
             ...(canCopy ? ['-c:v', 'copy'] : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p']),
             '-c:a', 'aac', '-b:a', '160k', '-shortest', '-movflags', '+faststart', outPath,
-          ], { timeoutMs: 600_000, signal });
+          ], { timeoutMs: canCopy ? 600_000 : composeTimeoutMs(srcDur), signal, onStderr: canCopy ? undefined : ffmpegProgress(srcDur, '转码合成', (m) => tracker.progress(m)) });
           if (!r.ok || !fs.existsSync(outPath)) { const err = '合成失败(换音轨出错)'; tracker.fail('compose', err); return { ok: false, error: err }; }
         }
       }
