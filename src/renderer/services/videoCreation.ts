@@ -415,18 +415,24 @@ class VideoCreationService {
    * 豆包(火山)真人音色目录:服务端 admin 下发(GET /api/tts/voices)。
    * 未配置/拉不到 → { enabled:false, voices:[] },UI 只显示 Edge 音色。
    */
-  async fetchDoubaoVoices(): Promise<{ enabled: boolean; voices: Array<{ id: string; zh?: string; en?: string; lang?: string; scene?: string }>; priceCnyPer10k: number }> {
+  async fetchDoubaoVoices(): Promise<{ enabled: boolean; voices: Array<{ id: string; zh?: string; en?: string; lang?: string; scene?: string }>; priceCnyPer10k: number; priceUsdPer10k: number }> {
+    const empty = { enabled: false, voices: [], priceCnyPer10k: 0, priceUsdPer10k: 0 };
     try {
       const { noobClawAuth } = await import('./noobclawAuth');
       const headers = noobClawAuth.getAuthHeaders();
-      if (!headers.Authorization) return { enabled: false, voices: [], priceCnyPer10k: 0 };
+      if (!headers.Authorization) return empty;
       const base = (window as any).__NOOBCLAW_API_BASE__ || 'https://api.noobclaw.com';
       const resp = await fetch(`${base}/api/tts/voices`, { headers });
-      if (!resp.ok) return { enabled: false, voices: [], priceCnyPer10k: 0 };
+      if (!resp.ok) return empty;
       const j: any = await resp.json();
       const voices = Array.isArray(j?.voices) ? j.voices.filter((v: any) => v && typeof v.id === 'string') : [];
-      return { enabled: !!j?.enabled && voices.length > 0, voices, priceCnyPer10k: Number(j?.priceCnyPer10k) || 0 };
-    } catch { return { enabled: false, voices: [], priceCnyPer10k: 0 }; }
+      return {
+        enabled: !!j?.enabled && voices.length > 0,
+        voices,
+        priceCnyPer10k: Number(j?.priceCnyPer10k) || 0,
+        priceUsdPer10k: Number(j?.priceUsdPer10k) || 0,
+      };
+    } catch { return empty; }
   }
 
   /** 用系统默认播放器打开成片。 */

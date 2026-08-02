@@ -2442,7 +2442,210 @@ type VoiceOpt = { id: string; zh: string; en: string };
 // ⚠️ 这里原来有个 voiceEngineHint,在音色框下面写「按字数计费,失败自动回退 Edge」——
 //   已按要求移除。计费细节不在选择器上对用户展示;「免费」只用微软 Edge 上那个红标表达。
 
-let _doubaoCache: { enabled: boolean; voices: Array<{ id: string; zh?: string; en?: string; lang?: string; scene?: string }> } | null = null;
+type DoubaoVoice = { id: string; zh?: string; en?: string; lang?: string; scene?: string };
+type DoubaoCatalog = { enabled: boolean; voices: DoubaoVoice[]; priceCnyPer10k: number; priceUsdPer10k: number };
+
+/**
+ * 豆包音色目录的【内置种子】。
+ *
+ * ⚠️ 为什么要有它:目录是服务端下发的,冷启动时要等一个网络往返才有内容 —— 在那之前
+ *   连「豆包真人 / 微软 Edge」这两个引擎按钮都不显示(外面套着 `doubaoEnabled &&`),
+ *   用户看到的是一片空白然后突然蹦出来。种子让选择器【立刻】能渲染。
+ *
+ * ⚠️ 内容是【从后端 `tts.ts` 的 DEFAULT_VOICES 原样生成的】,不是手敲 —— 手敲必然编错 ID,
+ *   而编造的 ID 用户一选就合成失败(第一版我就编了 en_female_anna / ja_female_yuka /
+ *   ko_female_mina 三个不存在的)。要更新时重新从后端那份生成,别手改。
+ *
+ * 它只是【首屏兜底】。服务端目录一拿到就整体替换并写进 localStorage,所以 admin 加音色
+ *   不需要重新打包客户端;这份种子过期了也只影响「全新安装 + 首次打开」那一两秒。
+ */
+const DOUBAO_SEED_VOICES: DoubaoVoice[] = [
+  { id: "zh_female_vv_uranus_bigtts", zh: "Vivi", en: "Vivi", lang: "zh", scene: "通用场景" },
+  { id: "zh_female_xiaohe_uranus_bigtts", zh: "小何", en: "小何", lang: "zh", scene: "通用场景" },
+  { id: "zh_male_m191_uranus_bigtts", zh: "云舟", en: "云舟", lang: "zh", scene: "通用场景" },
+  { id: "zh_male_taocheng_uranus_bigtts", zh: "小天", en: "小天", lang: "zh", scene: "通用场景" },
+  { id: "zh_male_liufei_uranus_bigtts", zh: "刘飞", en: "刘飞", lang: "zh", scene: "通用场景" },
+  { id: "zh_female_sophie_uranus_bigtts", zh: "魅力苏菲", en: "魅力苏菲", lang: "zh", scene: "通用场景" },
+  { id: "zh_female_qingxinnvsheng_uranus_bigtts", zh: "清新女声", en: "清新女声", lang: "zh", scene: "通用场景" },
+  { id: "zh_female_cancan_uranus_bigtts", zh: "知性灿灿", en: "知性灿灿", lang: "zh", scene: "角色扮演" },
+  { id: "zh_female_sajiaoxuemei_uranus_bigtts", zh: "撒娇学妹", en: "撒娇学妹", lang: "zh", scene: "角色扮演" },
+  { id: "zh_female_tianmeixiaoyuan_uranus_bigtts", zh: "甜美小源", en: "甜美小源", lang: "zh", scene: "通用场景" },
+  { id: "zh_female_tianmeitaozi_uranus_bigtts", zh: "甜美桃子", en: "甜美桃子", lang: "zh", scene: "通用场景" },
+  { id: "zh_female_shuangkuaisisi_uranus_bigtts", zh: "爽快思思", en: "爽快思思", lang: "zh", scene: "通用场景" },
+  { id: "zh_female_peiqi_uranus_bigtts", zh: "佩奇猪", en: "佩奇猪", lang: "zh", scene: "视频配音" },
+  { id: "zh_female_linjianvhai_uranus_bigtts", zh: "邻家女孩", en: "邻家女孩", lang: "zh", scene: "通用场景" },
+  { id: "zh_male_shaonianzixin_uranus_bigtts", zh: "少年梓辛", en: "少年梓辛", lang: "zh", scene: "通用场景" },
+  { id: "zh_male_sunwukong_uranus_bigtts", zh: "猴哥", en: "猴哥", lang: "zh", scene: "视频配音" },
+  { id: "zh_female_yingyujiaoxue_uranus_bigtts", zh: "Tina老师", en: "Tina老师", lang: "zh", scene: "教育场景" },
+  { id: "zh_female_kefunvsheng_uranus_bigtts", zh: "暖阳女声", en: "暖阳女声", lang: "zh", scene: "客服场景" },
+  { id: "zh_female_xiaoxue_uranus_bigtts", zh: "儿童绘本", en: "儿童绘本", lang: "zh", scene: "有声阅读" },
+  { id: "zh_male_dayi_uranus_bigtts", zh: "大壹", en: "大壹", lang: "zh", scene: "视频配音" },
+  { id: "zh_female_mizai_uranus_bigtts", zh: "咪仔", en: "咪仔", lang: "zh", scene: "视频配音" },
+  { id: "zh_female_jitangnv_uranus_bigtts", zh: "鸡汤女", en: "鸡汤女", lang: "zh", scene: "视频配音" },
+  { id: "zh_female_meilinvyou_uranus_bigtts", zh: "魅力女友", en: "魅力女友", lang: "zh", scene: "通用场景" },
+  { id: "zh_female_liuchangnv_uranus_bigtts", zh: "流畅女声", en: "流畅女声", lang: "zh", scene: "视频配音" },
+  { id: "zh_male_ruyayichen_uranus_bigtts", zh: "儒雅逸辰", en: "儒雅逸辰", lang: "zh", scene: "视频配音" },
+  { id: "zh_female_wenroumama_uranus_bigtts", zh: "温柔妈妈", en: "温柔妈妈", lang: "zh", scene: "通用场景" },
+  { id: "zh_male_jieshuoxiaoming_uranus_bigtts", zh: "解说小明", en: "解说小明", lang: "zh", scene: "通用场景" },
+  { id: "zh_female_tvbnv_uranus_bigtts", zh: "TVB女声", en: "TVB女声", lang: "zh", scene: "通用场景" },
+  { id: "zh_male_yizhipiannan_uranus_bigtts", zh: "译制片男", en: "译制片男", lang: "zh", scene: "通用场景" },
+  { id: "zh_female_qiaopinv_uranus_bigtts", zh: "俏皮女声", en: "俏皮女声", lang: "zh", scene: "通用场景" },
+  { id: "zh_female_zhishuaiyingzi_uranus_bigtts", zh: "直率英子", en: "直率英子", lang: "zh", scene: "角色扮演" },
+  { id: "zh_male_linjiananhai_uranus_bigtts", zh: "邻家男孩", en: "邻家男孩", lang: "zh", scene: "通用场景" },
+  { id: "zh_male_silang_uranus_bigtts", zh: "四郎", en: "四郎", lang: "zh", scene: "角色扮演" },
+  { id: "zh_male_ruyaqingnian_uranus_bigtts", zh: "儒雅青年", en: "儒雅青年", lang: "zh", scene: "通用场景" },
+  { id: "zh_male_qingcang_uranus_bigtts", zh: "擎苍", en: "擎苍", lang: "zh", scene: "角色扮演" },
+  { id: "zh_male_xionger_uranus_bigtts", zh: "熊二", en: "熊二", lang: "zh", scene: "角色扮演" },
+  { id: "zh_female_yingtaowanzi_uranus_bigtts", zh: "樱桃丸子", en: "樱桃丸子", lang: "zh", scene: "角色扮演" },
+  { id: "zh_male_wennuanahu_uranus_bigtts", zh: "温暖阿虎", en: "温暖阿虎", lang: "zh", scene: "通用场景" },
+  { id: "zh_male_naiqimengwa_uranus_bigtts", zh: "奶气萌娃", en: "奶气萌娃", lang: "zh", scene: "通用场景" },
+  { id: "zh_female_popo_uranus_bigtts", zh: "婆婆", en: "婆婆", lang: "zh", scene: "通用场景" },
+  { id: "zh_female_gaolengyujie_uranus_bigtts", zh: "高冷御姐", en: "高冷御姐", lang: "zh", scene: "通用场景" },
+  { id: "zh_male_aojiaobazong_uranus_bigtts", zh: "傲娇霸总", en: "傲娇霸总", lang: "zh", scene: "通用场景" },
+  { id: "zh_male_lanyinmianbao_uranus_bigtts", zh: "懒音绵宝", en: "懒音绵宝", lang: "zh", scene: "角色扮演" },
+  { id: "zh_male_fanjuanqingnian_uranus_bigtts", zh: "反卷青年", en: "反卷青年", lang: "zh", scene: "通用场景" },
+  { id: "zh_female_wenroushunv_uranus_bigtts", zh: "温柔淑女", en: "温柔淑女", lang: "zh", scene: "通用场景" },
+  { id: "zh_female_gufengshaoyu_uranus_bigtts", zh: "古风少御", en: "古风少御", lang: "zh", scene: "角色扮演" },
+  { id: "zh_male_huolixiaoge_uranus_bigtts", zh: "活力小哥", en: "活力小哥", lang: "zh", scene: "通用场景" },
+  { id: "zh_male_baqiqingshu_uranus_bigtts", zh: "霸气青叔", en: "霸气青叔", lang: "zh", scene: "有声阅读" },
+  { id: "zh_male_xuanyijieshuo_uranus_bigtts", zh: "悬疑解说", en: "悬疑解说", lang: "zh", scene: "有声阅读" },
+  { id: "zh_female_mengyatou_uranus_bigtts", zh: "萌丫头", en: "萌丫头", lang: "zh", scene: "通用场景" },
+  { id: "zh_female_tiexinnvsheng_uranus_bigtts", zh: "贴心女声", en: "贴心女声", lang: "zh", scene: "通用场景" },
+  { id: "zh_female_jitangmei_uranus_bigtts", zh: "鸡汤妹妹", en: "鸡汤妹妹", lang: "zh", scene: "通用场景" },
+  { id: "zh_male_cixingjieshuonan_uranus_bigtts", zh: "磁性解说男声", en: "磁性解说男声", lang: "zh", scene: "通用场景" },
+  { id: "zh_male_liangsangmengzai_uranus_bigtts", zh: "亮嗓萌仔", en: "亮嗓萌仔", lang: "zh", scene: "通用场景" },
+  { id: "zh_female_kailangjiejie_uranus_bigtts", zh: "开朗姐姐", en: "开朗姐姐", lang: "zh", scene: "通用场景" },
+  { id: "zh_male_gaolengchenwen_uranus_bigtts", zh: "高冷沉稳", en: "高冷沉稳", lang: "zh", scene: "通用场景" },
+  { id: "zh_male_shenyeboke_uranus_bigtts", zh: "深夜播客", en: "深夜播客", lang: "zh", scene: "通用场景" },
+  { id: "zh_male_lubanqihao_uranus_bigtts", zh: "鲁班七号", en: "鲁班七号", lang: "zh", scene: "角色扮演" },
+  { id: "zh_female_linxiao_uranus_bigtts", zh: "林潇", en: "林潇", lang: "zh", scene: "角色扮演" },
+  { id: "zh_female_lingling_uranus_bigtts", zh: "玲玲姐姐", en: "玲玲姐姐", lang: "zh", scene: "角色扮演" },
+  { id: "zh_female_chunribu_uranus_bigtts", zh: "春日部姐姐", en: "春日部姐姐", lang: "zh", scene: "角色扮演" },
+  { id: "zh_male_tangseng_uranus_bigtts", zh: "唐僧", en: "唐僧", lang: "zh", scene: "角色扮演" },
+  { id: "zh_male_zhuangzhou_uranus_bigtts", zh: "庄周", en: "庄周", lang: "zh", scene: "角色扮演" },
+  { id: "zh_male_kailangdidi_uranus_bigtts", zh: "开朗弟弟", en: "开朗弟弟", lang: "zh", scene: "通用场景" },
+  { id: "zh_male_zhubajie_uranus_bigtts", zh: "猪八戒", en: "猪八戒", lang: "zh", scene: "角色扮演" },
+  { id: "zh_female_qinqienv_uranus_bigtts", zh: "亲切女声", en: "亲切女声", lang: "zh", scene: "通用场景" },
+  { id: "zh_male_kuailexiaodong_uranus_bigtts", zh: "快乐小东", en: "快乐小东", lang: "zh", scene: "通用场景" },
+  { id: "zh_male_kailangxuezhang_uranus_bigtts", zh: "开朗学长", en: "开朗学长", lang: "zh", scene: "通用场景" },
+  { id: "zh_male_youyoujunzi_uranus_bigtts", zh: "悠悠君子", en: "悠悠君子", lang: "zh", scene: "通用场景" },
+  { id: "zh_female_wenjingmaomao_uranus_bigtts", zh: "文静毛毛", en: "文静毛毛", lang: "zh", scene: "通用场景" },
+  { id: "zh_female_zhixingnv_uranus_bigtts", zh: "知性女声", en: "知性女声", lang: "zh", scene: "通用场景" },
+  { id: "zh_male_qingshuangnanda_uranus_bigtts", zh: "清爽男大", en: "清爽男大", lang: "zh", scene: "通用场景" },
+  { id: "zh_male_yuanboxiaoshu_uranus_bigtts", zh: "渊博小叔", en: "渊博小叔", lang: "zh", scene: "通用场景" },
+  { id: "zh_male_yangguangqingnian_uranus_bigtts", zh: "阳光青年", en: "阳光青年", lang: "zh", scene: "通用场景" },
+  { id: "zh_female_qingchezizi_uranus_bigtts", zh: "清澈梓梓", en: "清澈梓梓", lang: "zh", scene: "通用场景" },
+  { id: "zh_female_tianmeiyueyue_uranus_bigtts", zh: "甜美悦悦", en: "甜美悦悦", lang: "zh", scene: "通用场景" },
+  { id: "zh_female_xinlingjitang_uranus_bigtts", zh: "心灵鸡汤", en: "心灵鸡汤", lang: "zh", scene: "通用场景" },
+  { id: "zh_male_wenrouxiaoge_uranus_bigtts", zh: "温柔小哥", en: "温柔小哥", lang: "zh", scene: "通用场景" },
+  { id: "zh_female_roumeinvyou_uranus_bigtts", zh: "柔美女友", en: "柔美女友", lang: "zh", scene: "通用场景" },
+  { id: "zh_male_dongfanghaoran_uranus_bigtts", zh: "东方浩然", en: "东方浩然", lang: "zh", scene: "通用场景" },
+  { id: "zh_female_wenrouxiaoya_uranus_bigtts", zh: "温柔小雅", en: "温柔小雅", lang: "zh", scene: "通用场景" },
+  { id: "zh_male_tiancaitongsheng_uranus_bigtts", zh: "天才童声", en: "天才童声", lang: "zh", scene: "通用场景" },
+  { id: "zh_female_wuzetian_uranus_bigtts", zh: "武则天", en: "武则天", lang: "zh", scene: "角色扮演" },
+  { id: "zh_female_gujie_uranus_bigtts", zh: "顾姐", en: "顾姐", lang: "zh", scene: "角色扮演" },
+  { id: "zh_male_guanggaojieshuo_uranus_bigtts", zh: "广告解说", en: "广告解说", lang: "zh", scene: "通用场景" },
+  { id: "zh_female_shaoergushi_uranus_bigtts", zh: "少儿故事", en: "少儿故事", lang: "zh", scene: "有声阅读" },
+  { id: "en_male_tim_uranus_bigtts", zh: "Tim", en: "Tim", lang: "en", scene: "多语种" },
+  { id: "en_female_dacey_uranus_bigtts", zh: "Dacey", en: "Dacey", lang: "en", scene: "多语种" },
+  { id: "en_female_stokie_uranus_bigtts", zh: "Stokie", en: "Stokie", lang: "en", scene: "多语种" },
+  { id: "ICL_uranus_en_female_charlie_tob", zh: "Charlie", en: "Charlie", lang: "en", scene: "多语种" },
+  { id: "ICL_uranus_en_male_ethan_tob", zh: "Ethan", en: "Ethan", lang: "en", scene: "多语种" },
+  { id: "ICL_uranus_en_male_alastor_tob", zh: "Alastor", en: "Alastor", lang: "en", scene: "多语种" },
+  { id: "ICL_uranus_en_male_noah_tob", zh: "Noah", en: "Noah", lang: "en", scene: "多语种" },
+  { id: "ICL_uranus_en_male_xavier_tob", zh: "Xavier", en: "Xavier", lang: "en", scene: "多语种" },
+  { id: "ICL_uranus_en_male_zayne_tob", zh: "Zayne", en: "Zayne", lang: "en", scene: "多语种" },
+  { id: "en_male_adam-imitation_uranus_bigtts", zh: "Rowan", en: "Rowan", lang: "en", scene: "多语种" },
+  { id: "en_male_alex_uranus_bigtts", zh: "Alex", en: "Alex", lang: "en", scene: "多语种" },
+  { id: "en_female_allison_uranus_bigtts", zh: "Allison", en: "Allison", lang: "en", scene: "多语种" },
+  { id: "en_female_authoritative-british_uranus_bigtts", zh: "Charlotte", en: "Charlotte", lang: "en", scene: "多语种" },
+  { id: "en_female_authoritative-informative_uranus_bigtts", zh: "Margaret", en: "Margaret", lang: "en", scene: "多语种" },
+  { id: "en_male_brad_pitt_p1_uranus_bigtts", zh: "Brad Pitt", en: "Brad Pitt", lang: "en", scene: "多语种" },
+  { id: "en_female_brittney_uranus_bigtts", zh: "Brittney", en: "Brittney", lang: "en", scene: "多语种" },
+  { id: "en_male_bruce_uranus_bigtts", zh: "Adrian", en: "Adrian", lang: "en", scene: "多语种" },
+  { id: "en_male_david_uranus_bigtts", zh: "David", en: "David", lang: "en", scene: "多语种" },
+  { id: "en_male_deep-voice_uranus_bigtts", zh: "Orion", en: "Orion", lang: "en", scene: "多语种" },
+  { id: "en_female_hayley_uranus_bigtts", zh: "Hayley", en: "Hayley", lang: "en", scene: "多语种" },
+  { id: "en_male_jamie_uranus_bigtts", zh: "Jamie", en: "Jamie", lang: "en", scene: "多语种" },
+  { id: "en_female_jane_uranus_bigtts", zh: "Jane", en: "Jane", lang: "en", scene: "多语种" },
+  { id: "en_female_jenny_uranus_bigtts", zh: "Jenny", en: "Jenny", lang: "en", scene: "多语种" },
+  { id: "en_male_jimmy_uranus_bigtts", zh: "Jimmy", en: "Jimmy", lang: "en", scene: "多语种" },
+  { id: "en_female_joanne_uranus_bigtts", zh: "Joanne", en: "Joanne", lang: "en", scene: "多语种" },
+  { id: "en_male_josh_uranus_bigtts", zh: "Josh", en: "Josh", lang: "en", scene: "多语种" },
+  { id: "en_male_kevin_uranus_bigtts", zh: "Kevin", en: "Kevin", lang: "en", scene: "多语种" },
+  { id: "en_male_knightley_uranus_bigtts", zh: "Knightley", en: "Knightley", lang: "en", scene: "多语种" },
+  { id: "en_male_marcus_uranus_bigtts", zh: "Marcus", en: "Marcus", lang: "en", scene: "多语种" },
+  { id: "en_female_mel_uranus_bigtts", zh: "Mel", en: "Mel", lang: "en", scene: "多语种" },
+  { id: "en_male_michael_uranus_bigtts", zh: "Hank", en: "Hank", lang: "en", scene: "多语种" },
+  { id: "en_female_myra_uranus_bigtts", zh: "Myra", en: "Myra", lang: "en", scene: "多语种" },
+  { id: "en_female_nadia_uranus_bigtts", zh: "Blair", en: "Blair", lang: "en", scene: "多语种" },
+  { id: "en_female_pleasant-female_uranus_bigtts", zh: "Elaine", en: "Elaine", lang: "en", scene: "多语种" },
+  { id: "en_male_ronald_uranus_bigtts", zh: "Ronald", en: "Ronald", lang: "en", scene: "多语种" },
+  { id: "en_male_russell_uranus_bigtts", zh: "Russell", en: "Russell", lang: "en", scene: "多语种" },
+  { id: "en_female_skye_uranus_bigtts", zh: "Skye", en: "Skye", lang: "en", scene: "多语种" },
+  { id: "en_male_tom_hiddleston_p1_uranus_bigtts", zh: "Tom", en: "Tom", lang: "en", scene: "多语种" },
+  { id: "en_male_valentino_uranus_bigtts", zh: "Valentino", en: "Valentino", lang: "en", scene: "多语种" },
+  { id: "en_male_yangguangjieshuonan_uranus_bigtts", zh: "Dylan", en: "Dylan", lang: "en", scene: "多语种" },
+  { id: "en_female_zendaya_p1_uranus_bigtts", zh: "Zendaya", en: "Zendaya", lang: "en", scene: "多语种" },
+  { id: "ja_female_bv024_uranus_bigtts", zh: "Bonnie", en: "Bonnie", lang: "ja", scene: "多语种" },
+  { id: "ja_female_bv522_uranus_bigtts", zh: "Hana", en: "Hana", lang: "ja", scene: "多语种" },
+  { id: "ja_male_bv524_uranus_bigtts", zh: "Ken", en: "Ken", lang: "ja", scene: "多语种" },
+  { id: "ja_female_bv520_uranus_bigtts", zh: "Poppy", en: "Poppy", lang: "ja", scene: "多语种" },
+  { id: "ko_male_bv545_uranus_bigtts", zh: "Jay", en: "Jay", lang: "ko", scene: "多语种" },
+  { id: "ko_female_bv546_uranus_bigtts", zh: "Momo", en: "Momo", lang: "ko", scene: "多语种" },
+  { id: "ko_male_m03_uranus_bigtts", zh: "Minho", en: "Minho", lang: "ko", scene: "多语种" },
+  { id: "vi_female_hong_uranus_bigtts", zh: "Hong", en: "Hong", lang: "vi", scene: "多语种" },
+  { id: "vi_female_ling_uranus_bigtts", zh: "Ling", en: "Ling", lang: "vi", scene: "多语种" },
+  { id: "vi_male_wumg_uranus_bigtts", zh: "Wumg", en: "Wumg", lang: "vi", scene: "多语种" },
+  { id: "es_female_bv084_uranus_bigtts", zh: "Gracie", en: "Gracie", lang: "es", scene: "多语种" },
+  { id: "es_male_dani_uranus_bigtts", zh: "Dani", en: "Dani", lang: "es", scene: "多语种" },
+  { id: "fr_female_fr_bv078_uranus_bigtts", zh: "Simone", en: "Simone", lang: "fr", scene: "多语种" },
+  { id: "fr_female_fr_f47_uranus_bigtts", zh: "Camille", en: "Camille", lang: "fr", scene: "多语种" },
+  { id: "fr_male_fr_m29_uranus_bigtts", zh: "Maurice", en: "Maurice", lang: "fr", scene: "多语种" },
+  { id: "de_female_bv081_uranus_bigtts", zh: "Stella", en: "Stella", lang: "de", scene: "多语种" },
+  { id: "de_male_sven_uranus_bigtts", zh: "Sven", en: "Sven", lang: "de", scene: "多语种" },
+  { id: "pt_male_bv172_uranus_bigtts", zh: "Sam", en: "Sam", lang: "pt", scene: "多语种" },
+  { id: "pt_female_bv173_uranus_bigtts", zh: "Diana", en: "Diana", lang: "pt", scene: "多语种" },
+  { id: "pt_female_bv530_uranus_bigtts", zh: "Sofia", en: "Sofia", lang: "pt", scene: "多语种" },
+  { id: "ru_female_af07_uranus_bigtts", zh: "Amelia", en: "Amelia", lang: "ru", scene: "多语种" },
+  { id: "ru_male_pavel_uranus_bigtts", zh: "Pavel", en: "Pavel", lang: "ru", scene: "多语种" },
+  { id: "id_male_bv160_uranus_bigtts", zh: "Rocco", en: "Rocco", lang: "id", scene: "多语种" },
+  { id: "id_female_bv161_uranus_bigtts", zh: "Clara", en: "Clara", lang: "id", scene: "多语种" },
+  { id: "th_female_bv568_happy_uranus_bigtts", zh: "Zara", en: "Zara", lang: "th", scene: "多语种" },
+  { id: "tl_female_annika_uranus_bigtts", zh: "Annika", en: "Annika", lang: "tl", scene: "多语种" },
+  { id: "ar_female_dina_uranus_bigtts", zh: "Dina", en: "Dina", lang: "ar", scene: "多语种" },
+  { id: "ar_male_youssef_uranus_bigtts", zh: "Youssef", en: "Youssef", lang: "ar", scene: "多语种" },
+  { id: "it_male_enzo_uranus_bigtts", zh: "Enzo", en: "Enzo", lang: "it", scene: "多语种" },
+  { id: "mx_female_bv065_uranus_bigtts", zh: "Irene", en: "Irene", lang: "mx", scene: "多语种" },
+  { id: "ms_male_ham_uranus_bigtts", zh: "Ham", en: "Ham", lang: "ms", scene: "多语种" },
+];
+
+const DOUBAO_LS_KEY = 'noobclaw.doubaoVoices.v1';
+const DOUBAO_SEED: DoubaoCatalog = {
+  enabled: true, voices: DOUBAO_SEED_VOICES,
+  priceCnyPer10k: 4.5, priceUsdPer10k: 0.625, // 服务端拉到就覆盖
+};
+
+/** 读上次成功拉到的目录(localStorage)。坏数据当没有。 */
+function readDoubaoCache(): DoubaoCatalog | null {
+  try {
+    const raw = localStorage.getItem(DOUBAO_LS_KEY);
+    if (!raw) return null;
+    const j = JSON.parse(raw);
+    const voices = Array.isArray(j?.voices) ? j.voices.filter((v: any) => v && typeof v.id === 'string') : [];
+    if (voices.length === 0) return null;
+    return {
+      enabled: !!j.enabled, voices,
+      priceCnyPer10k: Number(j.priceCnyPer10k) || DOUBAO_SEED.priceCnyPer10k,
+      priceUsdPer10k: Number(j.priceUsdPer10k) || DOUBAO_SEED.priceUsdPer10k,
+    };
+  } catch { return null; }
+}
+
+// 冷启动就有内容:上次拉到的 > 内置种子。之后台再刷新成最新的。
+let _doubaoCache: DoubaoCatalog = readDoubaoCache() || DOUBAO_SEED;
+/** 是否已经从服务端拿到过真目录(用来判断要不要再发请求)。 */
+let _doubaoFresh = false;
 
 /**
  * 音色 id → 人话名字。
@@ -2452,14 +2655,33 @@ let _doubaoCache: { enabled: boolean; voices: Array<{ id: string; zh?: string; e
  *   这种原始 id 直接印给用户看。
  *   缓存还没拉到时(冷启动首屏)退回 id —— 拉到后组件重渲染就正常了。
  */
-/** 拉一次豆包音色目录并填进模块级缓存。重复调用只发一次请求。 */
+/**
+ * 后台刷新豆包音色目录。重复调用只发一次请求。
+ * ⚠️ 不再「没缓存才拉」—— 缓存现在恒有值(种子/localStorage),那样写就永远不刷新了。
+ *   改成「本进程还没拉到过就拉」,拉到覆盖缓存并写回 localStorage 供下次冷启动秒开。
+ *   拉失败保留现有缓存(种子或上次的),UI 不会因为一次网络抖动变空。
+ */
 let _doubaoLoading: Promise<void> | null = null;
 function ensureDoubaoVoices(): Promise<void> {
-  if (_doubaoCache) return Promise.resolve();
+  if (_doubaoFresh) return Promise.resolve();
   if (_doubaoLoading) return _doubaoLoading;
   _doubaoLoading = videoCreationService.fetchDoubaoVoices()
-    .then((r) => { _doubaoCache = { enabled: r.enabled, voices: r.voices }; })
-    .catch(() => { _doubaoCache = { enabled: false, voices: [] }; })
+    .then((r) => {
+      if (r.voices.length > 0) {
+        _doubaoCache = {
+          enabled: r.enabled, voices: r.voices,
+          priceCnyPer10k: r.priceCnyPer10k || _doubaoCache.priceCnyPer10k,
+          priceUsdPer10k: r.priceUsdPer10k || _doubaoCache.priceUsdPer10k,
+        };
+        try { localStorage.setItem(DOUBAO_LS_KEY, JSON.stringify(_doubaoCache)); } catch { /* 配额满/隐私模式 → 只影响下次冷启动 */ }
+      } else if (!r.enabled) {
+        // 服务端明确说没配豆包 → 收起豆包页签,别让用户选了才失败。
+        _doubaoCache = { ..._doubaoCache, enabled: false };
+        try { localStorage.removeItem(DOUBAO_LS_KEY); } catch { /* ignore */ }
+      }
+      _doubaoFresh = true;
+    })
+    .catch(() => { /* 拉不到就继续用现有缓存 */ })
     .finally(() => { _doubaoLoading = null; });
   return _doubaoLoading;
 }
@@ -2472,7 +2694,7 @@ function ensureDoubaoVoices(): Promise<void> {
 function useDoubaoVoicesReady(): void {
   const [, force] = React.useState(0);
   React.useEffect(() => {
-    if (_doubaoCache) return;
+    if (_doubaoFresh) return;   // 已经拿到过真目录就不用再拉(缓存恒有值,不能拿它当判据)
     let alive = true;
     void ensureDoubaoVoices().then(() => { if (alive) force((n) => n + 1); });
     return () => { alive = false; };
@@ -2592,7 +2814,12 @@ const VoicePicker: React.FC<{
   /** 语速(试听时用同一档,听到的就是成片里的效果)。 */
   rate?: number;
 }> = ({ isZh, value, onChange, accent = 'sky', targetLang, rate }) => {
-  const { doubaoVoices, doubaoEnabled } = useVoiceGroups();
+  const { doubaoVoices, doubaoEnabled, priceCnyPer10k, priceUsdPer10k } = useVoiceGroups();
+  // 单价标文案:中文界面用人民币,其它语言用美元(后端已按汇率换算好)。拿不到价就不显示标。
+  const priceTag = (() => {
+    if (isZh) return priceCnyPer10k > 0 ? `¥${priceCnyPer10k}/万字` : '';
+    return priceUsdPer10k > 0 ? `$${priceUsdPer10k.toFixed(2)}/10k` : '';
+  })();
   // 配音试听:跟 BGM 同一套 UI(见 BgmPreviewBar)。放在 VoicePicker 里 = 所有向导一次生效。
   const voicePreview = useVoicePreview(value, rate, targetLang, isZh);
   const isDoubaoId = (id: string) => /_(male|female)_/i.test(id) && !/Neural$/i.test(id);
@@ -2668,6 +2895,12 @@ const VoicePicker: React.FC<{
         <div className="flex gap-2 pt-1.5">
           <button type="button" onClick={() => { setEngine('doubao'); const first = (dbByLang.get(dbLang) || doubaoVoices)[0]; if (first && !isDoubaoId(value)) onChange(first.id); }} className={engineTab(engine === 'doubao')}>
             🔥 {isZh ? '豆包真人' : 'Doubao lifelike'}
+            {/* 单价标:中文界面显示 ¥/万字,其它显示 $/万字(汇率由服务端换算好回传,客户端不自己配) */}
+            {priceTag && (
+              <span className="absolute -top-2 -right-1.5 px-1.5 py-[1px] rounded-full bg-amber-500 text-white text-[10px] font-bold leading-tight shadow-sm pointer-events-none whitespace-nowrap">
+                {priceTag}
+              </span>
+            )}
           </button>
           <button type="button" onClick={() => { setEngine('edge'); if (isDoubaoId(value)) onChange(VOICE_GROUPS[0].voices[0].id); }} className={engineTab(engine === 'edge')}>
             {isZh ? '微软 Edge' : 'Microsoft Edge'}
@@ -2730,20 +2963,26 @@ const VoicePicker: React.FC<{
   );
 };
 
-function useVoiceGroups(): { groups: typeof VOICE_GROUPS; doubaoEnabled: boolean; defaultVoice: string; doubaoVoices: Array<{ id: string; zh?: string; en?: string; lang?: string; scene?: string }> } {
-  const [db, setDb] = React.useState(_doubaoCache);
+function useVoiceGroups(): { groups: typeof VOICE_GROUPS; doubaoEnabled: boolean; defaultVoice: string; doubaoVoices: DoubaoVoice[]; priceCnyPer10k: number; priceUsdPer10k: number } {
+  // 初值就是缓存(种子/localStorage)→ 首屏立刻有内容,不等网络。
+  const [db, setDb] = React.useState<DoubaoCatalog>(_doubaoCache);
   React.useEffect(() => {
-    if (_doubaoCache) { setDb(_doubaoCache); return; }
+    if (_doubaoFresh) { setDb(_doubaoCache); return; }
     let alive = true;
     void ensureDoubaoVoices().then(() => { if (alive) setDb(_doubaoCache); });
     return () => { alive = false; };
   }, []);
-  if (!db?.enabled || db.voices.length === 0) return { groups: VOICE_GROUPS, doubaoEnabled: false, defaultVoice: '', doubaoVoices: [] };
+  if (!db?.enabled || db.voices.length === 0) {
+    return { groups: VOICE_GROUPS, doubaoEnabled: false, defaultVoice: '', doubaoVoices: [], priceCnyPer10k: 0, priceUsdPer10k: 0 };
+  }
   const grp = {
     groupZh: '🔥 豆包真人语音(推荐)', groupEn: '🔥 Doubao lifelike (recommended)',
     voices: db.voices.map((v) => ({ id: v.id, zh: v.zh || v.id, en: v.en || v.zh || v.id })) as VoiceOpt[],
   };
-  return { groups: [grp, ...VOICE_GROUPS], doubaoEnabled: true, defaultVoice: db.voices[0].id, doubaoVoices: db.voices };
+  return {
+    groups: [grp, ...VOICE_GROUPS], doubaoEnabled: true, defaultVoice: db.voices[0].id, doubaoVoices: db.voices,
+    priceCnyPer10k: db.priceCnyPer10k, priceUsdPer10k: db.priceUsdPer10k,
+  };
 }
 
 const VOICE_GROUPS: { groupZh: string; groupEn: string; voices: VoiceOpt[] }[] = [
