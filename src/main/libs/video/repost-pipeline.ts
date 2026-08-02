@@ -22,7 +22,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { spawn } from 'child_process';
-import { runFfmpeg, probeDuration, probeImageSize, isFfmpegAvailable, getFfmpegPath } from './ffmpegRuntime';
+import { runFfmpeg, probeDuration, probeImageSize, probeVideoCodec, isFfmpegAvailable, getFfmpegPath } from './ffmpegRuntime';
 import { getYtdlpPath, detectSystemProxy } from './ytdlpRuntime';
 import { resolveBgmPath } from './bgm';
 import { getVideoConfig } from './videoConfig';
@@ -57,7 +57,13 @@ const TUNE = {
   // 配音合块(dubPlan):短于 chunkMinDur 且间隙 ≤chunkGap 的相邻句并成一块整块合成,最多 chunkMax 句。
   chunkMinDur: 2.5, chunkGap: 1.2, chunkMax: 4,
   maskRatio: 0.16, fontDivisor: 700,
-  ytdlpFormat: 'bv*+ba/b', ytdlpExtractorArgs: 'youtube:player_client=android,ios',
+  // ⚠️ 优先挑 H.264(avc1)+ AAC(mp4a),别只写 bv*+ba。「最佳画质」在 YouTube 上通常是
+  //    VP9/AV1,封进 mp4 规范上合法但 Windows Media Player / QuickTime / 多数平台播不了
+  //    (真机反馈:下下来的源片打不开)。四级回退,每级都【显式配一条音轨】——
+  //    不能退化成 ext=mp4 那种写法,TikTok 的"最佳 mp4"可能是纯视频无音轨,抽音必挂。
+  //    实在没有 H.264 的站才落到最后一级(照旧 bv*+ba/b),那时靠合成阶段转码兜底。
+  ytdlpFormat: 'bv*[vcodec^=avc1]+ba[acodec^=mp4a]/bv*[vcodec^=avc1]+ba/b[vcodec^=avc1]/bv*+ba/b',
+  ytdlpExtractorArgs: 'youtube:player_client=android,ios',
   translatePrompt: '', condensePrompt: '',
 };
 async function refreshTune(): Promise<void> {
@@ -1323,12 +1329,20 @@ export async function runRepostPipeline(
           ], { timeoutMs: 600_000, signal });
           if (!r.ok || !fs.existsSync(outPath)) { const err = '合成失败(换音轨/延长画面出错)'; tracker.fail('compose', err); return { ok: false, error: err }; }
         } else {
-          // 配音不长于视频:换音轨零转码(音频已 apad 到视频长,-shortest 对齐)。
+          // 配音不长于视频:换音轨,画面能 copy 就 copy(零转码最快)。
+          // ⚠️ 但【只有 H.264 才能 copy】。YouTube 的最佳画质通常是 VP9/AV1,封进 mp4 容器
+          //    规范上合法、实际 Windows Media Player / QuickTime / 多数平台都播不了 ——
+          //    copy 出去用户拿到的成片就是打不开的(真机反馈:下下来的片子播不了)。
+          //    非 H.264 一律转 libx264,慢一点但保证到处能播、能发。
+          const srcCodec = await probeVideoCodec(sourceVideoPath).catch(() => '');
+          const canCopy = srcCodec === 'h264';
+          if (!canCopy && srcCodec) tracker.progress(`🎞️ 源视频编码 ${srcCodec}(非 H.264,多数播放器/平台不认)→ 转码为 H.264`);
           const r = await runFfmpeg([
             '-y', '-i', sourceVideoPath, '-i', finalAudio,
             '-map', '0:v:0', '-map', '1:a:0',
-            '-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k', '-shortest', '-movflags', '+faststart', outPath,
-          ], { timeoutMs: 300_000, signal });
+            ...(canCopy ? ['-c:v', 'copy'] : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p']),
+            '-c:a', 'aac', '-b:a', '160k', '-shortest', '-movflags', '+faststart', outPath,
+          ], { timeoutMs: 600_000, signal });
           if (!r.ok || !fs.existsSync(outPath)) { const err = '合成失败(换音轨出错)'; tracker.fail('compose', err); return { ok: false, error: err }; }
         }
       }
