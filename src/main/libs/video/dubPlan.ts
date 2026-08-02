@@ -33,10 +33,15 @@ export interface SpeechProfile {
    *    把 40 当成「40 个词」发给模型 = 等于没约束,该精简的一句都不会精简。
    */
   cjk: boolean;
+  /**
+   * 平均每词多少个【可发音字符】(不含空格和标点)。只对非 CJK 有意义 ——
+   * 估时按字符算、翻译预算按词下,两边换算全靠这个数。
+   */
+  charsPerWord: number;
 }
 
-const CJK_BASE = { pauseWeight: 0.30, numberWeight: 0.22, acronymWeight: 0.12, cjk: true };
-const LATIN_BASE = { pauseWeight: 0.24, numberWeight: 0.26, acronymWeight: 0.30, cjk: false };
+const CJK_BASE = { pauseWeight: 0.30, numberWeight: 0.22, acronymWeight: 0.12, cjk: true, charsPerWord: 1 };
+const LATIN_BASE = { pauseWeight: 0.24, numberWeight: 0.26, acronymWeight: 0.30, cjk: false, charsPerWord: 5.0 };
 
 /**
  * ⚠️ 语言名和两字母语言码【必须分开匹配】。放在同一个正则里靠数组顺序碰运气会错:
@@ -86,12 +91,35 @@ export function speechProfileFor(langLabel: string, sampleText = ''): SpeechProf
 export function textUnits(text: string, p: SpeechProfile): number {
   const t = String(text || '').trim();
   if (!t) return 0;
-  return p.cjk ? nonSpaceCount(t) : (t.split(/\s+/).filter(Boolean).length || 1);
+  // CJK 按可发音字符(和估时器同口径,标点不算);其它按词。
+  return p.cjk ? pronounceableCount(t) : (t.split(/\s+/).filter(Boolean).length || 1);
 }
 
 function nonSpaceCount(text: string): number {
   let n = 0;
   for (const ch of text) if (!/\s/.test(ch)) n++;
+  return n;
+}
+
+/**
+ * 【可发音字符】数:不含空白,**也不含标点**。
+ *
+ * ⚠️ 这是估时准不准的关键。原来 base 用 nonSpaceCount(把标点也当成要念的字),
+ *   下面又额外加一次 punctuationPause —— **标点被算了两遍**。实测:15 字 + 逗号 + 句号
+ *   被算成 17 个字 = 4.05s,再加 0.15s 停顿 = 4.20s;而实际只有 15 个字要发音,
+ *   真值 3.72s。虚高 13%,直接把「翻译刚好用满预算」的句子全判成超窗 ——
+ *   真机上一条片 11 句被误判、白烧一次 LLM 精简,译文还被砍。
+ *   (KrillinAI 的 nonSpaceRuneCount 同样把标点算进 base,它这块也是错的。)
+ *
+ * 标点用 \p{P} 判(不含 \p{S}:$ % # 这类符号是要念出来的,占时间)。
+ */
+function pronounceableCount(text: string): number {
+  let n = 0;
+  for (const ch of text) {
+    if (/\s/.test(ch)) continue;
+    if (/\p{P}/u.test(ch)) continue;
+    n++;
+  }
   return n;
 }
 
@@ -127,10 +155,24 @@ function acronymPenalty(text: string, p: SpeechProfile): number {
  * 误差 ±15% 属正常 —— 后面还有 atempo 压缩 + 顺延兜底,不需要精确。
  */
 export function estimateSpeechSeconds(text: string, p: SpeechProfile): number {
-  const runes = nonSpaceCount(text);
+  // base 只数【可发音字符】—— 标点不发音,它的耗时由 punctuationPause 单独计。
+  const runes = pronounceableCount(text);
   if (runes === 0) return 0;
   const base = runes / Math.max(0.5, p.cps);
   return base + punctuationPause(text, p) + numberPenalty(text, p) + acronymPenalty(text, p);
+}
+
+/**
+ * 翻译时给每句的【长度预算】(CJK=字/秒,其它=词/秒)。
+ *
+ * ⚠️ 必须从估时器推导,不能另设一个数。原来翻译按 5 字/秒 产出、估时器按 4.2 字/秒 判断,
+ *   两套数各调各的、没人保证一致 —— 结果就是「译文老老实实用满预算 = 必被判超窗」。
+ *   现在:预算 = cps × atempo 上限 × 安全系数。atempo 那 25% 就是留给译文的余量,
+ *   安全系数再留一点给标点停顿。
+ */
+export function budgetPerSecond(p: SpeechProfile, atempoMax: number, safety = 0.95): number {
+  const perSecChars = Math.max(0.5, p.cps) * Math.max(1, atempoMax) * safety;
+  return p.cjk ? perSecChars : perSecChars / Math.max(1, p.charsPerWord);
 }
 
 /** 语速百分比(-50..50)对时长的缩放:+25% 语速 → 时长 ×0.8。 */

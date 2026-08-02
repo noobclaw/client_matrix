@@ -29,7 +29,7 @@ import { getVideoConfig } from './videoConfig';
 import { synthesize, getVoiceFallbacks, getLastTtsError, alignSentencesToCues, voiceProviderLabel, type TtsCue } from './tts';
 import {
   speechProfileFor, estimateSpeechSeconds, rateScale, makeChunks, chunkText, distributeChunk, textUnits,
-  type DubCue,
+  budgetPerSecond, type DubCue,
 } from './dubPlan';
 import { resolvePublishCaption } from './publishCaptionWriter';
 import { callDeepSeek } from './scriptWriter';
@@ -48,7 +48,9 @@ function apiBase(): string {
 // ── 服务端可调参数(admin repost_* → /api/video/config 下发;拉不到用默认=历史行为)。
 // 模块级单例:每次 runRepostPipeline 开跑时刷新一次。调这些不用重新打包客户端。
 const TUNE = {
-  budgetCjk: 5, budgetLatin: 3.2,
+  // 0 = 自动按估时器推导(budgetPerSecond)。admin 填了非零值才覆盖 ——
+  // 两套数各调各的正是「译文用满预算就必被判超窗」的根因。
+  budgetCjk: 0, budgetLatin: 0,
   rateHi: 1.08, rateLo: 0.9, rateUpMax: 15, rateDownMax: 10,
   lineBoost: 20, atempoMax: 1.25, stretchMax: 1.15,
   gapSplit: 1.0, unitsSplit: 36,
@@ -62,8 +64,8 @@ async function refreshTune(): Promise<void> {
   try {
     const c: any = await getVideoConfig();
     const n = (v: unknown, dv: number) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : dv);
-    TUNE.budgetCjk = n(c?.repostBudgetCjk, TUNE.budgetCjk);
-    TUNE.budgetLatin = n(c?.repostBudgetLatin, TUNE.budgetLatin);
+    TUNE.budgetCjk = n(c?.repostBudgetCjk, 0);
+    TUNE.budgetLatin = n(c?.repostBudgetLatin, 0);
     TUNE.rateHi = n(c?.repostRateHi, TUNE.rateHi);
     TUNE.rateLo = n(c?.repostRateLo, TUNE.rateLo);
     TUNE.rateUpMax = n(c?.repostRateUpMax, TUNE.rateUpMax);
@@ -605,15 +607,19 @@ async function translateSegments(
   ].join('\n');
   // admin 可整体覆盖翻译 prompt({{TARGET}} 占位;必须保持 translations 输出契约)。
   const systemFinal = TUNE.translatePrompt.trim() ? TUNE.translatePrompt.split('{{TARGET}}').join(targetLangLabel) : system;
-  // 每句长度预算直接算成【具体数字】给模型(比让它自己按语速换算服从得多):
-  // CJK ≈ 5 字/秒,其它 ≈ 2.6 词/秒(边界略宽松 —— 超出的部分配音端先自动提速、
-  // 再 atempo,轻度压缩只做最后手段,避免译文被砍得太干)。
-  const cjkTarget = /中文|日本|日語|한국|Chinese|Japanese|Korean/i.test(targetLangLabel);
+  // 每句长度预算直接算成【具体数字】给模型(比让它自己按语速换算服从得多)。
+  // ⚠️ 预算【从估时器推导】,不能另设一个独立的数:原来翻译按 5 字/秒 产出、配音端估时
+  //    按 4.2 字/秒 判断超窗,两套数各调各的 —— 结果是「译文老老实实用满预算 = 必被判超窗」,
+  //    真机上一条片 10~11 句被误判、白烧一次 LLM 精简还把译文砍短。
+  //    现在 budgetPerSecond = cps × atempoMax × 0.95:atempo 那 25% 就是留给译文的余量。
+  //    admin 填了 repost_budget_cjk / _latin(非零)才覆盖这个推导值。
+  const profile = speechProfileFor(targetLangLabel);
+  const perSec = profile.cjk
+    ? (TUNE.budgetCjk > 0 ? TUNE.budgetCjk : budgetPerSecond(profile, TUNE.atempoMax))
+    : (TUNE.budgetLatin > 0 ? TUNE.budgetLatin : budgetPerSecond(profile, TUNE.atempoMax));
   const budgetOf = (s: Seg) => {
     const sec = Math.max(0.6, s.end - s.start);
-    // 拉丁语预算 2.6→3.2 词/秒:中文信息密度高,2.6 逼着模型狠删细节(真机反馈英文太简短);
-    // 超出部分交给 全局提速≤15% + 画面伸缩≤15% + 逐句提速 消化,极端才精简。
-    return Math.max(3, Math.floor(sec * (cjkTarget ? TUNE.budgetCjk : TUNE.budgetLatin)));
+    return Math.max(3, Math.floor(sec * perSec));
   };
 
   const out: Seg[] = [];
@@ -760,8 +766,9 @@ async function synthAndAlign(
     });
   });
   if (pending.length > 0 && !signal?.aborted) {
-    onLog(`✂️ ${pending.length} 句预估超出画面窗口,合成前统一精简(避免配音拖过画面)`);
+    onLog(`✂️ ${pending.length} 句预估超出画面窗口,合成前统一精简(一次 AI 调用,约 10~30s)`);
     const shortened = await condenseBatch(pending.map((p) => ({ text: p.text, budget: p.budget })), onCost, signal);
+    onLog(`✂️ 精简完成,开始合成`);
     pending.forEach((p, i) => {
       const s = shortened[i];
       if (s && s !== p.text) {
@@ -780,8 +787,20 @@ async function synthAndAlign(
   };
 
   // ── 逐块:合成 → 贴轴 → 归一化(含 atempo)→ 排进时间线 ──
+  // ⚠️ 这个循环必须打进度。一条长片能有 150+ 块,每块一次 TTS + 一次 ffmpeg,整体要跑好几分钟;
+  //    原来循环里一行日志都没有,用户看到的就是「✂️ 精简完」之后彻底没动静 —— 完全像卡死。
+  //    (真机反馈:等了四分钟以为挂了。)每块都打太吵,按 5% 或至少每 10 块打一次。
+  const progressEvery = Math.max(1, Math.min(10, Math.ceil(chunks.length / 20)));
+  const t0 = Date.now();
+  if (chunks.length > 12) onLog(`🎤 开始逐块合成,共 ${chunks.length} 块(长片需要几分钟,下面会报进度)`);
   for (let ci = 0; ci < chunks.length; ci++) {
     throwIfAborted(signal);
+    if (chunks.length > 12 && ci > 0 && ci % progressEvery === 0) {
+      const done = ci / chunks.length;
+      const elapsed = (Date.now() - t0) / 1000;
+      const eta = done > 0 ? Math.round(elapsed / done - elapsed) : 0;
+      onLog(`🎤 配音进度 ${ci}/${chunks.length} 块(${Math.round(done * 100)}%)· 已用 ${Math.round(elapsed)}s${eta > 0 ? ` · 约剩 ${eta}s` : ''}`);
+    }
     const ch = chunks[ci];
     const text = chunkText(dubCues, ch);
     if (!text) continue;
