@@ -337,7 +337,10 @@ async function resolveSourceVideo(
   //   bv*+ba/b = 最佳视频+最佳音频合并,再不行退最佳单流(通常也带音轨)→ 保证有声音。
   const baseArgs = [
     '-f', TUNE.ytdlpFormat,
-    '--no-playlist', '--retries', '5', '--no-progress',
+    // ⚠️ 别加 --no-progress:大文件要下几分钟,没有进度用户只能看着一行「正在下载源视频」
+    //    干等,完全分不清是在下还是卡死(真机反馈)。--newline 让 yt-dlp 每次进度都换行输出
+    //    (默认用 \r 原地刷新,管道里读到的是一坨),这样才能逐行解析。
+    '--no-playlist', '--retries', '5', '--newline',
     '--merge-output-format', 'mp4',
     '-o', outPath, url,
   ];
@@ -349,23 +352,60 @@ async function resolveSourceVideo(
   const proxy = process.env.HTTPS_PROXY || process.env.https_proxy || detectSystemProxy();
   if (proxy) baseArgs.push('--proxy', proxy);
 
-  const runYtdlp = (args: string[]): Promise<{ ok: boolean; err: string }> => new Promise((resolve) => {
+  /**
+   * 跑 yt-dlp。`showProgress` 时解析 stdout 的下载进度往日志推。
+   *
+   * yt-dlp 的进度行长这样(--newline 下每条独占一行):
+   *   `[download]  45.2% of  120.50MiB at    2.31MiB/s ETA 00:30`
+   * 限流:进度每涨 5% 或每 3 秒才打一条,否则几百行刷屏。
+   * bv*+ba 会【分两趟】下(先视频后音频),第二趟百分比从 0 重新开始 —— 百分比明显回退
+   *   就认为换了一个流,重置基准并标出「第 N 个文件」,不然用户看到进度倒退会以为出错。
+   */
+  const runYtdlp = (args: string[], showProgress = false): Promise<{ ok: boolean; err: string }> => new Promise((resolve) => {
     const child = spawn(ytdlp, args, { windowsHide: true });
     let err = '';
+    if (showProgress) {
+      let buf = '';
+      let lastPct = -1;
+      let lastAt = 0;
+      let filePart = 0;
+      child.stdout?.on('data', (d) => {
+        buf += String(d);
+        const lines = buf.split(/\r?\n/);
+        buf = lines.pop() || '';
+        for (const line of lines) {
+          const m = line.match(/\[download\]\s+([\d.]+)%\s+of\s+~?\s*([\d.]+\s*\w+)(?:\s+at\s+([\d.]+\s*\w+\/s))?(?:\s+ETA\s+([\d:]+))?/);
+          if (!m) continue;
+          const pct = Number(m[1]);
+          if (!Number.isFinite(pct)) continue;
+          if (pct < lastPct - 10) { filePart++; lastPct = -1; }   // 百分比回退 = 换了个流
+          const now = Date.now();
+          const advanced = pct >= lastPct + 5;
+          const stale = now - lastAt >= 3000;
+          if (!advanced && !stale && pct < 100) continue;
+          lastPct = pct; lastAt = now;
+          const size = String(m[2] || '').replace(/\s+/g, '');
+          const speed = m[3] ? String(m[3]).replace(/\s+/g, '') : '';
+          const eta = m[4] || '';
+          const part = filePart > 0 ? `(第 ${filePart + 1} 个流)` : '';
+          onLog(`⬇️ 下载中 ${pct.toFixed(1)}% / ${size}${speed ? ` · ${speed}` : ''}${eta ? ` · 约剩 ${eta}` : ''}${part}`);
+        }
+      });
+    }
     child.stderr?.on('data', (d) => { err += String(d); });
     child.on('error', (e) => resolve({ ok: false, err: String(e) }));
     child.on('close', (code) => resolve({ ok: code === 0, err }));
     signal?.addEventListener('abort', () => { try { child.kill('SIGKILL'); } catch { /* ignore */ } resolve({ ok: false, err: 'aborted' }); }, { once: true });
   });
 
-  let r = await runYtdlp(baseArgs);
+  let r = await runYtdlp(baseArgs, true);
   // YouTube 签名坎(真机实报):新版 yt-dlp 解 web 端签名需要外部 JS runtime(deno),
   // 用户机器没有 → 「s may be missing / EJS」+ 403。android/ios 播放端不走 JS 签名,
   // 大多数视频可直接下 → 自动换端重试一次,不用装任何东西。
   if (!r.ok && !signal?.aborted && /youtu\.?be/i.test(url) && /403|EJS|signature|s may be missing|nsig/i.test(r.err)) {
     onLog('⚙️ YouTube 签名受限,自动换 android/ios 播放端重试…');
     try { fs.unlinkSync(outPath); } catch { /* 无残留 */ }
-    r = await runYtdlp(['--extractor-args', TUNE.ytdlpExtractorArgs, ...baseArgs]);
+    r = await runYtdlp(['--extractor-args', TUNE.ytdlpExtractorArgs, ...baseArgs], true);
   }
   if (!r.ok || !fs.existsSync(outPath)) {
     if (r.err && r.err !== 'aborted') onLog(`yt-dlp 失败 · ${r.err.slice(-200)}`);
