@@ -892,6 +892,58 @@ async function synthAndAlign(
   return { voiceTrackPath: finalTrack, totalDur: totalDur || cursor, cues };
 }
 
+// ── 字幕存档:原字幕 / 译文字幕 / 译文纯文本,全落到成片同目录 ────────────────
+/** 秒 → SRT 时间码 `HH:MM:SS,mmm`。 */
+function toSrtTime(sec: number): string {
+  const s = Math.max(0, sec);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = Math.floor(s % 60);
+  const ms = Math.round((s - Math.floor(s)) * 1000);
+  const p = (n: number, w = 2) => String(n).padStart(w, '0');
+  return `${p(h)}:${p(m)}:${p(ss)},${p(ms, 3)}`;
+}
+
+function buildSrt(cues: Array<{ start: number; end: number; text: string }>): string {
+  return cues
+    .filter((c) => c.text && c.end > c.start)
+    .map((c, i) => `${i + 1}\n${toSrtTime(c.start)} --> ${toSrtTime(c.end)}\n${c.text.replace(/\r?\n/g, ' ').trim()}\n`)
+    .join('\n');
+}
+
+/**
+ * 把字幕存一份到成片目录,方便人工核对译文。写三种:
+ *   · `原字幕_<源语言>.srt` —— YouTube CC / 内嵌字幕轨原样留档;没有字幕(走 ASR)时用转写结果
+ *   · `译文字幕_<目标语言>.srt` —— 最终时间轴(和成片里烧的那份完全一致)
+ *   · `译文_<目标语言>.txt` —— 纯文本,一行一句、带时间码前缀,直接读
+ * 任何一份写失败都只记日志,绝不影响出片。
+ */
+function saveSubtitleArchive(
+  destDir: string,
+  srcLang: string,
+  targetLabel: string,
+  original: Array<{ start: number; end: number; text: string }>,
+  translated: Array<{ start: number; end: number; text: string }>,
+  onLog: (m: string) => void,
+): void {
+  const safe = (s: string) => String(s || '').replace(/[\\/:*?"<>|]/g, '_').slice(0, 40) || 'x';
+  const written: string[] = [];
+  const write = (name: string, content: string) => {
+    if (!content.trim()) return;
+    try { fs.writeFileSync(path.join(destDir, name), content, 'utf8'); written.push(name); } catch { /* 存档失败不影响出片 */ }
+  };
+  write(`原字幕_${safe(srcLang)}.srt`, buildSrt(original));
+  write(`译文字幕_${safe(targetLabel)}.srt`, buildSrt(translated));
+  write(
+    `译文_${safe(targetLabel)}.txt`,
+    translated
+      .filter((c) => c.text && c.end > c.start)
+      .map((c) => `[${toSrtTime(c.start).slice(0, 8)}] ${c.text.replace(/\r?\n/g, ' ').trim()}`)
+      .join('\n'),
+  );
+  if (written.length) onLog(`📝 字幕已存档:${written.join('、')}`);
+}
+
 // ── ASS 字幕(修「巨字挡画面」bug)──
 // SRT + force_style 的 FontSize 是按 libass 内部 288 高虚拟画布算的:竖屏 1920 高会放大
 // ~6.7 倍 → 20 号变 130+px 巨字。改为生成 ASS:PlayRes = 视频真实分辨率,字号按视频高度
@@ -1105,6 +1157,17 @@ export async function runRepostPipeline(
       aligned = await synthAndAlign(translated, voice, rate, assetDir, srcDur, targetLabel, (m) => tracker.progress(m), signal, (tk, usd) => { tracker.addTokens(tk, usd); aiCostUsd += usd; });
       if (!aligned) { const err = '配音失败(edge-tts 不可用或全部句子合成失败)'; tracker.fail('voice', err); return { ok: false, error: err }; }
       tracker.done('voice', `✅ 配音就绪 · ${aligned.cues.length} 句 · 共 ${aligned.totalDur.toFixed(1)}s`);
+
+      // 字幕存档(原文 / 译文 srt + 译文 txt)。放在这里是因为要用 aligned.cues 的最终时间轴 ——
+      //   它和成片里烧进去的那份完全一致,拿去核对译文不会有偏差。
+      saveSubtitleArchive(
+        destDir,
+        String((input as any).repostSourceLang || asr.language || 'auto'),
+        targetLabel,
+        regrouped,
+        aligned.cues,
+        (m) => tracker.progress(m),
+      );
     }
 
     // ── STEP 5:合成 ──

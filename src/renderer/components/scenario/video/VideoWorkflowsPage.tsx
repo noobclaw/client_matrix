@@ -2437,15 +2437,10 @@ const ASPECT_OPTIONS: { id: VideoAspect; zh: string; en: string; icon: string }[
 // ⚠️ 改这里的 id 时,同步检查 src/main/libs/video/tts.ts 的 getVoiceFallbacks 表
 //   (后台失败救场链);否则改名后失败 voice 没救场直接退费。
 type VoiceOpt = { id: string; zh: string; en: string };
-// 豆包(火山)真人音色:服务端 admin 下发,进程内缓存一次。配置了就排在最前(默认音色),
-// 合成失败自动回退 Edge(见 main/libs/video/tts.ts)。没配置 → 只有 Edge,行为同以前。
-// 音色说明按【所选音色】动态显示:豆包(真人大模型,按字计费)/ Edge(免费)。
-// 之前写死 'edge-tts 免费',选了豆包也显示它 → 用户以为没生效(真机反馈)。
-function voiceEngineHint(voice: string, isZh: boolean): string {
-  const doubao = /_(male|female)_/i.test(String(voice || '')) && !/Neural$/i.test(String(voice || ''));
-  if (doubao) return isZh ? '豆包真人语音 · 大模型合成(按字数计费,失败自动回退 Edge)' : 'Doubao lifelike (per-character billing, auto-fallback to Edge)';
-  return isZh ? 'Edge 语音 · 在线合成,免费' : 'Edge voice · free';
-}
+// 豆包(火山)真人音色:服务端 admin 下发,进程内缓存一次。配置了就排在最前(默认音色)。
+// 没配置 → 只有微软 Edge,行为同以前。
+// ⚠️ 这里原来有个 voiceEngineHint,在音色框下面写「按字数计费,失败自动回退 Edge」——
+//   已按要求移除。计费细节不在选择器上对用户展示;「免费」只用微软 Edge 上那个红标表达。
 
 let _doubaoCache: { enabled: boolean; voices: Array<{ id: string; zh?: string; en?: string; lang?: string; scene?: string }> } | null = null;
 
@@ -2637,6 +2632,14 @@ const VoicePicker: React.FC<{
 
   const on = VP_ACCENT[accent] || VP_ACCENT.sky;
   const tab = (active: boolean) => `px-3 py-1.5 rounded-lg text-xs border transition-colors ${active ? on : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-400'}`;
+  // ⚠️ 引擎选择器【必须和下面的语种 chip 长得不一样】。原来两级用的是同一个 tab() 样式,
+  //   「豆包真人 / 微软 Edge」和「中文 86 / 英语 41」挤在一起看着是同一排东西 ——
+  //   真机反馈:用户以为上面那两个也是语言。所以这里做成更大更厚的卡片:双线边框、
+  //   加粗字号、块级平分宽度,和下面的小 pill 拉开层级。
+  const engineTab = (active: boolean) => [
+    'relative flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold border-2 transition-all',
+    active ? `${on} shadow-sm` : 'border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600',
+  ].join(' ');
   const item = (active: boolean) => `text-left text-sm px-2.5 py-2 rounded-md truncate transition-colors ${active ? (VP_ITEM[accent] || VP_ITEM.sky) : 'hover:bg-black/5 dark:hover:bg-white/10 dark:text-gray-200'}`;
   const [open, setOpen] = useState(false);
   // 当前音色的显示名(豆包/Edge 都查一遍;查不到就显示原始 id,老任务的音色不会变空白)
@@ -2660,14 +2663,18 @@ const VoicePicker: React.FC<{
 
   return (
     <div className="space-y-2">
-      {/* 引擎 tab */}
+      {/* 引擎选择(第 1 级)—— 刻意做得比下面的语种 chip 大一号,别让用户看成语言 */}
       {doubaoEnabled && (
-        <div className="flex gap-2">
-          <button type="button" onClick={() => { setEngine('doubao'); const first = (dbByLang.get(dbLang) || doubaoVoices)[0]; if (first && !isDoubaoId(value)) onChange(first.id); }} className={tab(engine === 'doubao')}>
+        <div className="flex gap-2 pt-1.5">
+          <button type="button" onClick={() => { setEngine('doubao'); const first = (dbByLang.get(dbLang) || doubaoVoices)[0]; if (first && !isDoubaoId(value)) onChange(first.id); }} className={engineTab(engine === 'doubao')}>
             🔥 {isZh ? '豆包真人' : 'Doubao lifelike'}
           </button>
-          <button type="button" onClick={() => { setEngine('edge'); if (isDoubaoId(value)) onChange(VOICE_GROUPS[0].voices[0].id); }} className={tab(engine === 'edge')}>
-            {isZh ? 'Edge 免费' : 'Edge free'}
+          <button type="button" onClick={() => { setEngine('edge'); if (isDoubaoId(value)) onChange(VOICE_GROUPS[0].voices[0].id); }} className={engineTab(engine === 'edge')}>
+            {isZh ? '微软 Edge' : 'Microsoft Edge'}
+            {/* 右上角红标。父级有 pt-1.5 给它留出溢出空间,否则会被上一行裁掉。 */}
+            <span className="absolute -top-2 -right-1.5 px-1.5 py-[1px] rounded-full bg-red-500 text-white text-[10px] font-bold leading-tight shadow-sm pointer-events-none">
+              {isZh ? '免费' : 'FREE'}
+            </span>
           </button>
         </div>
       )}
@@ -4110,7 +4117,7 @@ const VideoConfigModal: React.FC<{
 
               {/* 配音音色 + 语速 —— 普通模式恒显示;Seedance 仅在开了「AI 配音」时显示 */}
               {(mode !== 'pure_ai' || aiNarration) && (
-              <Field label={isZh ? '配音音色' : 'Voice'} hint={voiceEngineHint(voice, isZh)}>
+              <Field label={isZh ? '配音音色' : 'Voice'}>
                 <VoicePicker isZh={isZh} value={voice} onChange={setVoice} accent="rose" targetLang={scriptLang} rate={voiceRate} />
                 <div className="flex gap-2 mt-2">
                   {RATE_OPTIONS.map((r) => (
@@ -6510,7 +6517,7 @@ export const RepostVideoModal: React.FC<{ isZh: boolean; matrixMode?: boolean; o
 
           {step === 3 && (
             <>
-              <Field label={isZh ? '配音音色' : 'Voice'} hint={voiceEngineHint(voice, isZh)}>
+              <Field label={isZh ? '配音音色' : 'Voice'}>
                 <VoicePicker isZh={isZh} value={voice} onChange={setVoice} accent="sky" targetLang={targetLang} />
                 {/* 语速不给用户选(用户拍板):系统按原片每句时长自动控速(超长句自动提速),手选反而总拖后。 */}
                 <div className="mt-2 text-[11px] text-gray-400">⚡ {isZh ? '语速自动:按原片节奏逐句适配,无需手选' : 'Auto pacing: matched to the source rhythm sentence by sentence'}</div>
@@ -7023,7 +7030,7 @@ export const LocalMixVideoModal: React.FC<{ isZh: boolean; matrixMode?: boolean;
                       {SCRIPT_LANGS.map((l) => (<option key={l.code} value={l.code}>{isZh ? l.zh : l.en}</option>))}
                     </select>
                   </Field>
-                  <Field label={isZh ? '配音音色' : 'Voice'} hint={voiceEngineHint(voice, isZh)}>
+                  <Field label={isZh ? '配音音色' : 'Voice'}>
                     <VoicePicker isZh={isZh} value={voice} onChange={setVoice} accent="emerald" targetLang={scriptLang} rate={voiceRate} />
                     <div className="flex gap-2 mt-2">
                       {RATE_OPTIONS.map((r) => (
