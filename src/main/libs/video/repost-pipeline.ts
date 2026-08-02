@@ -913,29 +913,39 @@ function buildSrt(cues: Array<{ start: number; end: number; text: string }>): st
 
 /**
  * 把字幕存一份到成片目录,方便人工核对译文。写三种:
- *   · `原字幕_<源语言>.srt` —— YouTube CC / 内嵌字幕轨原样留档;没有字幕(走 ASR)时用转写结果
- *   · `译文字幕_<目标语言>.srt` —— 最终时间轴(和成片里烧的那份完全一致)
- *   · `译文_<目标语言>.txt` —— 纯文本,一行一句、带时间码前缀,直接读
+ *   · `原字幕_<源语言码>.srt` —— YouTube CC / 内嵌字幕轨原样留档;没有字幕(走 ASR)时用转写结果
+ *   · `译文字幕_<目标语言码>.srt` —— 最终时间轴(和成片里烧的那份完全一致)
+ *   · `译文_<目标语言码>.txt` —— 纯文本,一行一句、带时间码前缀,直接读
+ *
+ * ⚠️ 文件名用【语言代码】(en/zh/ja/ko/vi/es/pt/fr/de/id),不用显示名 ——
+ *   目标语言不一定是英语,显示名里有空格和变音符(`Bahasa Indonesia`、`Tiếng Việt`、
+ *   `한국어`),当文件名既难敲也难在脚本里匹配。代码短、纯 ASCII,还能和「原字幕」那份对齐。
  * 任何一份写失败都只记日志,绝不影响出片。
  */
 function saveSubtitleArchive(
   destDir: string,
-  srcLang: string,
-  targetLabel: string,
+  srcLangCode: string,
+  targetLangCode: string,
   original: Array<{ start: number; end: number; text: string }>,
   translated: Array<{ start: number; end: number; text: string }>,
   onLog: (m: string) => void,
 ): void {
-  const safe = (s: string) => String(s || '').replace(/[\\/:*?"<>|]/g, '_').slice(0, 40) || 'x';
+  // 只留字母数字和连字符(zh-TW、pt-BR 这类要保住),其余一律丢。
+  const safe = (s: string, dv: string) => {
+    const t = String(s || '').trim().replace(/[^A-Za-z0-9-]/g, '').slice(0, 12);
+    return t && t.toLowerCase() !== 'auto' ? t : dv;
+  };
+  const srcTag = safe(srcLangCode, 'src');
+  const dstTag = safe(targetLangCode, 'dst');
   const written: string[] = [];
   const write = (name: string, content: string) => {
     if (!content.trim()) return;
     try { fs.writeFileSync(path.join(destDir, name), content, 'utf8'); written.push(name); } catch { /* 存档失败不影响出片 */ }
   };
-  write(`原字幕_${safe(srcLang)}.srt`, buildSrt(original));
-  write(`译文字幕_${safe(targetLabel)}.srt`, buildSrt(translated));
+  write(`原字幕_${srcTag}.srt`, buildSrt(original));
+  write(`译文字幕_${dstTag}.srt`, buildSrt(translated));
   write(
-    `译文_${safe(targetLabel)}.txt`,
+    `译文_${dstTag}.txt`,
     translated
       .filter((c) => c.text && c.end > c.start)
       .map((c) => `[${toSrtTime(c.start).slice(0, 8)}] ${c.text.replace(/\r?\n/g, ' ').trim()}`)
@@ -1160,10 +1170,11 @@ export async function runRepostPipeline(
 
       // 字幕存档(原文 / 译文 srt + 译文 txt)。放在这里是因为要用 aligned.cues 的最终时间轴 ——
       //   它和成片里烧进去的那份完全一致,拿去核对译文不会有偏差。
+      // 源语言优先用 ASR 实际探测到的(用户那栏常常留 'auto');目标语言用向导选的码。
       saveSubtitleArchive(
         destDir,
-        String((input as any).repostSourceLang || asr.language || 'auto'),
-        targetLabel,
+        String(asr.language || (input as any).repostSourceLang || ''),
+        String(targetLang || ''),
         regrouped,
         aligned.cues,
         (m) => tracker.progress(m),
