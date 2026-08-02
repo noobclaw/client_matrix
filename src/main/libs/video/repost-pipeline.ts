@@ -54,6 +54,9 @@ const TUNE = {
   rateHi: 1.08, rateLo: 0.9, rateUpMax: 15, rateDownMax: 10,
   lineBoost: 20, atempoMax: 1.25, stretchMax: 1.15,
   gapSplit: 1.0, unitsSplit: 36,
+  // 一条最长几秒 —— 自动字幕没标点时全靠它兜底。见 maxCueSec 那段说明:
+  // 窗口越长,窗口内「译文比画面早」的漂移越大(9s→2.2s,5s→1.2s)。
+  maxCueSec: 5,
   // 配音合块(dubPlan):短于 chunkMinDur 且间隙 ≤chunkGap 的相邻句并成一块整块合成,最多 chunkMax 句。
   chunkMinDur: 2.5, chunkGap: 1.2, chunkMax: 4,
   maskRatio: 0.16, fontDivisor: 700,
@@ -81,6 +84,7 @@ async function refreshTune(): Promise<void> {
     TUNE.stretchMax = n(c?.repostStretchMax, TUNE.stretchMax);
     TUNE.gapSplit = n(c?.repostGapSplit, TUNE.gapSplit);
     TUNE.unitsSplit = n(c?.repostUnitsSplit, TUNE.unitsSplit);
+    TUNE.maxCueSec = n(c?.repostMaxCueSec, TUNE.maxCueSec);
     TUNE.chunkMinDur = n(c?.repostChunkMinDur, TUNE.chunkMinDur);
     TUNE.chunkGap = n(c?.repostChunkGap, TUNE.chunkGap);
     TUNE.chunkMax = n(c?.repostChunkMax, TUNE.chunkMax);
@@ -269,6 +273,10 @@ function resplitByWords(segs: Seg[]): Seg[] {
   return out.filter((s) => s.text && s.end > s.start);
 }
 
+// 进程内正在跑的 yt-dlp 下载数 + 序号。>1 就说明同一任务被重复启动了(见 runYtdlp 里的探针)。
+let _ytdlpActive = 0;
+let _ytdlpSeq = 0;
+
 const VIDEO_EXTS = new Set(['.mp4', '.mov', '.m4v', '.webm', '.mkv', '.avi']);
 
 // ── SRT → Seg[](含 YouTube 自动字幕「滚动窗口重复」清洗:后条以前条全文开头则剥前缀)──
@@ -362,12 +370,34 @@ async function resolveSourceVideo(
    * 跑 yt-dlp。`showProgress` 时解析 stdout 的下载进度往日志推。
    *
    * yt-dlp 的进度行长这样(--newline 下每条独占一行):
+   *   `[download] Destination: source.f137.mp4`
    *   `[download]  45.2% of  120.50MiB at    2.31MiB/s ETA 00:30`
    * 限流:进度每涨 5% 或每 3 秒才打一条,否则几百行刷屏。
-   * bv*+ba 会【分两趟】下(先视频后音频),第二趟百分比从 0 重新开始 —— 百分比明显回退
-   *   就认为换了一个流,重置基准并标出「第 N 个文件」,不然用户看到进度倒退会以为出错。
+   *
+   * ⚠️ 「第几个流」必须认 `Destination:` 行,**不能靠百分比回退去猜**。bv*+ba 会分两趟下
+   *   (先视频后音频),百分比确实会从 0 重来 —— 但真机上出现过【两个进程同时下同一个文件】
+   *   (同一秒两条进度、速度分别 2.54 和 1.31MiB/s),那时百分比也在来回跳,靠回退猜就会
+   *   把它误判成"换流",标出一堆假的「第 N 个流」,把真正的问题掩盖掉。
    */
   const runYtdlp = (args: string[], showProgress = false): Promise<{ ok: boolean; err: string }> => new Promise((resolve) => {
+    // ⚠️ 并发探针:正常情况下同一时刻只该有一个下载进程(pipeline 有 _videoBatchBusy 单飞闸)。
+    //    真机出现过两条进度交替刷、状态一会红一会绿 —— 那是【两次运行同时在跑】,不是下载器的毛病。
+    //    这里显式点名,别再让它伪装成"进度乱跳"。
+    if (showProgress) {
+      _ytdlpSeq++;
+      if (_ytdlpActive > 0) {
+        onLog(`⚠️ 检测到已有 ${_ytdlpActive} 个下载在跑 —— 同一任务被重复启动了(进度会交替刷、状态忽红忽绿)`);
+      }
+      _ytdlpActive++;
+    }
+    const tag = showProgress && _ytdlpActive > 1 ? `#${_ytdlpSeq} ` : '';
+    let done = false;
+    const finish = (r: { ok: boolean; err: string }) => {
+      if (done) return;
+      done = true;
+      if (showProgress) _ytdlpActive = Math.max(0, _ytdlpActive - 1);
+      resolve(r);
+    };
     const child = spawn(ytdlp, args, { windowsHide: true });
     let err = '';
     if (showProgress) {
@@ -380,11 +410,12 @@ async function resolveSourceVideo(
         const lines = buf.split(/\r?\n/);
         buf = lines.pop() || '';
         for (const line of lines) {
+          // 换文件:yt-dlp 每开一个流都会先打 Destination。这才是「第几个流」的可靠依据。
+          if (/\[download\]\s+Destination:/.test(line)) { filePart++; lastPct = -1; continue; }
           const m = line.match(/\[download\]\s+([\d.]+)%\s+of\s+~?\s*([\d.]+\s*\w+)(?:\s+at\s+([\d.]+\s*\w+\/s))?(?:\s+ETA\s+([\d:]+))?/);
           if (!m) continue;
           const pct = Number(m[1]);
           if (!Number.isFinite(pct)) continue;
-          if (pct < lastPct - 10) { filePart++; lastPct = -1; }   // 百分比回退 = 换了个流
           const now = Date.now();
           const advanced = pct >= lastPct + 5;
           const stale = now - lastAt >= 3000;
@@ -393,15 +424,24 @@ async function resolveSourceVideo(
           const size = String(m[2] || '').replace(/\s+/g, '');
           const speed = m[3] ? String(m[3]).replace(/\s+/g, '') : '';
           const eta = m[4] || '';
-          const part = filePart > 0 ? `(第 ${filePart + 1} 个流)` : '';
-          onLog(`⬇️ 下载中 ${pct.toFixed(1)}% / ${size}${speed ? ` · ${speed}` : ''}${eta ? ` · 约剩 ${eta}` : ''}${part}`);
+          const part = filePart > 1 ? `(第 ${filePart} 个流)` : '';
+          onLog(`⬇️ ${tag}下载中 ${pct.toFixed(1)}% / ${size}${speed ? ` · ${speed}` : ''}${eta ? ` · 约剩 ${eta}` : ''}${part}`);
         }
       });
     }
     child.stderr?.on('data', (d) => { err += String(d); });
-    child.on('error', (e) => resolve({ ok: false, err: String(e) }));
-    child.on('close', (code) => resolve({ ok: code === 0, err }));
-    signal?.addEventListener('abort', () => { try { child.kill('SIGKILL'); } catch { /* ignore */ } resolve({ ok: false, err: 'aborted' }); }, { once: true });
+    child.on('error', (e) => finish({ ok: false, err: String(e) }));
+    child.on('close', (code) => finish({ ok: code === 0, err }));
+    signal?.addEventListener('abort', () => {
+      // ⚠️ 停止时不能只 kill 一次就 resolve 完事。kill 可能没生效(子进程在别的进程组、
+      //    或正卡在 socket 上),而 promise 一 resolve,流水线就往下走、单飞闸也放开了 ——
+      //    用户再点一次运行,就变成【两个 yt-dlp 同时下同一个文件】,进度交替刷、状态忽红忽绿。
+      //    所以:① 先摘掉 stdout 监听,孤儿进程再怎么跑也污染不了日志;② kill 之后再补一刀。
+      try { child.stdout?.removeAllListeners('data'); } catch { /* ignore */ }
+      try { child.kill('SIGKILL'); } catch { /* ignore */ }
+      setTimeout(() => { try { if (child.exitCode === null) child.kill('SIGKILL'); } catch { /* ignore */ } }, 1000).unref?.();
+      finish({ ok: false, err: 'aborted' });
+    }, { once: true });
   });
 
   let r = await runYtdlp(baseArgs, true);
@@ -613,6 +653,9 @@ function regroupSegments(segs: Seg[]): Seg[] {
   for (let i = 0; i < presplit.length; i++) {
     const seg = presplit[i];
     if (!seg.text.trim()) continue;
+    // ⚠️ 上限要在【加进来之前】判。加完再判的话窗口总会超出上限一整条源字幕的长度
+    //    (5s 上限实测出 6.2s 的窗口)。单条本身就超限时 bStart<0,照常收下,不丢内容。
+    if (bStart >= 0 && seg.end - bStart > TUNE.maxCueSec) flush();
     if (bStart < 0) bStart = seg.start;
     buf += (buf ? ' ' : '') + seg.text;
     bEnd = seg.end;
@@ -626,7 +669,9 @@ function regroupSegments(segs: Seg[]): Seg[] {
   // 过短碎句(<4 字宽)并入前句,别单独占屏。
   const merged: Seg[] = [];
   for (const s2 of out) {
-    if (merged.length > 0 && unitsOf(s2.text) < 4 && s2.start - merged[merged.length - 1].end <= 1.0) {
+    // ⚠️ 碎句回并不能把窗口顶过 maxCueSec —— 上面刚限制完这里又合回去就白限制了。
+    const prevSeg = merged[merged.length - 1];
+    if (prevSeg && unitsOf(s2.text) < 4 && s2.start - prevSeg.end <= 1.0 && s2.end - prevSeg.start <= TUNE.maxCueSec) {
       const p = merged[merged.length - 1]; p.text += ' ' + s2.text; p.end = s2.end;
     } else merged.push({ ...s2 });
   }
