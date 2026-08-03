@@ -136,6 +136,15 @@ function buildMatrixDriverCtx(
       const r = await kernelSetFileInput(accountId, targetSelector, [input.videoPath]);
       return r.ok ? { ok: true } : { ok: false, reason: r.reason || 'set_file_input_failed' };
     },
+    // 【通用】真实文件选择器拦截:可信点击站点自己的上传按钮 → 拦下弹出的选择器 → setFileInputFiles。
+    //   给【点了才创建 input 的站点】用 —— 如 Bybit ByX:切到 Video tab 后 DOM 里【没有】任何
+    //   input[type=file],必须点「Add video」才生成,所以 uploadVideo(selector) 那条路根本无从下手。
+    //   findButtonExpr 由 driver 自己给(返回按钮中心视口坐标 {x,y} 或 null),因为按钮长相各站不同。
+    //   TikTok 走的是 uploadVideo 里写死的同一套机制,这里只是把它开放给其它 driver 用。
+    uploadVideoViaChooser: async (findButtonExpr: string) => {
+      const ch = await kernelSetFileInputViaChooser(accountId, input.videoPath, findButtonExpr);
+      return ch.ok ? { ok: true } : { ok: false, reason: ch.reason || 'file_chooser_failed' };
+    },
     // 视频号 wujie open shadow 里的 file input:先走【页面世界 DataTransfer 注入】(base64 + 深遍历穿 shadow),
     //   失败再回落 CDP setFileInputFiles。⚠️ 跟 TikTok 同款病:视频号 wujie 上传器对 CDP setFileInputFiles 灌进去的
     //   File 处理不了 → 卡 0% 报「网络出错,请重新上传」(旧客户端用 DataTransfer 一直能传,改成 CDP 才坏)。
@@ -297,6 +306,8 @@ export async function runMatrixRedditThread(
 const MATRIX_EXTRA_ANCHOR_URL: Record<string, string> = {
   gate: 'https://www.gate.com/zh/post',
   bitget: 'https://www.bitget.com/zh-CN/insights',
+  // ByX 的发帖框在【专门的发布页】上(信息流页那个内联框只有图片),driver 直接落这里。
+  bybit: 'https://www.bybit.com/en/social/publish',
 };
 
 export async function runMatrixDriver(

@@ -45,7 +45,7 @@ function platLabel(p: string): string { return REPOST_PLATFORM_LABEL[p] || p; }
 //   · bitget ✅ 展开发帖框后 input[accept=video/mp4] 就在 DOM 里(drivers/bitget.js 已实现)
 //   · bybit ✅ 平台支持(/social/publish 有 Photos|Video tab,≤200MB),但 input 要点「Add video」
 //            才创建,得走 TikTok 那套 chooser 拦截 —— driver 还没写,所以先不开
-const VIDEO_REPOST_PLATFORMS = new Set<string>(['binance', 'gate', 'bitget']);
+const VIDEO_REPOST_PLATFORMS = new Set<string>(['binance', 'gate', 'bitget', 'bybit']);
 
 const DEFAULT_BASE_URL = 'https://api.noobclaw.com';
 function baseUrl(): string { return process.env.NOOBCLAW_API_BASE_URL || DEFAULT_BASE_URL; }
