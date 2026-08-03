@@ -3628,12 +3628,16 @@ const VideoConfigModal: React.FC<{
     scriptLang: mode === 'stock' && scriptLang !== 'auto' ? scriptLang : undefined,
     voice,
     voiceRate,
-    // Seedance(pure_ai):默认纯画面(关旁白 + 不烧字幕);用户在「音频」步开了「AI 配音」
-    //   → narrationEnabled=true,跟普通模式一样配音 + 按字幕开关烧录。
+    // 电影级(pure_ai):人声/口型/环境音全部由 Seedance 随画面一起生成,本地不再配音,
+    //   所以 narrationEnabled 对它已无意义(主进程恒当作 false)。
     narrationEnabled: mode === 'pure_ai' ? (aiNarration ? true : false) : undefined,
     bgmPath: bgmPath || undefined,
     bgmVolume,
-    subtitleEnabled: mode === 'pure_ai' ? (aiNarration && subtitleEnabled) : subtitleEnabled,
+    // ⚠️ 电影级默认【不烧字幕】(用户拍板:先全交给 Seedance)。
+    //   但要说清楚:Seedance 不生成字幕 —— 它负责的是音画同步和口型,画面文字我们的
+    //   prompt 还明确禁掉了(生成模型写中文常缺笔画/串字)。所以关掉 = 成片没有字幕。
+    //   要字幕就把这个开关打开:内容取每镜台词、时间取实测片段时长,本地烧,精度比以前更高。
+    subtitleEnabled: mode === 'pure_ai' ? false : subtitleEnabled,
     subtitleFontSize,
     subtitlePosition,
     subtitleColor: subtitleColor || undefined,

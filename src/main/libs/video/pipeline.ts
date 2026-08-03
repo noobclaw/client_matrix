@@ -2672,11 +2672,37 @@ async function runVideoPipeline(
       if (aiNativeAudio && scenes.length > 0 && scenes.every((sc) => sc.clips && sc.clips.length > 0)) {
         const clipPaths = scenes.flatMap((sc) => sc.clips as string[]);
         tracker.progress(`${label ? label + ' · ' : ''}🎬 拼接 ${clipPaths.length} 个原生片段(保留 Seedance 人声/音效)`);
+
+        // 字幕(可选)。⚠️ Seedance **不生成字幕** —— 它做的是音画同步和口型对齐,
+        //   画面上的文字我们的 prompt 还明确禁掉了(生成模型写中文常缺笔画/串字)。
+        //   所以要字幕只能本地烧。好在内容和时间轴都是现成的:
+        //     内容 = 每镜台词(就是喂给 Seedance 念的那句)
+        //     时间 = 【实测片段时长】,比以前靠 TTS 词边界估算更准 ——
+        //            那时对的是我们自己合成的音频,现在对的是成片里真实播放的那段。
+        //   默认关(用户拍板:先全交给 Seedance),想开改 subtitleEnabled 即可。
+        let nativeCues: { text: string; start: number; end: number }[] | undefined;
+        if (subtitleEnabled && aiShots) {
+          const cues: { text: string; start: number; end: number }[] = [];
+          let t = 0;
+          for (let i = 0; i < clipPaths.length; i++) {
+            const real = await probeDuration(clipPaths[i]).catch(() => 0);
+            const d = real > 0 ? real : (sceneDurations[i] || aiShots[i]?.seconds || 5);
+            const line = (aiShots[i]?.narration || '').trim();
+            // 首尾各留 0.1s,别和镜头切换撞在一帧上。
+            if (line && d > 0.4) cues.push({ text: line, start: t + 0.1, end: t + d - 0.1 });
+            t += d;
+          }
+          if (cues.length > 0) nativeCues = cues;
+        }
+
         await concatNativeClips({
           clipPaths,
           outputPath: outPath,
           bgmPath,
           bgmVolume: input.bgmVolume !== undefined && input.bgmVolume >= 0 ? input.bgmVolume : undefined,
+          subtitles: nativeCues,
+          subtitleFontSize: input.subtitleFontSize && input.subtitleFontSize > 0 ? input.subtitleFontSize : undefined,
+          width, height,
           onProgress: (m) => tracker.progress(`${label ? label + ' · ' : ''}${m}`),
           signal,
         });

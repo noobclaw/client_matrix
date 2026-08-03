@@ -908,6 +908,20 @@ export async function concatNativeClips(opts: {
   /** 可选:额外 BGM 垫在原声之下(Seedance 自带音乐时一般不用)。 */
   bgmPath?: string;
   bgmVolume?: number;
+  /**
+   * 可选:烧字幕。
+   *
+   * 内容直接来自分镜表的每镜台词(就是喂给 Seedance 念的那句),时间轴来自【实测的片段
+   * 时长】—— 比以前靠 TTS 词边界估算更准:那时字幕对的是我们自己合成的音频,现在对的
+   * 是成片里真实播放的那段。
+   * ⚠️ 一旦要烧字幕就【必须重编码】,零转码拼接用不了 —— 这是烧字幕的固有代价。
+   */
+  subtitles?: { text: string; start: number; end: number }[];
+  /** 字幕字号档(同 compose 的口径,默认 20)。 */
+  subtitleFontSize?: number;
+  /** 画面宽高(烧字幕时用于换算字号/边距);不传则从首个片段探测。 */
+  width?: number;
+  height?: number;
   onProgress?: (msg: string) => void;
   signal?: AbortSignal;
 }): Promise<string> {
@@ -954,10 +968,88 @@ export async function concatNativeClips(opts: {
       else opts.onProgress?.('BGM 混音失败,保留纯原声');
     }
 
+    // 烧字幕(可选)。放在最后一步,和 BGM 分开做 —— BGM 那步是 `-c:v copy`,
+    //   这一步必须重编码,合在一起会让没开字幕的用户也白白转码一遍。
+    const cues = (opts.subtitles || []).filter((c) => c.text && c.end > c.start);
+    if (cues.length > 0) {
+      const dim = (opts.width && opts.height)
+        ? { width: opts.width, height: opts.height }
+        : await probeImageSize(merged).catch(() => ({ width: 1080, height: 1920 }));
+      const W = dim.width > 0 ? dim.width : 1080;
+      const H = dim.height > 0 ? dim.height : 1920;
+      const assPath = path.join(workDir, 'sub.ass');
+      fs.writeFileSync(assPath, buildNativeAss(cues, W, H, opts.subtitleFontSize || 20), 'utf8');
+      const burned = path.join(workDir, 'burned.mp4');
+      opts.onProgress?.('烧录字幕(需重编码)');
+      const rs = await runFfmpeg(
+        ['-y', '-i', merged, '-vf', `subtitles='${escAssPath(assPath)}'`,
+          '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
+          '-c:a', 'copy', '-movflags', '+faststart', burned],
+        { timeoutMs: 900_000, signal: opts.signal },
+      );
+      // 烧失败不该让整条片子作废 —— 保留无字幕版本交付。
+      if (rs.ok && fs.existsSync(burned)) merged = burned;
+      else opts.onProgress?.('⚠️ 字幕烧录失败,输出无字幕版本');
+    }
+
     fs.mkdirSync(path.dirname(opts.outputPath), { recursive: true });
     fs.copyFileSync(merged, opts.outputPath);
     return opts.outputPath;
   } finally {
     try { fs.rmSync(workDir, { recursive: true, force: true }); } catch {}
   }
+}
+
+
+/** subtitles 滤镜的路径转义(Windows 盘符冒号 + 反斜杠)。 */
+function escAssPath(p: string): string {
+  return p.replace(/\\/g, '/').replace(/:/g, '\\:');
+}
+
+function assTime(sec: number): string {
+  const t = Math.max(0, sec);
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const ss = Math.floor(t % 60);
+  const cs = Math.round((t - Math.floor(t)) * 100);
+  const p2 = (n: number) => String(n).padStart(2, '0');
+  return `${h}:${p2(m)}:${p2(ss)}.${p2(cs)}`;
+}
+
+/**
+ * 电影级原生路径的 ASS 字幕。
+ *
+ * 用 ASS 而不是 SRT + force_style:后者的 FontSize 是按 libass 内部 288 高的虚拟画布算的,
+ *   竖屏 1920 高会被放大约 6.7 倍 → 20 号变成 130+px 的巨字糊满屏(老 bug)。
+ *   ASS 里 PlayRes 直接写真实分辨率,字号所见即所得。
+ * 折行复用 cutByWidth —— 按可视宽度断,英文不会从单词中间劈开。
+ */
+function buildNativeAss(
+  cues: { text: string; start: number; end: number }[],
+  W: number, H: number, fontSetting: number,
+): string {
+  const fontPx = Math.max(18, Math.round(H * (fontSetting / 700)));
+  const marginV = Math.round(H * 0.06);
+  const outline = Math.max(1, Math.round(fontPx / 18));
+  // 每行最多几个字宽:留 8% 安全边,拉丁按 0.5 字宽算(cutByWidth 内部处理)。
+  const maxPerLine = Math.max(6, Math.floor((W * 0.92) / fontPx));
+  const esc = (t: string) => cutByWidth(t.replace(/[{}]/g, '').replace(/\r?\n/g, ' ').trim(), maxPerLine)
+    .slice(0, 2)               // 电影级画面为主,字幕最多两行
+    .join('\\N');
+  return [
+    '[Script Info]',
+    'ScriptType: v4.00+',
+    `PlayResX: ${W}`,
+    `PlayResY: ${H}`,
+    'ScaledBorderAndShadow: yes',
+    'WrapStyle: 0',
+    '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    `Style: Default,Arial,${fontPx},&H00FFFFFF,&H00FFFFFF,&H00000000,&H7F000000,0,0,0,0,100,100,0,0,1,${outline},0,2,${Math.round(W * 0.04)},${Math.round(W * 0.04)},${marginV},1`,
+    '',
+    '[Events]',
+    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Text',
+    ...cues.map((c) => `Dialogue: 0,${assTime(c.start)},${assTime(c.end)},Default,,0,0,0,${esc(c.text)}`),
+  ].join('\n');
 }
