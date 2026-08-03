@@ -10,7 +10,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { shortId } from '../../utils/shortId';
-import { scenarioService, type Task, type Draft, type Scenario } from '../../services/scenario';
+import { scenarioService, exchangeSquarePlatformKey, type Task, type Draft, type Scenario } from '../../services/scenario';
 import { LoginRequiredModal } from './LoginRequiredModal';
 import { MATRIX_EDITION } from '../../matrixEdition';
 import { noobClawAuth } from '../../services/noobclawAuth';
@@ -288,7 +288,11 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
                           ? 'Facebook'
                           : ((scenario?.platform as any) === 'reddit' || task.scenario_id?.startsWith('reddit_'))
                             ? 'Reddit'
-                            : i18nService.t('tdXiaohongshu');
+                            // 交易所广场(gate/okx/bitget/bybit):没有这条的话 4 家全落到最后那个
+                            // 小红书默认值 → 详情页写「直接发布到 小红书」(2026-08-03 用户实拍)。
+                            : exchangeSquarePlatformKey(scenario?.platform as any, task.scenario_id)
+                              ? i18nService.t(exchangeSquarePlatformKey(scenario?.platform as any, task.scenario_id)!)
+                              : i18nService.t('tdXiaohongshu');
   const STEP_LABELS = STEP_LABELS_ZH;
   // Pick step names by scenario id first (Twitter has 3 distinct flavors),
   // then fall back to the legacy isAutoReply branch for XHS.

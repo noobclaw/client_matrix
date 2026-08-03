@@ -115,8 +115,16 @@ const MatrixBinanceRepostWizard: React.FC<Props> = ({ platformLabel, platform, a
   }, [sourcePlatform]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (saveError) setSaveError(null); /* eslint-disable-next-line */ }, [selectedIds, sourcePlatform, sourceAccountId, withImage, language, runInterval]);
 
+  // 同 MatrixBinancePostWizard:四家交易所广场共用本向导,而这些文案在 9 种语言里都把
+  // 「币安广场」写死了(标题/发布说明/任务名/账号提示),Gate 页面打开显示的还是币安。
+  // 统一把平台名替换成当前平台,不逐条改 i18n。
+  const tp = (key: string): string => i18nService.t(key)
+    .replace(/币安广场|幣安廣場|Binance Square|바이낸스 스퀘어/g, platformLabel)
+    .replace(/币安号|幣安號/g, platformLabel + '号')
+    .replace(/(?<![广廣])(币安|幣安)(?![广廣场場号號])/g, platformLabel);
+
   const canAdvance: Record<WizardStep, { ok: boolean; reason?: string }> = {
-    1: { ok: selectedIds.length > 0, reason: i18nService.t('wzBnRepostReasonSelectAccount') },
+    1: { ok: selectedIds.length > 0, reason: tp('wzBnRepostReasonSelectAccount') },
     2: { ok: !!sourceAccountId, reason: i18nService.t('wzBnRepostReasonPickSource') },
     3: { ok: true },
     4: { ok: allTermsAccepted, reason: i18nService.t('wzBnRepostReasonAcceptTerms') },
@@ -130,7 +138,7 @@ const MatrixBinanceRepostWizard: React.FC<Props> = ({ platformLabel, platform, a
     setSaving(true);
     try {
       await onSave({
-        name: initialTask?.name || i18nService.t('wzBnRepostTaskName').replace('{platform}', PLATFORM_NAME[sourcePlatform]).replace('{n}', String(selectedIds.length)),
+        name: initialTask?.name || tp('wzBnRepostTaskName').replace('{platform}', PLATFORM_NAME[sourcePlatform]).replace('{n}', String(selectedIds.length)),
         accountIds: selectedIds,
         concurrency: 1,
         frequency: runInterval,
@@ -157,7 +165,7 @@ const MatrixBinanceRepostWizard: React.FC<Props> = ({ platformLabel, platform, a
   return (
     <div className="w-full max-w-2xl mx-auto rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden flex flex-col">
       <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-800 shrink-0">
-        <div className="text-base font-semibold dark:text-white">♻️ {editing ? i18nService.t('wzBnRepostTitleEdit') : i18nService.t('wzBnRepostTitleCreate')}</div>
+        <div className="text-base font-semibold dark:text-white">♻️ {editing ? tp('wzBnRepostTitleEdit') : tp('wzBnRepostTitleCreate')}</div>
         <div className="flex items-center gap-3">
           <span className="text-xs px-2.5 py-1 rounded-full border border-amber-500/40 text-amber-500 bg-amber-500/5">{i18nService.t('wzBnRepostStepIndicator').replace('{n}', String(step))}</span>
           <button type="button" onClick={onCancel} disabled={saving} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">✕</button>
@@ -215,11 +223,11 @@ const MatrixBinanceRepostWizard: React.FC<Props> = ({ platformLabel, platform, a
               <label className="text-sm font-medium dark:text-gray-200 mb-2 block">🎞️ {i18nService.t('wzBnRepostMaterialLabel')}<span className="text-xs text-gray-400 font-normal ml-1">{i18nService.t('wzBnRepostMaterialHint')}</span></label>
               <div className={`grid gap-2 ${supportsVideo ? 'grid-cols-2' : 'grid-cols-1'}`}>
                 <button type="button" onClick={() => { setMaterial('image'); setSourcePlatform(firstEnabledSource('image')); setSourceAccountId(''); }} className={`px-3 py-2.5 rounded-lg text-sm border text-left transition-colors ${material === 'image' ? 'border-amber-500 bg-amber-500/10 text-amber-600 dark:text-amber-400 font-medium' : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-amber-500/50'}`}>
-                  🖼️ {i18nService.t('wzBnRepostMaterialImage')}<div className="text-[11px] text-gray-400 font-normal mt-0.5">{i18nService.t('wzBnRepostMaterialImageDesc')}</div>
+                  🖼️ {i18nService.t('wzBnRepostMaterialImage')}<div className="text-[11px] text-gray-400 font-normal mt-0.5">{tp('wzBnRepostMaterialImageDesc')}</div>
                 </button>
                 {supportsVideo && (
                 <button type="button" onClick={() => { setMaterial('video'); setSourcePlatform(firstEnabledSource('video')); setSourceAccountId(''); }} className={`px-3 py-2.5 rounded-lg text-sm border text-left transition-colors ${material === 'video' ? 'border-amber-500 bg-amber-500/10 text-amber-600 dark:text-amber-400 font-medium' : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-amber-500/50'}`}>
-                  🎬 {i18nService.t('wzBnRepostMaterialVideo')}<div className="text-[11px] text-gray-400 font-normal mt-0.5">{i18nService.t('wzBnRepostMaterialVideoDesc')}</div>
+                  🎬 {i18nService.t('wzBnRepostMaterialVideo')}<div className="text-[11px] text-gray-400 font-normal mt-0.5">{tp('wzBnRepostMaterialVideoDesc')}</div>
                 </button>
                 )}
               </div>
@@ -304,7 +312,7 @@ const MatrixBinanceRepostWizard: React.FC<Props> = ({ platformLabel, platform, a
               <label className="text-sm font-medium dark:text-gray-200 mb-2 block">📤 {i18nService.t('wzBnRepostAfterGenLabel')}</label>
               <div className="grid grid-cols-2 gap-2">
                 <button type="button" onClick={() => setAutoPublish(true)} className={`px-3 py-2.5 rounded-lg text-sm border text-left transition-colors ${autoPublish ? 'border-amber-500 bg-amber-500/10 text-amber-600 dark:text-amber-400 font-medium' : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-amber-500/50'}`}>
-                  🚀 {i18nService.t('wzBnRepostPublishNow')}<div className="text-[11px] text-gray-400 font-normal mt-0.5">{i18nService.t('wzBnRepostPublishNowDesc')}</div>
+                  🚀 {i18nService.t('wzBnRepostPublishNow')}<div className="text-[11px] text-gray-400 font-normal mt-0.5">{tp('wzBnRepostPublishNowDesc')}</div>
                 </button>
                 <button type="button" onClick={() => setAutoPublish(false)} className={`px-3 py-2.5 rounded-lg text-sm border text-left transition-colors ${!autoPublish ? 'border-amber-500 bg-amber-500/10 text-amber-600 dark:text-amber-400 font-medium' : 'border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-amber-500/50'}`}>
                   💾 {i18nService.t('wzBnRepostGenOnly')}<div className="text-[11px] text-gray-400 font-normal mt-0.5">{i18nService.t('wzBnRepostGenOnlyDesc')}</div>
@@ -329,11 +337,11 @@ const MatrixBinanceRepostWizard: React.FC<Props> = ({ platformLabel, platform, a
               <SummaryRow label={i18nService.t('wzBnRepostSummarySource')} value={`${PLATFORM_NAME[sourcePlatform]} · ${i18nService.t('wzBnRepostSummarySourceCollector').replace('{name}', srcAcc ? (srcAcc.nickname || srcAcc.displayName) : i18nService.t('wzBnRepostSummaryNotSelected'))}`} />
               <SummaryRow label={i18nService.t('wzBnRepostSummaryKeyword')} value={srcAcc && Array.isArray(srcAcc.keywords) && srcAcc.keywords.length ? i18nService.t('wzBnRepostSummaryKeywordCount').replace('{n}', String(srcAcc.keywords.length)) : i18nService.t('wzBnRepostSummaryKeywordPlain')} />
               <SummaryRow label={i18nService.t('wzBnRepostSummaryMaterial')} value={material === 'image' ? i18nService.t('wzBnRepostSummaryMaterialImage') : i18nService.t('wzBnRepostSummaryMaterialVideo')} />
-              <SummaryRow label={i18nService.t('wzBnRepostSummaryPublisher')} value={i18nService.t('wzBnRepostSummaryPublisherValue').replace('{n}', String(selectedIds.length))} />
+              <SummaryRow label={i18nService.t('wzBnRepostSummaryPublisher')} value={tp('wzBnRepostSummaryPublisherValue').replace('{n}', String(selectedIds.length))} />
               <SummaryRow label={i18nService.t('wzBnRepostSummaryLanguage')} value={langLabel(language)} />
               <SummaryRow label={i18nService.t('wzBnRepostSummaryImage')} value={material === 'video' ? i18nService.t('wzBnRepostSummaryImageVideo') : (withImage ? i18nService.t('wzBnRepostSummaryImageWithSource') : i18nService.t('wzBnRepostSummaryImageTextOnly'))} />
               <SummaryRow label={i18nService.t('wzBnRepostSummaryPace')} value={i18nService.t('wzBnRepostSummaryPaceValue')} />
-              <SummaryRow label={i18nService.t('wzBnRepostSummaryPublish')} value={autoPublish ? i18nService.t('wzBnRepostSummaryPublishAuto') : i18nService.t('wzBnRepostSummaryPublishGenOnly')} />
+              <SummaryRow label={i18nService.t('wzBnRepostSummaryPublish')} value={autoPublish ? tp('wzBnRepostSummaryPublishAuto') : i18nService.t('wzBnRepostSummaryPublishGenOnly')} />
               <SummaryRow label={i18nService.t('wzBnRepostSummaryFrequency')} value={intervalLabel} />
             </div>
             <div className="space-y-2">
