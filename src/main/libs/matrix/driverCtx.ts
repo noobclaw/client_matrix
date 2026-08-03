@@ -292,6 +292,12 @@ export async function runMatrixRedditThread(
  * 流程:导航到创作者中心 anchor → 拉矩阵 driver 脚本 → 同契约 ctx 执行。
  * 绝不抛,归一成 PublishResult。
  */
+// 交易所广场的发布落地页(matrix/drivers/<平台>.js 在这个页面上跑)。
+// gate:2026-08-03 真机确认发帖框在 /zh/post,视频 input 常驻 DOM,不用点入口。
+const MATRIX_EXTRA_ANCHOR_URL: Record<string, string> = {
+  gate: 'https://www.gate.com/zh/post',
+};
+
 export async function runMatrixDriver(
   accountId: string,
   platform: VideoPlatform,
@@ -299,7 +305,10 @@ export async function runMatrixDriver(
   onLog: (msg: string) => void,
 ): Promise<PublishResult> {
   try {
-    const anchor = PUBLISHER_ANCHOR_URL[platform];
+    // 交易所广场的发布锚点。PUBLISHER_ANCHOR_URL 的 key 是 VideoPlatform 联合类型,而 gate 这类
+    // 平台不属于「视频创作」那套流程(加进联合类型会让它冒到视频发布 UI 的平台勾选里),所以单列
+    // 一张表。没有锚点就不导航(保持老行为)。
+    const anchor = PUBLISHER_ANCHOR_URL[platform] || MATRIX_EXTRA_ANCHOR_URL[String(platform)];
     if (anchor) {
       onLog(`导航到 ${platform} 创作者中心`);
       await kernelNavigate(accountId, anchor);

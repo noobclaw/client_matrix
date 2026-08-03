@@ -22,10 +22,11 @@ export interface WizardAccount { id: string; displayName: string; status: string
 
 const PLATFORM_NAME: Record<string, string> = { douyin: '抖音', xhs: '小红书', bilibili: 'B站', kuaishou: '快手', tiktok: 'TikTok', x: 'X', binance: '币安广场', youtube: 'YouTube', shipinhao: '视频号', toutiao: '头条',
   gate: 'Gate广场', bitget: 'Bitget Insight', bybit: 'Bybit Byx', okx: 'OKX星球' };
-// 有视频发布能力的目标平台 —— 只有这些才给「视频」素材选项。
-// 交易所广场四家(gate/bitget/bybit/okx)只做发帖 + 互动,后端 matrix/drivers 下没有它们的
-// 视频发布 driver;给了选项用户选了也只会在跑到发布那步才失败,所以这里直接不展示。
-const VIDEO_REPOST_PLATFORMS = new Set<string>(['binance']);
+// 有视频发布能力的目标平台 —— 只有这些才给「视频」素材选项(没 driver 的平台给了选项,
+// 用户选了也只会在跑到发布那步才失败,素材白下)。与 binanceRepostRunner 的同名表必须一致。
+// 2026-08-03 真机实测:gate 支持视频且 driver 已实现;okx 平台根本没有视频入口;
+// bybit 平台支持但上传要走文件选择器拦截,driver 未写;bitget 待确认。
+const VIDEO_REPOST_PLATFORMS = new Set<string>(['binance', 'gate']);
 
 // 来源平台按【搬运形态】给:图文→小红书 / X;视频→抖音 / TikTok。只列已实现的平台(不展示「敬请期待」)。
 type SrcOpt = { id: 'xhs' | 'douyin' | 'tiktok' | 'x'; label: string; enabled: boolean };
@@ -72,6 +73,9 @@ const MatrixBinanceRepostWizard: React.FC<Props> = ({ platformLabel, platform, a
   const editing = !!initialTask;
   const [step, setStep] = useState<WizardStep>(1);
 
+  // 搬运搜什么,由【发布号的赛道】决定,不是采集号。采集号只是借登录态去源平台搜的工具人:
+  // 一个小红书美食号的赛道词是「美食探店/一人食」,拿它去搜再发到 web3 广场完全不对路。
+  // 口径与 binanceRepostRunner.collectFromSource 保持一致(取勾选发布号的并集)。
   const [selectedIds, setSelectedIds] = useState<string[]>(() => {
     if (Array.isArray(initialTask?.accountIds) && initialTask.accountIds.length) return Array.from(new Set(initialTask.accountIds.map(String)));
     return accounts.filter((a) => a.status !== 'banned' && a.status !== 'login_required').map((a) => a.id);
@@ -164,6 +168,19 @@ const MatrixBinanceRepostWizard: React.FC<Props> = ({ platformLabel, platform, a
 
   const langLabel = (l: string) => postLangLabel(l, i18nService.currentLanguage === 'zh');
   const srcAcc = sourceCandidates.find((a) => a.id === sourceAccountId);
+  // 勾选的【发布号】的赛道关键词并集 —— 搬运按这个搜素材(与 runner 口径一致)。
+  const publishKeywords = React.useMemo(() => {
+    const out: string[] = [];
+    for (const id of selectedIds) {
+      const a = accounts.find((x) => x.id === id);
+      if (!a || !Array.isArray(a.keywords)) continue;
+      for (const k of a.keywords) {
+        const kk = String(k || '').trim();
+        if (kk && out.indexOf(kk) < 0) out.push(kk);
+      }
+    }
+    return out;
+  }, [selectedIds, accounts]);
 
   return (
     <div className="w-full max-w-2xl mx-auto rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden flex flex-col">
@@ -281,8 +298,8 @@ const MatrixBinanceRepostWizard: React.FC<Props> = ({ platformLabel, platform, a
             <div>
               <label className="text-sm font-medium dark:text-gray-200 mb-1.5 block">🔍 {i18nService.t('wzBnRepostKeywordLabel')}<span className="text-xs text-gray-400 font-normal ml-1">{i18nService.t('wzBnRepostKeywordHint')}</span></label>
               <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/40 px-3 py-2 text-[12px] text-gray-600 dark:text-gray-300 min-h-[38px] flex items-center">
-                {srcAcc && Array.isArray(srcAcc.keywords) && srcAcc.keywords.length > 0
-                  ? srcAcc.keywords.join('、')
+                {publishKeywords.length > 0
+                  ? publishKeywords.join('、')
                   : <span className="text-amber-500">{i18nService.t('wzBnRepostNoKeywords')}</span>}
               </div>
             </div>
