@@ -3294,7 +3294,15 @@ const VideoConfigModal: React.FC<{
   const isEdit = !!editTask;
   // forcedMode(从「电影级 / 在线素材」card 进来)锁定模式 → 跳过 step1 模式选择,从 step2(赛道)起。
   // 矩阵号在「出片(7)」后多插一步「账号(8)」。
-  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5 | 6 | 7 | 8>(forcedMode ? 2 : 1);
+  // 电影级(pure_ai)连「选号」也跳过 —— 它的输入是分镜脚本或一句话想法,赛道/人设/关键词
+  //   已经不是主要输入;发布账号在最后一步单独选,这一步对它是纯摩擦。
+  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5 | 6 | 7 | 8>(
+    forcedMode === 'pure_ai' ? 3 : (forcedMode ? 2 : 1),
+  );
+  /** 本向导是否跳过「选号」步(电影级)。编号显示、前进/后退、取消判定都要按它走。 */
+  const skipIdentityStep = forcedMode === 'pure_ai';
+  /** 圆点上显示的序号:forced 少一步「模式」,电影级再少一步「选号」。 */
+  const dotNo = (forced: number, plain: number) => (skipIdentityStep ? forced - 1 : (forcedMode ? forced : plain));
   // 出片(7)= 本地/上传去向 + 频率 + 条数;发布(8)= 发布平台 + 每平台选号(matrix)。
   // 对齐热搜成片:平台与账号【同一步】,且与「出片去向」分开成独立的「发布」步。
   const PUBLISH_STEP = 8 as const;
@@ -3869,25 +3877,30 @@ const VideoConfigModal: React.FC<{
                   <div className={`h-px w-6 ${step > 1 ? 'bg-rose-500' : 'bg-gray-200 dark:bg-gray-700'}`} />
                 </>
               )}
-              {/* forcedMode(从卡片进来跳过 step1「模式」)时显示编号 -1 → 选号=1…发布=7,不从 2 起 */}
-              <StepDot n={forcedMode ? 1 : 2} active={step === 2} done={step > 2} label={isZh ? (matrixMode ? '选号' : '赛道') : (matrixMode ? 'Account' : 'Track')} />
-              <div className={`h-px w-6 ${step > 2 ? 'bg-rose-500' : 'bg-gray-200 dark:bg-gray-700'}`} />
-              <StepDot n={forcedMode ? 2 : 3} active={step === 3} done={step > 3} label={isZh ? '文案' : 'Script'} />
+              {/* forcedMode(从卡片进来跳过 step1「模式」)时显示编号 -1 → 选号=1…发布=7,不从 2 起。
+                  电影级再跳过「选号」→ 编号再 -1(文案=1…发布=6),圆点也不画。 */}
+              {!skipIdentityStep && (
+                <>
+                  <StepDot n={forcedMode ? 1 : 2} active={step === 2} done={step > 2} label={isZh ? (matrixMode ? '选号' : '赛道') : (matrixMode ? 'Account' : 'Track')} />
+                  <div className={`h-px w-6 ${step > 2 ? 'bg-rose-500' : 'bg-gray-200 dark:bg-gray-700'}`} />
+                </>
+              )}
+              <StepDot n={dotNo(2, 3)} active={step === 3} done={step > 3} label={isZh ? '文案' : 'Script'} />
               <div className={`h-px w-6 ${step > 3 ? 'bg-rose-500' : 'bg-gray-200 dark:bg-gray-700'}`} />
-              <StepDot n={forcedMode ? 3 : 4} active={step === 4} done={step > 4} label={isZh ? '画面' : 'Visuals'} />
+              <StepDot n={dotNo(3, 4)} active={step === 4} done={step > 4} label={isZh ? '画面' : 'Visuals'} />
               <div className={`h-px w-6 ${step > 4 ? 'bg-rose-500' : 'bg-gray-200 dark:bg-gray-700'}`} />
-              <StepDot n={forcedMode ? 4 : 5} active={step === 5} done={step > 5} label={(mode === 'pure_ai' && !aiNarration) ? (isZh ? '音乐' : 'Music') : (isZh ? '音频' : 'Audio')} />
+              <StepDot n={dotNo(4, 5)} active={step === 5} done={step > 5} label={(mode === 'pure_ai' && !aiNarration) ? (isZh ? '音乐' : 'Music') : (isZh ? '音频' : 'Audio')} />
               {/* Seedance 纯画面(未开 AI 配音)无字幕步 → 隐藏「字幕」圆点 + 一段连接线 */}
               {!(mode === 'pure_ai' && !aiNarration) && (
                 <>
                   <div className={`h-px w-6 ${step > 5 ? 'bg-rose-500' : 'bg-gray-200 dark:bg-gray-700'}`} />
-                  <StepDot n={forcedMode ? 5 : 6} active={step === 6} done={step > 6} label={isZh ? '字幕' : 'Subtitles'} />
+                  <StepDot n={dotNo(5, 6)} active={step === 6} done={step > 6} label={isZh ? '字幕' : 'Subtitles'} />
                 </>
               )}
               <div className={`h-px w-6 ${step > 6 ? 'bg-rose-500' : 'bg-gray-200 dark:bg-gray-700'}`} />
-              <StepDot n={forcedMode ? 6 : 7} active={step === 7} done={step > 7} label={isZh ? '出片' : 'Output'} />
+              <StepDot n={dotNo(6, 7)} active={step === 7} done={step > 7} label={isZh ? '出片' : 'Output'} />
               <div className={`h-px w-6 ${step > 7 ? 'bg-rose-500' : 'bg-gray-200 dark:bg-gray-700'}`} />
-              <StepDot n={forcedMode ? 7 : 8} active={step === 8} done={false} label={isZh ? '发布' : 'Publish'} />
+              <StepDot n={dotNo(7, 8)} active={step === 8} done={false} label={isZh ? '发布' : 'Publish'} />
             </div>
           </div>
           <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
@@ -4756,13 +4769,13 @@ const VideoConfigModal: React.FC<{
             type="button"
             onClick={() => {
               // forcedMode 锁定模式 → 最低步是 step2(赛道),从 step2 点「上一步」= 取消(没有 step1)。
-              if (step === 1 || (forcedMode && step === 2)) { onClose(); return; }
+              if (step === 1 || (forcedMode && step === 2) || (skipIdentityStep && step === 3)) { onClose(); return; }
               // Seedance 纯画面(未开 AI 配音)无字幕步:7 ← 5(跳过 6)。账号步(8)正常 8→7。
               setStep((s) => ((mode === 'pure_ai' && !aiNarration && s === 7 ? 5 : s - 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8));
             }}
             className="flex-1 py-2.5 rounded-lg text-sm font-medium border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
           >
-            {(step === 1 || (forcedMode && step === 2)) ? (isZh ? '取消' : 'Cancel') : `← ${isZh ? '上一步' : 'Back'}`}
+            {(step === 1 || (forcedMode && step === 2) || (skipIdentityStep && step === 3)) ? (isZh ? '取消' : 'Cancel') : `← ${isZh ? '上一步' : 'Back'}`}
           </button>
           {step < MAX_STEP ? (
             <button
