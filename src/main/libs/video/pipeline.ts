@@ -1080,9 +1080,13 @@ async function runVideoPipeline(
     let script = userText;
     if (scriptMode === 'ai') {
       const isHotspot = input.engine === 'hotspot';
+      // 电影级(ai)不带赛道/关键词 —— 题材全在用户那句想法里(向导已强制必填),
+      //   拿它当 topic。老任务可能还存着默认赛道/关键词,userText 优先于它们。
+      const isCinematic = input.engine === 'ai';
       const topic = isHotspot && hotspotTopic
         ? hotspotTopic.title
-        : ((input.keywords || []).filter(Boolean).join('、') || input.track || '生活方式');
+        : ((isCinematic && userText.trim() ? userText.trim().slice(0, 120) : '')
+          || (input.keywords || []).filter(Boolean).join('、') || input.track || '生活方式');
       tracker.progress(isHotspot
         ? `AI 正在紧贴热点资料撰写口播（目标约 ${input.targetSeconds ?? 45}s）…`
         : (userText

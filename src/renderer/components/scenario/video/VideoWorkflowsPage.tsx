@@ -742,6 +742,30 @@ const VideoTaskCard: React.FC<{ isZh: boolean; task: VideoTask; onClick: () => v
               )}
             </>
           );
+        })() : task.input.engine === 'ai' ? (() => {
+          // 电影级:向导只问 文案/时长/画质/字幕/发布 —— 卡片就照这些显示。
+          //   老任务里可能还存着默认赛道/人设/关键词,一律不再展示(跟成片无关)。
+          const pubN = Array.isArray(task.input.publishPlatforms) ? task.input.publishPlatforms.length : 0;
+          return (
+            <>
+              <div className="flex items-start gap-1.5">
+                <span className="text-gray-400 shrink-0">📝 {isZh ? '文案' : 'Script'}</span>
+                <span className="truncate text-gray-500 dark:text-gray-400">{scriptSummary(task.input, isZh)}</span>
+              </div>
+              <div className="flex items-start gap-1.5">
+                <span className="text-gray-400 shrink-0">🎬 {isZh ? '画面' : 'Visuals'}</span>
+                <span className="truncate">{cinematicVisualLabel(task.input, isZh)}</span>
+              </div>
+              <div className="flex items-start gap-1.5">
+                <span className="text-gray-400 shrink-0">🎤 {isZh ? '声音' : 'Audio'}</span>
+                <span className="truncate">{cinematicAudioLabel(task.input, isZh)}</span>
+              </div>
+              <div className="flex items-start gap-1.5">
+                <span className="text-gray-400 shrink-0">🚀 {isZh ? '发布' : 'Publish'}</span>
+                <span className="truncate">{pubN > 0 ? (isZh ? `${pubN} 个平台` : `${pubN} platforms`) : (isZh ? '仅存本地' : 'Local only')}</span>
+              </div>
+            </>
+          );
         })() : (
           <>
             <div className="flex items-start gap-1.5">
@@ -1134,7 +1158,34 @@ const ConfigCard: React.FC<{ isZh: boolean; input: VideoCreationInput }> = ({ is
       </div>
     );
   }
-  // 其它 engine(stock / pure_ai / 本地素材)走老的赛道/人设/关键词/文案布局。
+  // 电影级:文案/时长/画面/声音/字幕/发布 —— 没有「赛道/人设/关键词」这回事。
+  if (input.engine === 'ai') {
+    return (
+      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-3 space-y-2 text-xs">
+        <Row label={`📝 ${isZh ? '文案' : 'Script'}`}>
+          {(() => {
+            const s = (input.script || '').trim();
+            const tag = (input.scriptMode || (s ? 'strict' : 'ai')) === 'strict'
+              ? (isZh ? '我有脚本' : 'own script')
+              : (isZh ? 'AI 写稿' : 'AI script');
+            return (
+              <div className="space-y-1">
+                <span className="inline-block rounded bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 text-[11px] text-gray-500 dark:text-gray-400">{tag}</span>
+                {s
+                  ? <div className="whitespace-pre-wrap break-words text-gray-600 dark:text-gray-300">{input.script}</div>
+                  : <div className="text-gray-400">{isZh ? `AI 按 ${input.targetSeconds ?? 45}s 写稿` : `AI writes for ${input.targetSeconds ?? 45}s`}</div>}
+              </div>
+            );
+          })()}
+        </Row>
+        {scriptLangDisplay(input.scriptLang, isZh) && <Row label={`🌐 ${isZh ? '创作语言' : 'Language'}`}>{scriptLangDisplay(input.scriptLang, isZh)}</Row>}
+        <Row label={`🎬 ${isZh ? '画面' : 'Visuals'}`}>{cinematicVisualLabel(input, isZh)}</Row>
+        <Row label={`🎤 ${isZh ? '声音' : 'Audio'}`}>{cinematicAudioLabel(input, isZh)}</Row>
+        <Row label={`🚀 ${isZh ? '发布' : 'Publish'}`}>{publishSummary(input, isZh)}</Row>
+      </div>
+    );
+  }
+  // 其它 engine(stock / 本地素材)走老的赛道/人设/关键词/文案布局。
   return (
     <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-3 space-y-2 text-xs">
       <Row label={`🎯 ${isZh ? '赛道' : 'Track'}`}>{input.track || '-'}</Row>
@@ -1158,14 +1209,13 @@ const ConfigCard: React.FC<{ isZh: boolean; input: VideoCreationInput }> = ({ is
         })()}
       </Row>
       {scriptLangDisplay(input.scriptLang, isZh) && <Row label={`🌐 ${isZh ? '创作语言' : 'Language'}`}>{scriptLangDisplay(input.scriptLang, isZh)}</Row>}
+      {/* 到这里只剩 stock(在线/本地素材)—— 电影级已在上面的 'ai' 分支返回。 */}
       <Row label={`🎞️ ${isZh ? '画面' : 'Visuals'}`}>
-        {input.engine === 'ai'
-          ? (isZh ? '纯 AI 生成（Seedance）' : 'Pure AI (Seedance)')
-          : (input.localVideos && input.localVideos.length > 0)
-            ? (isZh ? `本地素材 ${input.localVideos.length} 个` : `${input.localVideos.length} local clips`)
-            : input.useStockVideo !== false
-              ? (isZh ? '在线视频素材 + 图片' : 'stock video + images')
-              : (isZh ? '仅图片' : 'images only')}
+        {(input.localVideos && input.localVideos.length > 0)
+          ? (isZh ? `本地素材 ${input.localVideos.length} 个` : `${input.localVideos.length} local clips`)
+          : input.useStockVideo !== false
+            ? (isZh ? '在线视频素材 + 图片' : 'stock video + images')
+            : (isZh ? '仅图片' : 'images only')}
       </Row>
       <Row label={`🚀 ${isZh ? '发布' : 'Publish'}`}>{publishSummary(input, isZh)}</Row>
     </div>
@@ -1178,6 +1228,27 @@ const Row: React.FC<{ label: string; children: React.ReactNode }> = ({ label, ch
     <span className="flex-1 min-w-0 dark:text-gray-200">{children}</span>
   </div>
 );
+
+// 电影级画面摘要:Seedance + 清晰度 + 画幅。清晰度用户可选(480/720),档位服务端定。
+function cinematicVisualLabel(input: VideoCreationInput, isZh: boolean): string {
+  const res = (input as any).seedanceResolution ? `${(input as any).seedanceResolution}p` : '';
+  const RATIO: Record<string, [string, string]> = {
+    '9:16': ['竖屏 9:16', 'portrait 9:16'],
+    '16:9': ['横屏 16:9', 'landscape 16:9'],
+    '1:1': ['方形 1:1', 'square 1:1'],
+  };
+  const r = RATIO[String(input.aspect || '9:16')] || RATIO['9:16'];
+  const ratio = isZh ? r[0] : r[1];
+  const nRef = Array.isArray(input.referenceImages) ? input.referenceImages.filter(Boolean).length : 0;
+  return [isZh ? 'Seedance 生成' : 'Seedance', res, ratio, nRef > 0 ? (isZh ? `参考图 ${nRef} 张` : `${nRef} ref images`) : '']
+    .filter(Boolean).join(' · ');
+}
+
+// 电影级声音摘要:配音由 Seedance 随画面一起生成(本地不再合成),字幕仍是本地烧录的开关。
+function cinematicAudioLabel(input: VideoCreationInput, isZh: boolean): string {
+  const sub = input.subtitleEnabled !== false ? (isZh ? '烧字幕' : 'subtitles') : (isZh ? '不烧字幕' : 'no subtitles');
+  return `${isZh ? 'Seedance 原生配音' : 'Seedance native audio'} · ${sub}`;
+}
 
 // 发布去向摘要(详情页/记录详情常驻显示):空 publishPlatforms = 仅存本地;否则列出平台中文名。
 // 让用户在详情页一眼看到「存本地」还是「上传到 抖音、小红书…」(之前只在 hotspot 显示个数,
@@ -1362,18 +1433,36 @@ const ConfigRows: React.FC<{ isZh: boolean; input: VideoCreationInput }> = ({ is
       </>
     );
   }
+  // 电影级:同 ConfigCard,不显示赛道/人设/关键词。
+  if (input.engine === 'ai') {
+    const body = (input.script || '').trim();
+    const tag = (input.scriptMode || (body ? 'strict' : 'ai')) === 'strict'
+      ? (isZh ? '我有脚本' : 'own script')
+      : (isZh ? 'AI 写稿' : 'AI script');
+    return (
+      <>
+        <div className="break-words whitespace-pre-wrap">
+          📝 {isZh ? '文案' : 'Script'}：<span className="text-gray-400">[{tag}]</span>{' '}
+          {body || (isZh ? `AI 按 ${input.targetSeconds ?? 45}s 写稿` : `AI writes for ${input.targetSeconds ?? 45}s`)}
+        </div>
+        {scriptLangDisplay(input.scriptLang, isZh) && <div>🌐 {isZh ? '创作语言' : 'Language'}：{scriptLangDisplay(input.scriptLang, isZh)}</div>}
+        <div>🎬 {isZh ? '画面' : 'Visuals'}：{cinematicVisualLabel(input, isZh)}</div>
+        <div>🎤 {isZh ? '声音' : 'Audio'}：{cinematicAudioLabel(input, isZh)}</div>
+        <div>🚀 {isZh ? '发布' : 'Publish'}：{publishSummary(input, isZh)}</div>
+      </>
+    );
+  }
   const kw = (input.keywords || []).filter(Boolean).join(' · ');
   const s = (input.script || '').trim();
   const mode = input.scriptMode || (s ? 'strict' : 'ai');
   const scriptTag = mode === 'strict' ? (isZh ? '严格逐字' : 'verbatim') : (isZh ? 'AI 写稿' : 'AI script');
   const scriptBody = s || (isZh ? `留空 · AI 按 ${input.targetSeconds ?? 45}s 写稿` : `empty · AI writes for ${input.targetSeconds ?? 45}s`);
-  const visuals = input.engine === 'ai'
-    ? (isZh ? '纯 AI 生成（Seedance）' : 'Pure AI (Seedance)')
-    : (input.localVideos && input.localVideos.length > 0)
-      ? (isZh ? `本地素材 ${input.localVideos.length} 个` : `${input.localVideos.length} local clips`)
-      : input.useStockVideo !== false
-        ? (isZh ? '在线视频素材 + 图片' : 'stock video + images')
-        : (isZh ? '仅图片' : 'images only');
+  // 到这里只剩 stock(在线/本地素材)—— 电影级已在上面的 'ai' 分支返回。
+  const visuals = (input.localVideos && input.localVideos.length > 0)
+    ? (isZh ? `本地素材 ${input.localVideos.length} 个` : `${input.localVideos.length} local clips`)
+    : input.useStockVideo !== false
+      ? (isZh ? '在线视频素材 + 图片' : 'stock video + images')
+      : (isZh ? '仅图片' : 'images only');
   return (
     <>
       <div>🎯 {isZh ? '赛道' : 'Track'}：{input.track || '-'}</div>
@@ -3558,9 +3647,13 @@ const VideoConfigModal: React.FC<{
   // 文案校验:
   //   strict 严格逐字:必填、≥SCRIPT_MIN_STRICT 字、≤scriptMax 字(直接决定时长)。
   //   ai 参考:选填,填了则不超上限。
+  //   ⚠️ 电影级例外:它不再带赛道/人设/关键词,想法留空就真的没有任何题材输入了
+  //      (老逻辑会拿默认赛道去写稿),所以「我只有个想法」必须填。
   const scriptValid = scriptMode === 'strict'
     ? (scriptLen >= SCRIPT_MIN_STRICT && scriptLen <= scriptMax)
-    : (scriptLen === 0 || scriptLen <= scriptMax);
+    : (mode === 'pure_ai'
+        ? (scriptLen > 0 && scriptLen <= scriptMax)
+        : (scriptLen === 0 || scriptLen <= scriptMax));
   // 赛道步:非矩阵只校验赛道必选;矩阵号必须选好账号(编辑老任务可沿用已存身份不强制重选)。
   const trackStepValid = matrixMode ? (!!identityAccountId || isEdit) : (trackId !== '');
   // 文案步:只校验文案本身。
@@ -3576,17 +3669,23 @@ const VideoConfigModal: React.FC<{
     : (TRACK_PRESETS.find((t) => t.id === trackId)?.[isZh ? 'zh' : 'en'] || editTask?.input.track || '');
 
   const buildTitle = (): string => {
-    const kw = keywords.split(/[,，\s]+/).map((k) => k.trim()).filter(Boolean);
-    const head = kw.slice(0, 2).join(' / ');
-    const base = head || trackLabel || (isZh ? '视频创作' : 'Video');
+    // 电影级没有关键词可拼,用脚本/想法的首行 —— 用户粘的分镜脚本首行通常就是标题。
+    const head = mode === 'pure_ai'
+      ? (script.split('\n').map((l) => l.trim()).find((l) => l.length > 0) || '').slice(0, 24)
+      : keywords.split(/[,，\s]+/).map((k) => k.trim()).filter(Boolean).slice(0, 2).join(' / ');
+    const base = head
+      || (mode === 'pure_ai' ? (isZh ? '电影级' : 'Cinematic') : (trackLabel || (isZh ? '视频创作' : 'Video')));
     if (scriptMode === 'strict') return `${base}（${isZh ? '严格文案' : 'strict'} · ${scriptLen}${isZh ? '字' : 'ch'}）`;
     return `${base}（AI ${isZh ? '写稿' : 'script'} · ${targetSeconds}s）`;
   };
 
   const buildInput = (shotsOverride?: StoryShot[]): VideoCreationInput => ({
-    persona: persona.trim(),
-    track: trackLabel,
-    keywords: keywords.split(/[,，\s]+/).map((k) => k.trim()).filter(Boolean),
+    // 电影级的输入是分镜脚本或一句话想法 —— 赛道/人设/关键词既不问也不用。
+    //   写进去只会让卡片和详情页显示一套跟成片毫不相干的默认值
+    //   (实测:一条金融故事被标成「美食探店 / 一人食」)。
+    persona: mode === 'pure_ai' ? '' : persona.trim(),
+    track: mode === 'pure_ai' ? '' : trackLabel,
+    keywords: mode === 'pure_ai' ? [] : keywords.split(/[,，\s]+/).map((k) => k.trim()).filter(Boolean),
     script: script.trim(),
     scriptMode,
     // 电影级:用户在分镜表上确认/编辑过的分镜。pipeline 见到它就直接用,不再跑一次解析
@@ -4074,7 +4173,7 @@ const VideoConfigModal: React.FC<{
                       ? (isZh ? '我只有个想法' : 'I just have an idea')
                       : (isZh ? 'AI 参考我的文案' : 'AI writes (reference mine)')}
                     desc={mode === 'pure_ai'
-                      ? (isZh ? 'AI 写稿并设计分镜，你的文字仅作方向参考（可不填）' : 'AI writes the script and designs shots; your text is a hint')
+                      ? (isZh ? 'AI 按你写的一句话写稿并设计分镜' : 'AI writes the script and designs shots from your one-liner')
                       : (isZh ? 'AI 写稿，你的文案仅作参考（可不填）' : 'AI writes; your text is just a reference')}
                   />
                 </div>
@@ -4088,7 +4187,9 @@ const VideoConfigModal: React.FC<{
                   ? (mode === 'pure_ai'
                       ? (isZh ? `不少于 ${SCRIPT_MIN_STRICT} 字。表头、拍摄准备、B-roll 清单这类制作说明会自动剔除，不会被念出来` : `at least ${SCRIPT_MIN_STRICT} chars; production notes are stripped automatically`)
                       : (isZh ? `逐字朗读，不少于 ${SCRIPT_MIN_STRICT} 字；字数越多视频越长` : `read verbatim; at least ${SCRIPT_MIN_STRICT} chars`))
-                  : (isZh ? '选填，留空则由 AI 按目标时长写稿；填了 AI 会参考' : 'optional; AI writes for target length, uses yours as reference')}
+                  : (mode === 'pure_ai'
+                      ? (isZh ? '一句话说清要拍什么，AI 据此写稿并设计分镜（必填）' : 'one line on what to shoot; AI writes the script and shots (required)')
+                      : (isZh ? '选填，留空则由 AI 按目标时长写稿；填了 AI 会参考' : 'optional; AI writes for target length, uses yours as reference'))}
               >
                 <textarea
                   value={script}
@@ -4098,7 +4199,9 @@ const VideoConfigModal: React.FC<{
                     ? (mode === 'pure_ai'
                         ? (isZh ? '把你的分镜脚本整份粘进来（场景/口播/画面/花字/音乐都可以带上），或者只粘一段口播稿…' : 'Paste your full storyboard (scenes, narration, visuals, captions, music) or just the narration…')
                         : (isZh ? `把要逐字朗读的视频文案粘进来…（${SCRIPT_MIN_STRICT}~${scriptMax} 字）` : `Paste the exact narration… (${SCRIPT_MIN_STRICT}~${scriptMax} chars)`))
-                    : (isZh ? `给 AI 的参考方向，可留空…（≤${scriptMax} 字）` : `Reference for AI, can be empty… (≤${scriptMax} chars)`)}
+                    : (mode === 'pure_ai'
+                        ? (isZh ? '例：讲一个投行因为一篇研报亏掉 1.3 亿美元的故事，讲故事风格…' : 'e.g. tell the story of a bank losing $130M over one research note…')
+                        : (isZh ? `给 AI 的参考方向，可留空…（≤${scriptMax} 字）` : `Reference for AI, can be empty… (≤${scriptMax} chars)`))}
                   className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm dark:text-white focus:outline-none focus:ring-2 focus:ring-rose-500/50 resize-y min-h-[100px]"
                 />
                 <div className={`mt-1 text-[11px] text-right ${!scriptValid ? 'text-red-500' : 'text-gray-400'}`}>
