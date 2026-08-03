@@ -155,28 +155,50 @@ function resolveScriptFont(sample: string): string | null {
   return null;
 }
 
-/** 把一句话按【可视宽度】折行:中文=1 字宽(行为不变)、拉丁/数字/空格≈0.5 字宽,英文优先在
- *  空格处断词(真机反馈:英文每个字母被当全宽算 → 行只用一半宽还从单词中间劈开)。 */
-function wrapSubtitle(text: string, maxPerLine = 14): string {
+const isWideChar = (ch: string) => /[\u1100-\u11ff\u2e80-\u9fff\ua960-\ua97f\uac00-\ud7ff\uf900-\ufaff\uff00-\uffef]/.test(ch);
+const charUnit = (ch: string) => (isWideChar(ch) ? 1 : 0.5);
+/** 文本的【可视宽度】:中文/全角=1,拉丁/数字/空格=0.5。字符数不能直接当宽度用。 */
+function widthUnits(s: string): number {
+  let u = 0;
+  for (const ch of Array.from(s)) u += charUnit(ch);
+  return u;
+}
+
+/**
+ * 按【可视宽度】把文本切成若干段,**优先在空格处断词**。
+ *
+ * ⚠️【真机 bug】:原来 splitPhrases 里是 `for (i += PHRASE_MAX) r.slice(i, i+PHRASE_MAX)` ——
+ *   纯按字符数硬切、完全不看空格。"Far from being nothing" 共 22 字符 > 20,被切成
+ *   "Far from being nothi" + "ng",烧进画面就是半个单词(用户实测截图)。
+ *   翻译搬运没这毛病,是因为它走 ASS 的 wrapAssLine,那条认空格。
+ *
+ * 只有【整段没有空格】(中文,或一个超长英文单词)时才硬切 —— 那时也没别的办法。
+ */
+function cutByWidth(text: string, maxUnits: number): string[] {
   const clean = text.replace(/\s+/g, ' ').trim();
-  if (!clean) return '';
-  const isWide = (ch: string) => /[ᄀ-ᇿ⺀-鿿ꥠ-꥿가-퟿豈-﫿＀-￯]/.test(ch);
-  const unit = (ch: string) => (isWide(ch) ? 1 : 0.5);
-  const lines: string[] = [];
+  if (!clean) return [];
+  const out: string[] = [];
   let cur = ''; let units = 0; let lastSpace = -1;
   for (const ch of Array.from(clean)) {
-    cur += ch; units += unit(ch);
+    cur += ch; units += charUnit(ch);
     if (ch === ' ') lastSpace = cur.length;
-    if (units >= maxPerLine) {
+    if (units >= maxUnits) {
       const cut = (lastSpace > 0 && lastSpace < cur.length) ? lastSpace : cur.length;
-      lines.push(cur.slice(0, cut).trimEnd());
+      const piece = cur.slice(0, cut).trim();
+      if (piece) out.push(piece);
       cur = cur.slice(cut);
-      units = 0; for (const c of Array.from(cur)) units += unit(c);
+      units = widthUnits(cur);
       lastSpace = cur.lastIndexOf(' ') >= 0 ? cur.lastIndexOf(' ') + 1 : -1;
     }
   }
-  if (cur.trim()) lines.push(cur.trim());
-  return lines.slice(0, 3).join('\n'); // 最多 3 行,别糊满屏
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
+
+/** 把一句话按【可视宽度】折行:中文=1 字宽、拉丁/数字/空格≈0.5 字宽,英文优先在空格处断词
+ *  (真机反馈:英文每个字母被当全宽算 → 行只用一半宽还从单词中间劈开)。 */
+function wrapSubtitle(text: string, maxPerLine = 14): string {
+  return cutByWidth(text, maxPerLine).slice(0, 3).join('\n'); // 最多 3 行,别糊满屏
 }
 
 /**
@@ -192,15 +214,21 @@ function splitPhrases(text: string): string[] {
   const rough = clean.split(/[,，、;；:：]+/).map((s) => s.trim()).filter(Boolean);
   const phrases: string[] = [];
   let buf = '';
+  // ⚠️ 三处长度判断【必须按可视宽度算,不能按字符数】。PHRASE_MAX=20 的本意是「20 个中文字
+  //    那么宽」,而 20 个英文字符只有 3~4 个单词、连半屏都不到 —— 英文因此几乎每段都触发
+  //    下面那条超长分支,再被硬切断词。widthUnits 把拉丁按 0.5 计,20 单位 ≈ 40 个英文字符。
   for (const r of rough) {
-    if (r.length > PHRASE_MAX) {
-      // 单段本身超长:先收掉缓冲,再按 PHRASE_MAX 硬切
+    if (widthUnits(r) > PHRASE_MAX) {
+      // 单段本身超长:先收掉缓冲,再按可视宽度切(cutByWidth 会优先在空格处断词)
       if (buf) { phrases.push(buf); buf = ''; }
-      for (let i = 0; i < r.length; i += PHRASE_MAX) phrases.push(r.slice(i, i + PHRASE_MAX));
+      for (const piece of cutByWidth(r, PHRASE_MAX)) phrases.push(piece);
     } else if (!buf) {
       buf = r;
-    } else if (buf.length + r.length <= PHRASE_MAX) {
-      buf += r;  // 合并相邻短句到同一屏(中文紧凑,不加分隔)
+    } else if (widthUnits(buf) + widthUnits(r) <= PHRASE_MAX) {
+      // 合并相邻短句到同一屏。中文紧凑不加分隔;拉丁必须补空格 ——
+      //   rough 是按逗号切的,逗号已被丢掉,直接 += 会把 "nothing" + "it" 粘成 "nothingit"。
+      const needSpace = !isWideChar(buf.slice(-1)) && !isWideChar(r[0] || '');
+      buf += (needSpace ? ' ' : '') + r;
     } else {
       phrases.push(buf);
       buf = r;
