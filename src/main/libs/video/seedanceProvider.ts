@@ -47,6 +47,9 @@ export interface SeedanceClipResult {
   error?: string;
   /** 该镜实扣积分(服务端 create 时扣;失败镜服务端已退,不计入总额)。 */
   chargedTokens?: number;
+  /** 是等满预算没等到,而不是上游明确失败。这种镜【钱已扣且退不回来】(退款只认 failed),
+   *  所以开头连着超时必须立刻收手,别把后面每一镜都照样提交一遍。 */
+  timedOut?: boolean;
 }
 
 export interface GenerateSeedanceOptions {
@@ -107,7 +110,13 @@ function authHeaders(): Record<string, string> | null {
   return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
 }
 
-interface CreateResult { taskId: string; chargeId: string; chargedTokens: number; costUsd: number; }
+interface CreateResult {
+  taskId: string; chargeId: string; chargedTokens: number; costUsd: number;
+  /** 服务端给的【本镜最多等多少秒】。档位是服务端定的(flex=离线队列,排队十几分钟很正常),
+   *  客户端自己猜不出来 —— 老客户端没有这个字段,回落到本地默认。 */
+  pollBudgetSec?: number;
+  serviceTier?: string;
+}
 
 /** 提交一个 Seedance 片段任务。返回 taskId+chargeId,或抛错(含 402 余额不足)。 */
 async function createClip(
@@ -139,13 +148,22 @@ async function createClip(
       chargedTokens: Number(json.chargedTokens) || 0,
       // 服务端权威美元数。拿不到(老后端)才退回 tokens/1e6 —— 那个是 $1/M 的假设,会少算。
       costUsd: Number(json.costUsd) || 0,
+      pollBudgetSec: Number(json.pollBudgetSec) > 0 ? Number(json.pollBudgetSec) : undefined,
+      serviceTier: typeof json.serviceTier === 'string' ? json.serviceTier : undefined,
     };
   } finally {
     clearTimeout(timer);
   }
 }
 
-interface StatusResult { status: 'queued' | 'running' | 'succeeded' | 'failed'; videoUrl?: string | null; error?: string; }
+interface StatusResult {
+  status: 'queued' | 'running' | 'succeeded' | 'failed';
+  videoUrl?: string | null;
+  error?: string;
+  /** 这一次【查询本身】失败了(HTTP 非 2xx / 解析不了),不是任务在跑。
+   *  调用方要单独计数:偶发一两次无所谓,一直失败说明链路断了,不能当"还在跑"干等到超时。 */
+  pollFailed?: boolean;
+}
 
 /** 查一次任务状态。 */
 async function pollClipOnce(taskId: string, chargeId: string): Promise<StatusResult> {
@@ -157,7 +175,9 @@ async function pollClipOnce(taskId: string, chargeId: string): Promise<StatusRes
     const url = `${apiBase()}/api/video/seedance/status/${encodeURIComponent(taskId)}`
       + (chargeId ? `?chargeId=${encodeURIComponent(chargeId)}` : '');
     const resp = await fetch(url, { headers, signal: ctrl.signal });
-    if (!resp.ok) return { status: 'running' }; // 暂时性查询失败 → 当还在跑,下轮再试
+    // 查询失败 ≠ 任务在跑。标记出来交给上层计数 —— 原来一律当 'running',链路真断了
+    // (401/502/端点不存在)也会一路干等到超时才放弃,而钱在 create 时就已经扣了。
+    if (!resp.ok) return { status: 'running', pollFailed: true, error: `status ${resp.status}` };
     const json: any = await resp.json();
     return { status: json?.status || 'running', videoUrl: json?.videoUrl, error: json?.error };
   } finally {
@@ -486,17 +506,33 @@ async function generateOne(
   // 故事板模式:该镜有首帧图 → 用它做 i2v(图生视频,更稳);否则用全局参考图 / 纯文生视频。
   const imgs = (scene.keyframeDataUrl && scene.keyframeDataUrl.length > 0) ? [scene.keyframeDataUrl] : imageUrls;
   try {
-    const { taskId, chargeId, chargedTokens, costUsd } = await createClip(scene.prompt, imgs, duration, ratio, resolution, tier);
+    const created = await createClip(scene.prompt, imgs, duration, ratio, resolution, tier);
+    const { taskId, chargeId, chargedTokens, costUsd } = created;
+    // 等多久【听服务端的】:档位是它定的(flex=离线队列,排队十几分钟正常;default=在线)。
+    //   老后端没回这个字段才用本地默认 —— 那正是真机烧掉一整批的配方:
+    //   服务端选了慢档、客户端按 300s 的快档等,每镜必然等满再放弃,钱早扣了。
+    const budgetSec = Math.max(60, Math.min(3600, created.pollBudgetSec ?? timeoutSec));
     // 每镜【先扣费再生成】(服务端 /seedance/create 原子扣费),把这笔扣费显出来 ——
     // 否则用户只看到"生成中"、看不到扣费,会以为没收钱(失败镜服务端会自动退)。
+    const waitHint = created.serviceTier === 'flex'
+      ? ` · 离线档排队,最长等 ${Math.round(budgetSec / 60)} 分钟`
+      : '';
     onProgress?.(chargedTokens > 0
-      ? `💎 第 ${idx + 1} 镜 已扣 ${chargedTokens.toLocaleString()} 积分 · AI 生成中…`
-      : `🎬 第 ${idx + 1} 镜 AI 生成中…`);
-    const deadline = Date.now() + timeoutSec * 1000;
+      ? `💎 第 ${idx + 1} 镜 已扣 ${chargedTokens.toLocaleString()} 积分 · AI 生成中…${waitHint}`
+      : `🎬 第 ${idx + 1} 镜 AI 生成中…${waitHint}`);
+    const deadline = Date.now() + budgetSec * 1000;
+    // 连续【查询失败】计数:偶发抖动照常重试,连续 12 次(约 1 分钟)说明链路断了,
+    //   立刻退出去报错,而不是拿着一条查不动的任务干等满整个预算。
+    let pollFails = 0;
     while (Date.now() < deadline) {
       await sleep(5000);
       if (signal?.aborted) return { path: null, error: '已停止', chargedTokens };
       const st = await pollClipOnce(taskId, chargeId);
+      if (st.pollFailed) {
+        if (++pollFails >= 12) return { path: null, error: `任务状态查询持续失败(${st.error || '未知'})` };
+        continue;
+      }
+      pollFails = 0;
       if (st.status === 'succeeded') {
         if (!st.videoUrl) return { path: null, error: '成片无 video_url', chargedTokens };
         const outPath = path.join(destDir, `seedance_${idx + 1}_${taskId.slice(-8)}.mp4`);
@@ -510,7 +546,9 @@ async function generateOne(
       // 失败镜:服务端按 chargeId 自动退款,不计入实扣总额。
       if (st.status === 'failed') return { path: null, error: st.error || 'Ark 任务失败' };
     }
-    return { path: null, error: '生成超时' };
+    // 超时 = 钱已扣、任务还在上游队列里跑,成片我们再也取不回来。把等了多久写进错误里,
+    //   否则日志上只有一个"生成超时",看不出是"等太短"还是"上游真挂了"。
+    return { path: null, error: `生成超时(已等 ${Math.round(budgetSec / 60)} 分钟未出片)`, timedOut: true };
   } catch (e) {
     return { path: null, error: e instanceof Error ? e.message : String(e) };
   }
@@ -554,6 +592,27 @@ export async function generateSeedanceClips(opts: GenerateSeedanceOptions): Prom
 
   const results = new Array<SeedanceClipResult>(scenes.length);
 
+  // ── 熔断:开头连着超时就收手 ────────────────────────────────────────────
+  // 每镜是【先扣费再生成】,而超时镜的钱退不回来(服务端只在查到 failed 时退)。
+  // 真机实测:档位配成离线队列、客户端按 300s 等 → 第 1 镜就超时,代码却照样把
+  //   剩下 7 镜挨个提交挨个扣费,8 镜全军覆没、¥11.9 全烧掉。
+  // 前两镜都超时说明是【配置/链路层面】的问题(等太短、上游堵死),不是这一镜的运气,
+  //   后面每一镜都会一模一样。这时候停下来只赔 2 镜,继续跑就是赔满全场。
+  const BAIL_AFTER_TIMEOUTS = 2;
+  let timeouts = 0;
+  let anyOk = false;
+  let bailed = false;
+  /** 记一镜结果;返回 true 表示该收手了。 */
+  const noteResult = (r: SeedanceClipResult): boolean => {
+    if (r?.path) { anyOk = true; timeouts = 0; return false; }
+    if (!r?.timedOut) return false;      // 上游明确失败的镜会退款,不触发熔断
+    timeouts++;
+    if (anyOk || timeouts < BAIL_AFTER_TIMEOUTS) return false;
+    bailed = true;
+    opts.onProgress?.(`⛔ 开头连着 ${timeouts} 镜等不到成片,已中止本次生成 —— 剩下的镜不再提交,免得继续扣费`);
+    return true;
+  };
+
   if (opts.chainFrames) {
     // ── 串接模式:严格顺序,每镜首帧 = 上一镜末帧 ──
     //   第 1 镜用它自己的故事板首帧(或纯文生视频);之后每镜都不再需要出图,
@@ -569,6 +628,7 @@ export async function generateSeedanceClips(opts: GenerateSeedanceOptions): Prom
         i, { ...scene, keyframeDataUrl: undefined }, imgs,
         ratio, resolution, tier, destDir, timeoutSec, opts.signal, opts.onProgress,
       );
+      if (noteResult(results[i])) break;
       // 抽本镜末帧给下一镜。抽不到就清空 carry —— 下一镜退回文生视频,
       //   总比拿一张过期的帧去驱动强(那会让画面突然跳回好几镜之前)。
       carry = '';
@@ -584,20 +644,32 @@ export async function generateSeedanceClips(opts: GenerateSeedanceOptions): Prom
     let next = 0;
     const worker = async (): Promise<void> => {
       while (next < scenes.length) {
-        if (opts.signal?.aborted) break;
+        if (opts.signal?.aborted || bailed) break;
         const i = next++;
         results[i] = await generateOne(i, scenes[i], imageUrls, ratio, resolution, tier, destDir, timeoutSec, opts.signal, opts.onProgress);
+        if (noteResult(results[i])) break;   // bailed 置位,其余 worker 下一轮各自退出
       }
     };
     const n = Math.max(1, Math.min(concurrency, scenes.length));
     await Promise.all(Array.from({ length: n }, () => worker()));
   }
 
-  // 结尾汇总实扣积分(只计成功镜;失败镜服务端已退)。
+  // 结尾汇总实扣积分(只计成功镜)。
+  // ⚠️ 「失败已退」不能一概而论:上游明确 failed 的镜服务端会退,但【超时】的镜退不了 ——
+  //    任务还在上游队列里跑,状态从没到过终态,退款那条路根本没被触发过。以前这里
+  //    把所有失败都写成"已退",用户对账时会以为钱回来了。
   const okResults = results.filter((r) => r && r.path);
   const totalCharged = okResults.reduce((s, r) => s + (r.chargedTokens || 0), 0);
+  const timedOutCount = results.filter((r) => r && r.timedOut).length;
+  const failedCount = results.filter((r) => r && !r.path && !r.timedOut).length;
   if (totalCharged > 0) {
-    opts.onProgress?.(`💎 AI 成片共扣 ${totalCharged.toLocaleString()} 积分(${okResults.length} 镜成功${okResults.length < scenes.length ? `,${scenes.length - okResults.length} 镜失败已退` : ''})`);
+    const tail = [
+      failedCount > 0 ? `${failedCount} 镜失败已退` : '',
+      timedOutCount > 0 ? `${timedOutCount} 镜超时未出片(该笔已扣,上游仍在跑)` : '',
+    ].filter(Boolean).join(',');
+    opts.onProgress?.(`💎 AI 成片共扣 ${totalCharged.toLocaleString()} 积分(${okResults.length} 镜成功${tail ? ',' + tail : ''})`);
+  } else if (timedOutCount > 0) {
+    opts.onProgress?.(`⚠️ ${timedOutCount} 镜等满预算未出片 —— 这几笔已扣且退不回来,请把服务端「出片档」或「等待预算」调好再重试`);
   }
   return results;
 }
