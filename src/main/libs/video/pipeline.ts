@@ -613,6 +613,20 @@ export function classifyLocalMediaFiles(paths: string[]): { videos: string[]; im
  *    每条都【完整跑完】(本地保存 + 按需发布)才进下一条,中途不提前结束。
  */
 let _videoBatchBusy = false; // ③ 进程级单飞闸:同一进程同时只跑一条视频流水线
+/**
+ * 谁持有闸门、什么时候拿的、它的中断信号。
+ *
+ * ⚠️【真机 bug】闸门只在 finally 里释放。一旦流水线卡在某个不响应停止的等待上
+ *   (合成超时上限现在按片长算、最长 3 小时),finally 就永远不执行 —— 用户点了停止、
+ *   界面也显示停了,可**之后每个视频任务都被这道闸挡掉**,只能重启 app。
+ *   所以要记住持有者是谁:① 报错时说清被谁占着、占了多久;② 持有者已经被 abort
+ *   且僵住超过 ZOMBIE_TAKEOVER_MS 就允许接管 —— 那时它已经是僵尸,继续挡着只会更糟。
+ */
+let _videoBatchHolder: { taskId: string; startedAt: number; signal?: AbortSignal } | null = null;
+/** 闸门持有令牌:接管后老的持有者 finally 不能再把【别人的】闸门放掉。 */
+let _videoBatchToken = 0;
+/** 被停止的持有者僵住多久算僵尸。正常 abort 几秒内就该收尾,给到 60s 已很宽。 */
+const ZOMBIE_TAKEOVER_MS = 60_000;
 
 export async function generateVideoBatch(
   input: VideoCreationInput,
@@ -623,14 +637,34 @@ export async function generateVideoBatch(
   //    抢同一个 video_publish 窗口 / 抖音 tab 串台(用户实测:要 2 条却出 3 条 + 画面串台)。
   //    无论从哪条入口(main IPC / sidecar / createAndRun / 调度)进来,都在此唯一汇合点拦住。
   if (_videoBatchBusy) {
-    emit?.({
-      jobId: (input as any).taskId, status: 'error', steps: [],
-      message: '已有视频任务在运行,本次跳过(同时只跑一条,避免抢占视频窗口)',
-      error: 'video_pipeline_busy',
-    } as any);
-    return { ok: false, error: '已有视频任务在运行,本次跳过' } as VideoCreationResult;
+    const h = _videoBatchHolder;
+    const heldMs = h ? Date.now() - h.startedAt : 0;
+    const heldSec = Math.round(heldMs / 1000);
+    const holderAborted = !!h?.signal?.aborted;
+    // 持有者已被停止、却还僵着不放 → 它已经是僵尸,接管。继续挡下去只会让用户以为
+    //   整个视频功能坏了(真机:停了一个任务后,所有视频任务点了就失败)。
+    // ⚠️ 只在【已 abort】时才接管。没 abort 说明人家真在跑,强行接管会变成两条流水线
+    //    并发抢同一个发布窗口 —— 那正是这道闸当初要防的事(也确实出过两个下载器同时跑)。
+    if (holderAborted && heldMs >= ZOMBIE_TAKEOVER_MS) {
+      console.warn(`[video] 接管僵死闸门:持有者 task=${h?.taskId} 已停止但仍占用 ${heldSec}s`);
+      emit?.({
+        jobId: (input as any).taskId, status: 'running', steps: [],
+        message: `⚠️ 上一个任务已停止但未完全收尾(占用 ${heldSec}s),已强制接管继续`,
+      } as any);
+    } else {
+      const who = h?.taskId ? `任务 ${String(h.taskId).slice(0, 8)}` : '另一个任务';
+      const state = holderAborted ? '已停止,正在收尾' : '运行中';
+      emit?.({
+        jobId: (input as any).taskId, status: 'error', steps: [],
+        message: `已有视频任务在运行,本次跳过(${who} · ${state} · 已 ${heldSec}s;同时只跑一条,避免抢占视频窗口)`,
+        error: 'video_pipeline_busy',
+      } as any);
+      return { ok: false, error: `已有视频任务在运行,本次跳过(${state} · 已 ${heldSec}s)` } as VideoCreationResult;
+    }
   }
   _videoBatchBusy = true;
+  const myBatchToken = ++_videoBatchToken;
+  _videoBatchHolder = { taskId: String((input as any).taskId || ''), startedAt: Date.now(), signal };
   // 运行窗 title 标【当前任务 id + 类型】(req 2);收尾在 finally 清。
   setCurrentVideoTask((input as any).taskId, videoTypeLabel((input as any).engine));
   try {
@@ -710,7 +744,15 @@ export async function generateVideoBatch(
     ...(success > 0 ? {} : { error: stopped ? '已停止' : '全部失败' }),
   } as any);
   return { ok: success > 0, outputPath: outputPaths[0], outputPaths, stopped } as unknown as VideoCreationResult;
-  } finally { _videoBatchBusy = false; clearCurrentVideoTask(); }
+  } finally {
+    // ⚠️ 只能放【自己拿的】那道闸。被接管之后老持有者才姗姗来迟地走到这里,
+    //    若无条件置 false,就会把接管者正在用的闸门放掉 → 两条流水线并发。
+    if (_videoBatchToken === myBatchToken) {
+      _videoBatchBusy = false;
+      _videoBatchHolder = null;
+      clearCurrentVideoTask();
+    }
+  }
 }
 
 export async function generateVideo(
