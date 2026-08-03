@@ -296,6 +296,7 @@ export async function runMatrixRedditThread(
 // gate:2026-08-03 真机确认发帖框在 /zh/post,视频 input 常驻 DOM,不用点入口。
 const MATRIX_EXTRA_ANCHOR_URL: Record<string, string> = {
   gate: 'https://www.gate.com/zh/post',
+  bitget: 'https://www.bitget.com/zh-CN/insights',
 };
 
 export async function runMatrixDriver(

@@ -24,9 +24,9 @@ const PLATFORM_NAME: Record<string, string> = { douyin: '抖音', xhs: '小红�
   gate: 'Gate广场', bitget: 'Bitget Insight', bybit: 'Bybit Byx', okx: 'OKX星球' };
 // 有视频发布能力的目标平台 —— 只有这些才给「视频」素材选项(没 driver 的平台给了选项,
 // 用户选了也只会在跑到发布那步才失败,素材白下)。与 binanceRepostRunner 的同名表必须一致。
-// 2026-08-03 真机实测:gate 支持视频且 driver 已实现;okx 平台根本没有视频入口;
-// bybit 平台支持但上传要走文件选择器拦截,driver 未写;bitget 待确认。
-const VIDEO_REPOST_PLATFORMS = new Set<string>(['binance', 'gate']);
+// 2026-08-03 真机逐个实测:gate / bitget 支持且 driver 已实现;okx 平台根本没有视频入口;
+// bybit 平台支持(≤200MB)但上传要走文件选择器拦截,driver 未写,先不开。
+const VIDEO_REPOST_PLATFORMS = new Set<string>(['binance', 'gate', 'bitget']);
 
 // 来源平台按【搬运形态】给:图文→小红书 / X;视频→抖音 / TikTok。只列已实现的平台(不展示「敬请期待」)。
 type SrcOpt = { id: 'xhs' | 'douyin' | 'tiktok' | 'x'; label: string; enabled: boolean };

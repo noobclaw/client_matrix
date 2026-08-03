@@ -42,10 +42,10 @@ function platLabel(p: string): string { return REPOST_PLATFORM_LABEL[p] || p; }
 // 2026-08-03 真机逐个验过各交易所广场的发帖框:
 //   · gate  ✅ 支持视频,input[accept=video/*] 常驻 DOM(drivers/gate.js 已实现)
 //   · okx   ❌ 内联框和完整编辑器都只有 image/png,jpg,jpeg,gif,全页无视频入口 —— 平台就没这功能
+//   · bitget ✅ 展开发帖框后 input[accept=video/mp4] 就在 DOM 里(drivers/bitget.js 已实现)
 //   · bybit ✅ 平台支持(/social/publish 有 Photos|Video tab,≤200MB),但 input 要点「Add video」
 //            才创建,得走 TikTok 那套 chooser 拦截 —— driver 还没写,所以先不开
-//   · bitget ❓ 未登录看不到编辑器,待确认
-const VIDEO_REPOST_PLATFORMS = new Set<string>(['binance', 'gate']);
+const VIDEO_REPOST_PLATFORMS = new Set<string>(['binance', 'gate', 'bitget']);
 
 const DEFAULT_BASE_URL = 'https://api.noobclaw.com';
 function baseUrl(): string { return process.env.NOOBCLAW_API_BASE_URL || DEFAULT_BASE_URL; }
