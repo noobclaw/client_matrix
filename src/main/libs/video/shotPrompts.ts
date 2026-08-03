@@ -171,8 +171,53 @@ export interface MotionPromptOptions {
  * 只写运动:结构声明 → 运镜 → 主体动作 → 时间轴 → 否定项。
  * 有首帧参考图时【绝不复述画面内容】(复述会导致主体漂移 —— Seedance 官方与社区共识)。
  */
+/**
+ * Seedance 提示词硬上限 2000 字符(社区实测,中文一字算一个、标点也算)。
+ * 留 100 字余量,和 seedance2.0-prompt-skill 的建议一致。
+ */
+const PROMPT_MAX_CHARS = 1900;
+
+/**
+ * 超长时按优先级砍段,**台词绝不砍**。
+ *
+ * ⚠️ 为什么必须做:后端是 `prompt.slice(0, 2000)` —— 超了从尾巴直接切,不报错不提示。
+ *   而台词拼在 prompt 中后段,一旦超长被切掉,那一镜就变成哑巴,日志上什么都看不出来。
+ *   所以超长时从【最次要的段】开始丢:质感 → 时间轴 → 否定项 → 环境音/BGM。
+ *   丢到还超,就只能截了 —— 但那时台词已经排在前面,截的是尾部的修饰。
+ *
+ * @param parts     按原顺序的段落
+ * @param dropOrder 可丢弃段的下标,按【先丢谁】排序
+ * @param shrinkIdx 最后手段:该段可以被截短(台词段)。见下面为什么不能整体截尾。
+ */
+function capPromptLength(parts: string[], dropOrder: number[], shrinkIdx = -1): string {
+  const join = (ps: string[]) => ps.filter(Boolean).join('。');
+  const cur = parts.slice();
+  if (join(cur).length <= PROMPT_MAX_CHARS) return join(cur);
+  for (const idx of dropOrder) {
+    if (idx < 0 || idx >= cur.length) continue;
+    cur[idx] = '';
+    if (join(cur).length <= PROMPT_MAX_CHARS) return join(cur);
+  }
+  // ⚠️ 丢完还超 = 台词本身比整个预算还长(分镜表该按 4.2 字/秒 拦住,这里只是兜底)。
+  //   此时【不能整体截尾】—— 「禁止:任何文字、字幕、LOGO或水印」排在最后,一截就没了,
+  //   而它没了画面就会冒出乱码文字,比台词短一截严重得多(测试实测到这条)。
+  //   所以改成把台词段自己截短,结构条款全部保住。
+  if (shrinkIdx >= 0 && shrinkIdx < cur.length && cur[shrinkIdx]) {
+    const others = cur.slice();
+    others[shrinkIdx] = '';
+    const room = PROMPT_MAX_CHARS - join(others).length - 2; // 2 = 分隔符余量
+    cur[shrinkIdx] = room > 8 ? cur[shrinkIdx].slice(0, room) : '';
+    if (join(cur).length <= PROMPT_MAX_CHARS) return join(cur);
+  }
+  return join(cur).slice(0, PROMPT_MAX_CHARS);
+}
+
 export function buildMotionPrompt(shot: StoryShot, opts: MotionPromptOptions = {}): string {
   const parts: string[] = [];
+  // 可丢弃段的下标,按「先丢谁」排。台词那几段【不进这个表】= 永不丢弃。
+  const dropOrder: number[] = [];
+  // 最后手段可截短的段(台词)。-1 = 本镜没台词。
+  let shrinkIdx = -1;
   const dur = Math.max(1, Math.round(opts.durationSec || shot.seconds || 5));
 
   // 1. 结构声明
@@ -197,19 +242,24 @@ export function buildMotionPrompt(shot: StoryShot, opts: MotionPromptOptions = {
   } else {
     parts.push(`0-${dur}s:匀速完成这一次运动,不要中途变向`);
   }
+  const idxTimeline = parts.length - 1;
 
   // 4. 质感(与首帧共享,保证调性一致)
   parts.push(opts.styleLock || DEFAULT_STYLE_LOCK);
+  const idxStyle = parts.length - 1;
 
   // 5. 原生音频:把台词交给 Seedance 念(它会自己对口型)。
   //    ⚠️ 不写这段的话模型只出环境音,分镜稿的口播就丢了 —— 这是「本地不配音」方案的命门。
   const line = (opts.dialogue || shot.narration || '').trim();
   if (opts.nativeAudio && line) {
     const who = opts.speaker?.trim();
+    // ⚠️ 台词这两段【不进 dropOrder】—— 超长时宁可砍质感和否定项,也绝不能砍掉要念的话。
+    //    极端超长(台词本身比预算还长)时才由 capPromptLength 把这一段截短,见 shrinkIdx。
     parts.push(`${who ? `${who}说` : '画面中的人物开口说'}:「${line}」`);
+    shrinkIdx = parts.length - 1;
     parts.push('人物口型与这句台词严格同步,语气自然、贴合画面情绪');
-    if (shot.sfx?.trim()) parts.push(`环境音:${shot.sfx.trim()}`);
-    if (shot.bgmMood?.trim()) parts.push(`背景音乐:${shot.bgmMood.trim()},音量压在人声之下`);
+    if (shot.sfx?.trim()) { parts.push(`环境音:${shot.sfx.trim()}`); dropOrder.push(parts.length - 1); }
+    if (shot.bgmMood?.trim()) { parts.push(`背景音乐:${shot.bgmMood.trim()},音量压在人声之下`); dropOrder.push(parts.length - 1); }
   } else if (opts.nativeAudio) {
     // 这一镜没台词(纯空镜/转场)→ 明确只要环境音,别让它自己编台词。
     parts.push(`只有环境音${shot.sfx?.trim() ? `(${shot.sfx.trim()})` : ''},没有任何人说话`);
@@ -218,9 +268,17 @@ export function buildMotionPrompt(shot: StoryShot, opts: MotionPromptOptions = {
   // 6. 否定项(视频专属)
   //    ⚠️ 原生音频模式下【不能】写「不要人声」之类 —— 台词全靠它念。
   //    「不要出现文字、字幕」保留:字幕不由画面生成,需要花字时另行本地叠加。
-  parts.push('不要剪切、不要变焦跳变、不要镜头抖动;不要肢体扭曲或多余手指、不要画面闪烁或时间跳变;不要出现文字、字幕、水印、台标');
+  parts.push('不要剪切、不要变焦跳变、不要镜头抖动;不要肢体扭曲或多余手指、不要画面闪烁或时间跳变');
+  const idxNeg = parts.length - 1;
+  // 丢弃优先级:质感 → 时间轴 → 画质否定项(环境音/BGM 上面已入表,排在最前先丢)。
+  //   「禁止文字字幕」那条【不入表】—— 它丢了就会冒出乱码文字,比少一句质感严重得多。
+  dropOrder.push(idxStyle, idxTimeline, idxNeg);
+  // 措辞对齐社区通行写法:seedance2.0-prompt-skill 的标准模板、ArcReel 生成端自动追加的
+  //   都是这一句。补上 LOGO —— 原来只写了「文字、字幕、水印、台标」,漏了它。
+  //   字幕一律本地烧:生成模型画中文字必畸变(实测「几乎无法避免」),那两个项目也都禁掉。
+  parts.push('禁止:任何文字、字幕、LOGO或水印');
 
-  return parts.join('。') + '。';
+  return capPromptLength(parts, dropOrder, shrinkIdx) + '。';
 }
 
 /**

@@ -3418,10 +3418,11 @@ const VideoConfigModal: React.FC<{
   //   · 编辑【纯 AI(engine==='ai')】:按任务【实际保存值】回填 —— 建时开了字幕(配音+字幕)
   //     就回填开,不能因为是 AI 引擎就一律强制关(否则用户每次编辑都丢掉字幕设置)。
   //   · 编辑【在线/本地素材】:始终默认开,忽略早期以 pure_ai 建过残留的 subtitleEnabled=false。
+  // ⚠️ 编辑电影级老任务时不能读旧值。旧逻辑是 `aiNarration && subtitleEnabled`,
+  //   没开 AI 配音的任务一律被存成 subtitleEnabled=false —— 照读的话这些任务永远没字幕,
+  //   而现在电影级的字幕是本地烧、和配音无关了。统一默认开,用户想关在向导里关。
   const [subtitleEnabled, setSubtitleEnabled] = useState<boolean>(
-    editTask
-      ? (editTask.input.engine === 'ai' ? editTask.input.subtitleEnabled === true : true)
-      : true,
+    editTask ? editTask.input.subtitleEnabled !== false : true,
   );
   // 纯 AI(Seedance)是否额外加「AI 配音 + 字幕」。电影级 card(forcedMode='pure_ai')默认【开】
   //   —— 补回 step1 纯AI onClick 的 setAiNarration(true)(用户要求纯AI字幕默认打开);用户仍可在
@@ -3633,11 +3634,13 @@ const VideoConfigModal: React.FC<{
     narrationEnabled: mode === 'pure_ai' ? (aiNarration ? true : false) : undefined,
     bgmPath: bgmPath || undefined,
     bgmVolume,
-    // ⚠️ 电影级默认【不烧字幕】(用户拍板:先全交给 Seedance)。
-    //   但要说清楚:Seedance 不生成字幕 —— 它负责的是音画同步和口型,画面文字我们的
-    //   prompt 还明确禁掉了(生成模型写中文常缺笔画/串字)。所以关掉 = 成片没有字幕。
-    //   要字幕就把这个开关打开:内容取每镜台词、时间取实测片段时长,本地烧,精度比以前更高。
-    subtitleEnabled: mode === 'pure_ai' ? false : subtitleEnabled,
+    // 电影级字幕:**本地烧,默认开**。
+    //   Seedance 不画字幕 —— 它负责音画同步和口型,画面文字我们 prompt 里明确禁掉了
+    //   (生成模型写中文必畸变,社区实测「几乎无法避免」;seedance2.0-prompt-skill 和
+    //   ArcReel 的标准模板也都是禁掉、字幕另做)。
+    //   本地烧的精度反而更高:内容取每镜台词(就是喂给 Seedance 念的那句),
+    //   时间取【实测片段时长】—— 对的是成片里真实播放的那段,不是估算。
+    subtitleEnabled,
     subtitleFontSize,
     subtitlePosition,
     subtitleColor: subtitleColor || undefined,
