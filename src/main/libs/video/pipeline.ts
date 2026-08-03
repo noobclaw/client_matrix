@@ -1659,6 +1659,11 @@ async function runVideoPipeline(
         return { ok: false, error: err };
       }
       // 一镜都不用生成 → 跳过 Seedance,直接进静帧分配(避免空数组调用把服务端打出 400)。
+      // 哪些镜用的是【自己生成的】片段(不是借邻镜的)。
+      // ⚠️ 原生音频下这个区分是必须的:片段自带音轨,借来的片段会把邻镜的台词【再念一遍】,
+      //    而本镜那句彻底消失 —— 画面上还看不出异常,只有听才发现。以前音频是我们自己配的,
+      //    借片段只影响画面贴题度,所以无所谓;现在不行了。
+      const aiOwnClip: boolean[] = [];
       const clipResults: SeedanceClipResult[] = Array.from(
         { length: aiScenes.length },
         (): SeedanceClipResult => ({ path: null }),
@@ -1714,7 +1719,7 @@ async function runVideoPipeline(
       assignVisuals = () => {
         const imageByScene = new Map<number, string>();
         const sceneClips = clipResults.map((r, i) => {
-          if (r.path) return [r.path];
+          if (r.path) { aiOwnClip[i] = true; return [r.path]; }
           // 没生成视频的镜(以及生成失败的镜):优先用【本镜自己的首帧】走 Ken Burns ——
           //   比借邻镜的片段贴题得多(邻镜画的是别的内容)。
           if (keyframePaths[i]) { imageByScene.set(i, keyframePaths[i]); return []; }
@@ -2669,7 +2674,15 @@ async function runVideoPipeline(
       //   走那条就把这些全丢了。所以只要每一镜都真出了视频,就直接 concat。
       //   有任何一镜没出视频(降级成静帧/图片)→ 老老实实回 composeVideo,
       //   否则会拼出一条缺镜头的片子。
-      if (aiNativeAudio && scenes.length > 0 && scenes.every((sc) => sc.clips && sc.clips.length > 0)) {
+      // ⚠️ 条件是「每镜都有【自己生成的】片段」,不是「每镜都有片段」。差别在于借来的片段
+      //    会连着邻镜的音轨一起拼进去 —— 那句台词被念两遍、本镜那句消失。宁可整条退回
+      //    composeVideo(画面照出、只是没有原生音),也不能交付一条台词错乱的片子。
+      const allOwn = scenes.length > 0 && scenes.every((sc, i) => sc.clips && sc.clips.length > 0 && aiOwnClip[i]);
+      if (aiNativeAudio && !allOwn && scenes.length > 0) {
+        const miss = scenes.filter((sc, i) => !(sc.clips && sc.clips.length > 0 && aiOwnClip[i])).length;
+        tracker.progress(`⚠️ 有 ${miss} 镜没生成出自己的片段,为避免台词错乱,本条不走原生音轨拼接`);
+      }
+      if (aiNativeAudio && allOwn) {
         const clipPaths = scenes.flatMap((sc) => sc.clips as string[]);
         tracker.progress(`${label ? label + ' · ' : ''}🎬 拼接 ${clipPaths.length} 个原生片段(保留 Seedance 人声/音效)`);
 

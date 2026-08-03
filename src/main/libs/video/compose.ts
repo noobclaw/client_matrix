@@ -931,7 +931,10 @@ export async function concatNativeClips(opts: {
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'noobclaw-ainative-'));
   try {
     const listPath = path.join(workDir, 'concat.txt');
-    fs.writeFileSync(listPath, clips.map((c) => `file '${c.replace(/'/g, "'\''")}'`).join('\n') + '\n', 'utf8');
+    // ⚠️ 复用 concatLine,别自己再写一遍转义:第一版写成 `"'\''"`,而在 JS 里那是三个引号
+    //    —— 反斜杠在解析期就没了,路径里带撇号(用户名 O'Brien 之类)直接拼接失败。
+    //    concatLine 还顺带把反斜杠转成正斜杠,Windows 路径也才对。
+    fs.writeFileSync(listPath, clips.map(concatLine).join('\n') + '\n', 'utf8');
 
     let merged = path.join(workDir, 'merged.mp4');
     opts.onProgress?.(`拼接 ${clips.length} 个片段(保留原声,零转码)`);
@@ -1003,7 +1006,9 @@ export async function concatNativeClips(opts: {
 
 /** subtitles 滤镜的路径转义(Windows 盘符冒号 + 反斜杠)。 */
 function escAssPath(p: string): string {
-  return p.replace(/\\/g, '/').replace(/:/g, '\\:');
+  // 三样都要:反斜杠→正斜杠、盘符冒号转义、撇号转义。和 repost-pipeline.escSubPath 同口径 ——
+  //   少了撇号那条,路径里带撇号时 subtitles='...' 会被提前闭合,滤镜串直接语法错。
+  return p.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
 }
 
 function assTime(sec: number): string {
