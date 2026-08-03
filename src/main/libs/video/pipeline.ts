@@ -28,7 +28,7 @@ import { pickHotspotTopic, fetchHotspotMaterial, type HotspotTopic } from './hot
 import { getUsedHotspots, markHotspotUsed } from './usedHotspotStore';
 import { fetchDouyinClips } from './hotspotDouyinSource';
 import { fetchTiktokClips } from './hotspotTiktokSource';
-import { composeVideo, type SceneSpec, type SubtitleStyle, type SubtitleCue } from './compose';
+import { composeVideo, concatNativeClips, type SceneSpec, type SubtitleStyle, type SubtitleCue } from './compose';
 import { generateScript, generateSearchTerms, detectLang, type ContentLang } from './scriptWriter';
 import { getVideoConfig, localeFor } from './videoConfig';
 import { chargeMode1Video, chargeHotspotImages, refundMode1Video } from './billing';
@@ -1259,7 +1259,12 @@ async function runVideoPipeline(
     //    偏移后合并成全局 cue(离线、精确,抄 MoneyPrinterTurbo);拿不到就让 compose 估算。
     // v6.x: 纯画面模式(仅 Seedance 可开)— 跳过 TTS、不烧字幕,镜头时长按分镜稿
     //   字数估算(5~10s,对 Seedance 片段硬限 [4,12] 友好)。其它模式恒为有旁白。
-    const wantNarration = !(input.engine === 'ai' && input.narrationEnabled === false);
+    // ⚠️【电影级不再本地配音】Seedance 1.5-pro 开 generate_audio 后,人声、口型、环境音、
+    //   BGM 是和画面一起生成的 —— 毫秒级音画同步、口型对得上,这是本地 TTS 后期贴上去
+    //   永远做不到的。所以电影级一律跳过本地 TTS(顺带省掉一整笔配音费)。
+    //   台词不再走 TTS,而是写进每镜的 prompt 交给 Seedance 念(见 buildMotionPrompt)。
+    const aiNativeAudio = input.engine === 'ai';
+    const wantNarration = !aiNativeAudio && !(input.engine === 'ai' && input.narrationEnabled === false);
     // 每镜时长来源:有旁白 → 各句真实配音时长;纯画面 → 分镜稿字数估算。下游(Seedance
     //   生成 / 本地拼接 / compose)统一读 sceneDurations,不再直接摸 audios[i].durationSec。
     const sceneDurations: number[] = [];
@@ -1515,6 +1520,9 @@ async function runVideoPipeline(
               hasLastFrame: false,
               styleLock: DEFAULT_STYLE_LOCK,
               lang: contentLang,
+              // 原生音频:台词交给 Seedance 念(本地已不再配音)。
+              nativeAudio: true,
+              dialogue: shot.narration,
             }),
             durationSec: clampDur(i),
           }))
@@ -1660,6 +1668,10 @@ async function runVideoPipeline(
       const generated = await generateSeedanceClips({
         scenes: animateIdx.map((i) => aiScenes[i]),
         referenceImages: refImagesAi,
+        // 首尾帧串接:上一镜末帧当下一镜首帧,跨镜人物/光影/画风物理连续。
+        // ⚠️ 用户自带参考图时【不串接】—— 火山那边首尾帧和参考图互斥,用户的参考图
+        //    是更强的人设锚,优先保它。
+        chainFrames: refImagesAi.length === 0,
         resolution,
         tier: input.seedanceModel,
         ratio: aspectToSeedanceRatio(input.aspect),
@@ -2651,6 +2663,27 @@ async function runVideoPipeline(
         };
       });
       const outPath = path.join(destDir, outputFileName(v));
+
+      // ── 电影级 · 原生音频:本地只拼接,绝不重编码、绝不丢音轨 ────────────────
+      // Seedance 出的片段自带人声/口型/环境音,音画同源。composeVideo 全程 `-an`,
+      //   走那条就把这些全丢了。所以只要每一镜都真出了视频,就直接 concat。
+      //   有任何一镜没出视频(降级成静帧/图片)→ 老老实实回 composeVideo,
+      //   否则会拼出一条缺镜头的片子。
+      if (aiNativeAudio && scenes.length > 0 && scenes.every((sc) => sc.clips && sc.clips.length > 0)) {
+        const clipPaths = scenes.flatMap((sc) => sc.clips as string[]);
+        tracker.progress(`${label ? label + ' · ' : ''}🎬 拼接 ${clipPaths.length} 个原生片段(保留 Seedance 人声/音效)`);
+        await concatNativeClips({
+          clipPaths,
+          outputPath: outPath,
+          bgmPath,
+          bgmVolume: input.bgmVolume !== undefined && input.bgmVolume >= 0 ? input.bgmVolume : undefined,
+          onProgress: (m) => tracker.progress(`${label ? label + ' · ' : ''}${m}`),
+          signal,
+        });
+        if (videoCount > 1) tracker.progress(`✅ ${label} 合成完成`);
+        return outPath;
+      }
+
       await composeVideo({
         scenes,
         outputPath: outPath,

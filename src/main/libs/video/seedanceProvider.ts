@@ -19,6 +19,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { runFfmpeg } from './ffmpegRuntime';
 import { getNoobClawAuthToken } from '../claudeSettings';
 
 function apiBase(): string {
@@ -58,8 +59,18 @@ export interface GenerateSeedanceOptions {
   ratio?: SeedanceRatio;
   /** 片段下载落地目录(临时素材目录)。 */
   destDir: string;
-  /** 并发上限(Ark 账号级限流,默认 2)。 */
+  /** 并发上限(Ark 账号级限流,默认 2)。⚠️ chainFrames 打开时强制串行。 */
   concurrency?: number;
+  /**
+   * 首尾帧串接:把上一镜的【末帧】当下一镜的首帧。
+   *
+   * 这是跨镜一致性的关键。以前每镜各自 i2v、靠参考图勉强锁人设,人物长相/光影/画风
+   * 一路漂;末帧衔接是画面物理连续,接缝几乎看不出来。
+   * ⚠️ 代价是【必须串行】——下一镜要等上一镜出片才能抽末帧,没法并发。
+   * ⚠️ 火山实测:首尾帧与参考图互斥(InvalidParameter: first/last frame content cannot be
+   *    mixed with reference media content),所以串接开启后不再下发全局参考图。
+   */
+  chainFrames?: boolean;
   /** 单镜最大等待秒数(轮询超时,默认 240)。 */
   perClipTimeoutSec?: number;
   /** 中断信号:用户「停止」时停止轮询、不再生成新镜。 */
@@ -111,7 +122,9 @@ async function createClip(
     const resp = await fetch(`${apiBase()}/api/video/seedance/create`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ prompt, imageUrls, duration, ratio, resolution, tier }),
+      // firstFrame 单独发:服务端要给每张图打 role,全塞 imageUrls 会被当成多个首帧。
+      //   imageUrls 仍然带上,兼容还没部署新契约的后端。
+      body: JSON.stringify({ prompt, firstFrame: imageUrls[0], imageUrls, duration, ratio, resolution, tier }),
       signal: ctrl.signal,
     });
     if (resp.status === 402) throw new Error('余额不足');
@@ -507,6 +520,21 @@ async function generateOne(
  * 批量生成各镜 Seedance 片段(限并发)。返回与 scenes 等长的结果数组(失败项 path:null）。
  * 服务端逐片段计费 + 失败自动退款,所以这里只管生成 + 收集,不处理钱。
  */
+/**
+ * 抽视频【最后一帧】存成 jpg。给首尾帧串接用。
+ * ⚠️ 用 `-sseof -0.1` 从末尾倒数取,而不是 seek 到 duration —— 后者常因时基/最后一个
+ *   关键帧的位置取不到画面,输出空文件。
+ */
+async function extractLastFrame(videoPath: string, outPath: string, signal?: AbortSignal): Promise<boolean> {
+  try {
+    const r = await runFfmpeg(
+      ['-y', '-sseof', '-0.1', '-i', videoPath, '-vsync', '0', '-q:v', '2', '-frames:v', '1', outPath],
+      { timeoutMs: 60_000, signal },
+    );
+    return r.ok && fs.existsSync(outPath) && fs.statSync(outPath).size > 0;
+  } catch { return false; }
+}
+
 export async function generateSeedanceClips(opts: GenerateSeedanceOptions): Promise<SeedanceClipResult[]> {
   const { scenes, destDir } = opts;
   // 档位/分辨率不在客户端定:透传(可能 undefined)→ 服务端 create 端点决定。
@@ -525,16 +553,45 @@ export async function generateSeedanceClips(opts: GenerateSeedanceOptions): Prom
     .filter((u): u is string => !!u);
 
   const results = new Array<SeedanceClipResult>(scenes.length);
-  let next = 0;
-  const worker = async (): Promise<void> => {
-    while (next < scenes.length) {
+
+  if (opts.chainFrames) {
+    // ── 串接模式:严格顺序,每镜首帧 = 上一镜末帧 ──
+    //   第 1 镜用它自己的故事板首帧(或纯文生视频);之后每镜都不再需要出图,
+    //   故事板图从 N 张降到 1 张。
+    let carry = '';   // 上一镜末帧的 data URL
+    for (let i = 0; i < scenes.length; i++) {
       if (opts.signal?.aborted) break;
-      const i = next++;
-      results[i] = await generateOne(i, scenes[i], imageUrls, ratio, resolution, tier, destDir, timeoutSec, opts.signal, opts.onProgress);
+      const scene = scenes[i];
+      // 有 carry 就用 carry;否则用本镜自己的首帧图;都没有 → 文生视频。
+      const seed = carry || scene.keyframeDataUrl || '';
+      const imgs = seed ? [seed] : [];
+      results[i] = await generateOne(
+        i, { ...scene, keyframeDataUrl: undefined }, imgs,
+        ratio, resolution, tier, destDir, timeoutSec, opts.signal, opts.onProgress,
+      );
+      // 抽本镜末帧给下一镜。抽不到就清空 carry —— 下一镜退回文生视频,
+      //   总比拿一张过期的帧去驱动强(那会让画面突然跳回好几镜之前)。
+      carry = '';
+      const out = results[i]?.path;
+      if (out && i + 1 < scenes.length) {
+        const framePath = path.join(destDir, `chain_${String(i).padStart(3, '0')}.jpg`);
+        const got = await extractLastFrame(out, framePath, opts.signal);
+        if (got) carry = imageToDataUrl(framePath) || '';
+        if (!carry) opts.onProgress?.(`⚠️ 第 ${i + 1} 镜末帧抽取失败,下一镜改用文生视频`);
+      }
     }
-  };
-  const n = Math.max(1, Math.min(concurrency, scenes.length));
-  await Promise.all(Array.from({ length: n }, () => worker()));
+  } else {
+    let next = 0;
+    const worker = async (): Promise<void> => {
+      while (next < scenes.length) {
+        if (opts.signal?.aborted) break;
+        const i = next++;
+        results[i] = await generateOne(i, scenes[i], imageUrls, ratio, resolution, tier, destDir, timeoutSec, opts.signal, opts.onProgress);
+      }
+    };
+    const n = Math.max(1, Math.min(concurrency, scenes.length));
+    await Promise.all(Array.from({ length: n }, () => worker()));
+  }
 
   // 结尾汇总实扣积分(只计成功镜;失败镜服务端已退)。
   const okResults = results.filter((r) => r && r.path);

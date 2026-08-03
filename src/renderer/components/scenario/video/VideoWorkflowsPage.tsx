@@ -2171,6 +2171,13 @@ const VideoCreateFlow: React.FC<{
           descZh={i18nService.t('rpstCardDesc')} descEn={i18nService.t('rpstCardDesc')}
           costZh={i18nService.t('rpstCardCost').replace('{fee}', feeZh)} costEn={i18nService.t('rpstCardCost').replace('{fee}', feeEn)}
           btnZh={i18nService.t('rpstCardBtn')} btnEn={i18nService.t('rpstCardBtn')} />
+        <VideoScenarioEntryCard isZh={isZh} accent="violet" icon="🎬" onOpen={openWithLogin(() => setCinemaOpen(true))} onGoTasks={onGoTasks}
+          tagZh="AI自动成片 · 电影级" tagEn="AI Auto · Cinematic"
+          titleZh="电影级 · 纯 AI 生成" titleEn="Cinematic · Pure AI"
+          descZh="一句话,AI 直接造出电影感写实画面 —— 不用拍摄、不用露脸。画面、人声、口型、环境音由 Seedance 一次生成,音画毫秒同步;镜头之间首尾帧相接,人物和画风不跳。有分镜脚本可直接粘进来,没有就让 AI 写一版。成片自动发布 TikTok / YouTube / 抖音 / 小红书 / 视频号 等全平台。"
+          descEn="One line → cinematic, photoreal footage. No filming, no face. Seedance generates the picture, the voice, the lip sync and the ambience together, so audio and video are in step to the millisecond; shots are chained frame to frame so faces and style hold. Paste your own storyboard, or let AI write one. Auto-publishes to TikTok / YouTube / Douyin / Xiaohongshu / Channels and more."
+          costZh={`按秒计费 · 约 $${aiSec}/秒(720p)`} costEn={`Per-second · ~$${aiSec}/s (720p)`}
+          btnZh="🎬 开始创作 →" btnEn="🎬 Start →" />
         <VideoScenarioEntryCard isZh={isZh} accent="sky" icon="🎞️" onOpen={openWithLogin(() => setStockOpen(true))} onGoTasks={onGoTasks}
           tagZh="AI自动成片 · 在线素材" tagEn="AI Auto · Stock"
           titleZh="在线素材 · AI 口播日更" titleEn="Stock · AI Voice-over"
@@ -2201,13 +2208,6 @@ const VideoCreateFlow: React.FC<{
           descEn="Auto-picks a top-voted Reddit thread, overlays real post & comment screenshot cards on gameplay footage and reads them aloud — the proven Reddit Stories format, one click (VPN required for Reddit). Auto-publishes to TikTok / YouTube / Douyin / Xiaohongshu / Channels and more."
           costZh={`单条约 ${feeZh}(选帖/翻译/截图/合成)`} costEn={`~${feeEn} per clip (pick / translate / shots / compose)`}
           btnZh="🧵 开始创作 →" btnEn="🧵 Start →" />
-        <VideoScenarioEntryCard isZh={isZh} accent="violet" icon="🎬" onOpen={openWithLogin(() => setCinemaOpen(true))} onGoTasks={onGoTasks}
-          tagZh="AI自动成片 · 电影级" tagEn="AI Auto · Cinematic"
-          titleZh="电影级 · 纯 AI 生成" titleEn="Cinematic · Pure AI"
-          descZh="一句话,AI 直接造出电影感写实画面 —— 不用拍摄、不用露脸。Seedance 逐镜生成、自动配音+字幕,拍不到的镜头也能生,还能传参考图锁画风。成片自动发布 TikTok / YouTube / 抖音 / 小红书 / 视频号 等全平台。"
-          descEn="One line → cinematic, photoreal footage. No filming, no face. Seedance generates brand-new shots with auto voice-over + subtitles — even shots you could never film; add reference images to lock the style. Auto-publishes to TikTok / YouTube / Douyin / Xiaohongshu / Channels and more."
-          costZh={`按秒计费 · 约 $${aiSec}/秒(720p)`} costEn={`Per-second · ~$${aiSec}/s (720p)`}
-          btnZh="🎬 开始创作 →" btnEn="🎬 Start →" />
       </section>
 
       <section className="mt-6">

@@ -889,3 +889,75 @@ export async function composeVideo(opts: ComposeOptions): Promise<string> {
     try { fs.rmSync(workDir, { recursive: true, force: true }); } catch {}
   }
 }
+
+
+/**
+ * 电影级专用:把 Seedance 片段【直接拼起来】,不重编码、不丢音轨。
+ *
+ * ⚠️ 为什么不能走 composeVideo:那条路每一步都带 `-an`,片段音轨全被丢掉。
+ *   而 Seedance 1.5-pro 开了 generate_audio 之后,人声、口型、环境音、BGM 是【和画面
+ *   一起生成的】—— 音画同源、毫秒同步,正是我们要的东西,丢了就白花钱了。
+ *   所以电影级本地只剩这一件事:拼。不配音、不烧字幕、不加蒙层、不做时间轴对齐。
+ *
+ * 片段来自同一次生成,分辨率/帧率/编码一致 → concat demuxer + `-c copy` 零转码。
+ *   万一某段参数不一致导致 copy 失败,回退重编码一次(慢但一定成)。
+ */
+export async function concatNativeClips(opts: {
+  clipPaths: string[];
+  outputPath: string;
+  /** 可选:额外 BGM 垫在原声之下(Seedance 自带音乐时一般不用)。 */
+  bgmPath?: string;
+  bgmVolume?: number;
+  onProgress?: (msg: string) => void;
+  signal?: AbortSignal;
+}): Promise<string> {
+  const clips = opts.clipPaths.filter((c) => c && fs.existsSync(c));
+  if (clips.length === 0) throw new Error('没有可拼接的片段');
+
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'noobclaw-ainative-'));
+  try {
+    const listPath = path.join(workDir, 'concat.txt');
+    fs.writeFileSync(listPath, clips.map((c) => `file '${c.replace(/'/g, "'\''")}'`).join('\n') + '\n', 'utf8');
+
+    let merged = path.join(workDir, 'merged.mp4');
+    opts.onProgress?.(`拼接 ${clips.length} 个片段(保留原声,零转码)`);
+    let r = await runFfmpeg(
+      ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', '-movflags', '+faststart', merged],
+      { timeoutMs: 300_000, signal: opts.signal },
+    );
+    if (!r.ok || !fs.existsSync(merged)) {
+      // 片段参数不一致 → 重编码兜底(音频统一 aac,视频统一 h264)。
+      opts.onProgress?.('零转码拼接失败,改用重编码拼接');
+      merged = path.join(workDir, 'merged_re.mp4');
+      r = await runFfmpeg(
+        ['-y', '-f', 'concat', '-safe', '0', '-i', listPath,
+          '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
+          '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', merged],
+        { timeoutMs: 900_000, signal: opts.signal },
+      );
+      if (!r.ok || !fs.existsSync(merged)) throw new Error('片段拼接失败');
+    }
+
+    // 可选 BGM:垫在原声之下。原声必须保持主导 —— 它才是台词所在。
+    const bgm = opts.bgmPath;
+    if (bgm && fs.existsSync(bgm)) {
+      const vol = typeof opts.bgmVolume === 'number' && opts.bgmVolume >= 0 ? opts.bgmVolume : 0.12;
+      const withBgm = path.join(workDir, 'with_bgm.mp4');
+      const rb = await runFfmpeg(
+        ['-y', '-i', merged, '-stream_loop', '-1', '-i', bgm,
+          '-filter_complex', `[1:a]volume=${vol}[bg];[0:a][bg]amix=inputs=2:duration=first:normalize=0[a]`,
+          '-map', '0:v', '-map', '[a]', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k',
+          '-movflags', '+faststart', withBgm],
+        { timeoutMs: 300_000, signal: opts.signal },
+      );
+      if (rb.ok && fs.existsSync(withBgm)) merged = withBgm;
+      else opts.onProgress?.('BGM 混音失败,保留纯原声');
+    }
+
+    fs.mkdirSync(path.dirname(opts.outputPath), { recursive: true });
+    fs.copyFileSync(merged, opts.outputPath);
+    return opts.outputPath;
+  } finally {
+    try { fs.rmSync(workDir, { recursive: true, force: true }); } catch {}
+  }
+}

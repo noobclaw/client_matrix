@@ -152,6 +152,18 @@ export interface MotionPromptOptions {
   styleLock?: string;
   /** 内容语言。 */
   lang?: string;
+  /**
+   * 原生音频模式:让 Seedance 自己出人声/口型/环境音,本地不再配音。
+   *
+   * ⚠️ 打开后【必须把台词写进 prompt】—— 不写它只会出环境音,分镜稿的口播直接丢了。
+   *   同时否定项里的「不要出现文字、字幕」要保留(我们不要它烧字幕),
+   *   但「不要人声」这类否定绝不能出现。
+   */
+  nativeAudio?: boolean;
+  /** 该镜台词(nativeAudio 时交给 Seedance 念)。 */
+  dialogue?: string;
+  /** 谁在说(多角色时用;空则按画面主体)。 */
+  speaker?: string;
 }
 
 /**
@@ -189,7 +201,23 @@ export function buildMotionPrompt(shot: StoryShot, opts: MotionPromptOptions = {
   // 4. 质感(与首帧共享,保证调性一致)
   parts.push(opts.styleLock || DEFAULT_STYLE_LOCK);
 
-  // 5. 否定项(视频专属)
+  // 5. 原生音频:把台词交给 Seedance 念(它会自己对口型)。
+  //    ⚠️ 不写这段的话模型只出环境音,分镜稿的口播就丢了 —— 这是「本地不配音」方案的命门。
+  const line = (opts.dialogue || shot.narration || '').trim();
+  if (opts.nativeAudio && line) {
+    const who = opts.speaker?.trim();
+    parts.push(`${who ? `${who}说` : '画面中的人物开口说'}:「${line}」`);
+    parts.push('人物口型与这句台词严格同步,语气自然、贴合画面情绪');
+    if (shot.sfx?.trim()) parts.push(`环境音:${shot.sfx.trim()}`);
+    if (shot.bgmMood?.trim()) parts.push(`背景音乐:${shot.bgmMood.trim()},音量压在人声之下`);
+  } else if (opts.nativeAudio) {
+    // 这一镜没台词(纯空镜/转场)→ 明确只要环境音,别让它自己编台词。
+    parts.push(`只有环境音${shot.sfx?.trim() ? `(${shot.sfx.trim()})` : ''},没有任何人说话`);
+  }
+
+  // 6. 否定项(视频专属)
+  //    ⚠️ 原生音频模式下【不能】写「不要人声」之类 —— 台词全靠它念。
+  //    「不要出现文字、字幕」保留:字幕不由画面生成,需要花字时另行本地叠加。
   parts.push('不要剪切、不要变焦跳变、不要镜头抖动;不要肢体扭曲或多余手指、不要画面闪烁或时间跳变;不要出现文字、字幕、水印、台标');
 
   return parts.join('。') + '。';
