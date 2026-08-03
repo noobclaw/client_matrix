@@ -118,10 +118,13 @@ const MatrixBinanceRepostWizard: React.FC<Props> = ({ platformLabel, platform, a
   // 同 MatrixBinancePostWizard:四家交易所广场共用本向导,而这些文案在 9 种语言里都把
   // 「币安广场」写死了(标题/发布说明/任务名/账号提示),Gate 页面打开显示的还是币安。
   // 统一把平台名替换成当前平台,不逐条改 i18n。
+  // 先换「币安广场 / Binance Square」这种整词,再换剩下的裸「币安 / Binance」(如英文的
+  // "{n} Binance accounts"、中文的「币安图文帖」)。顺序不能反,否则会把整词切一半。
   const tp = (key: string): string => i18nService.t(key)
     .replace(/币安广场|幣安廣場|Binance Square|바이낸스 스퀘어/g, platformLabel)
     .replace(/币安号|幣安號/g, platformLabel + '号')
-    .replace(/(?<![广廣])(币安|幣安)(?![广廣场場号號])/g, platformLabel);
+    .replace(/币安|幣安/g, platformLabel)
+    .replace(/Binance/g, platformLabel);
 
   const canAdvance: Record<WizardStep, { ok: boolean; reason?: string }> = {
     1: { ok: selectedIds.length > 0, reason: tp('wzBnRepostReasonSelectAccount') },

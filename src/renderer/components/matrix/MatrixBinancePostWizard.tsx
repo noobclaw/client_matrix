@@ -94,8 +94,11 @@ const MatrixBinancePostWizard: React.FC<Props> = ({ platformLabel, platform, acc
   // 「配置币安广场自动发帖」、发布选项写着「各号生成后自动发到币安广场」—— 用户在 Gate 页面
   // 打开看到的还是币安(2026-08-03 实拍)。这几条文案在 9 种语言里都把平台名写死了、没留
   // {platform} 占位符,逐条改成本高还容易漏,统一在这里把平台名替换成当前平台。
+  // 先整词后裸词,顺序不能反(否则会把「Binance Square」切成「<平台> Square」)。
   const tp = (key: string): string => i18nService.t(key)
-    .replace(/币安广场|幣安廣場|Binance Square|바이낸스 스퀘어/g, platformLabel);
+    .replace(/币安广场|幣安廣場|Binance Square|바이낸스 스퀘어/g, platformLabel)
+    .replace(/币安|幣安/g, platformLabel)
+    .replace(/Binance/g, platformLabel);
 
   const handleSave = async () => {
     if (saving) return;
