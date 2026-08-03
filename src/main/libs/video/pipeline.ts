@@ -2699,16 +2699,28 @@ async function runVideoPipeline(
       //   走那条就把这些全丢了。所以只要每一镜都真出了视频,就直接 concat。
       //   有任何一镜没出视频(降级成静帧/图片)→ 老老实实回 composeVideo,
       //   否则会拼出一条缺镜头的片子。
-      // ⚠️ 条件是「每镜都有【自己生成的】片段」,不是「每镜都有片段」。差别在于借来的片段
-      //    会连着邻镜的音轨一起拼进去 —— 那句台词被念两遍、本镜那句消失。宁可整条退回
-      //    composeVideo(画面照出、只是没有原生音),也不能交付一条台词错乱的片子。
-      const allOwn = scenes.length > 0 && scenes.every((sc, i) => sc.clips && sc.clips.length > 0 && aiOwnClip[i]);
-      if (aiNativeAudio && !allOwn && scenes.length > 0) {
-        const miss = scenes.filter((sc, i) => !(sc.clips && sc.clips.length > 0 && aiOwnClip[i])).length;
-        tracker.progress(`⚠️ 有 ${miss} 镜没生成出自己的片段,为避免台词错乱,本条不走原生音轨拼接`);
+      // ⚠️ 只能拼「自己生成的」片段,不能拼借来的:借来的片段带着邻镜的音轨,那句台词会被
+      //    念两遍、本镜那句消失。
+      // ⚠️⚠️ 但「有镜没出片」也【不能】整条退回 composeVideo —— 那条路每一步都是 `-an`
+      //    (见 compose.ts 文件头),会把所有片段的原生音轨丢光,而电影级又没有本地配音,
+      //    结果是交付一条【完全没声音】的片子,而且已出片那几镜的钱照付。以前这里写的
+      //    「画面照出、只是没有原生音」说轻了。
+      //    正确做法:把没出片的镜【从时间轴上去掉】,其余照常原生拼接。台词是跟着片段走的
+      //    (每段的人声就是喂给它的那句),少一镜只是少一句,绝不会串音;片子短一点,
+      //    远好过一条哑片。
+      const ownIdx = scenes.map((_, i) => i).filter((i) => scenes[i].clips && scenes[i].clips!.length > 0 && aiOwnClip[i]);
+      const canNativeJoin = aiNativeAudio && ownIdx.length > 0;
+      if (aiNativeAudio && ownIdx.length < scenes.length && ownIdx.length > 0) {
+        tracker.progress(`⚠️ 有 ${scenes.length - ownIdx.length} 镜没生成出自己的片段,已从成片中跳过(保住其余镜的原生人声,避免台词错位)`);
       }
-      if (aiNativeAudio && allOwn) {
-        const clipPaths = scenes.flatMap((sc) => sc.clips as string[]);
+      if (canNativeJoin) {
+        // clipPaths[k] 与 clipShot[k] 严格平行:后者是这一段来自【原分镜的第几镜】,
+        //   字幕取台词/时长全靠它。不用 flatMap 是因为那样一镜多段就会让下标错位。
+        const clipPaths: string[] = [];
+        const clipShot: number[] = [];
+        for (const i of ownIdx) {
+          for (const c of scenes[i].clips as string[]) { clipPaths.push(c); clipShot.push(i); }
+        }
         tracker.progress(`${label ? label + ' · ' : ''}🎬 拼接 ${clipPaths.length} 个原生片段(保留 Seedance 人声/音效)`);
 
         // 字幕(可选)。⚠️ Seedance **不生成字幕** —— 它做的是音画同步和口型对齐,
@@ -2722,8 +2734,12 @@ async function runVideoPipeline(
         if (subtitleEnabled && aiShots) {
           const cues: { text: string; start: number; end: number }[] = [];
           let t = 0;
-          for (let i = 0; i < clipPaths.length; i++) {
-            const real = await probeDuration(clipPaths[i]).catch(() => 0);
+          for (let k = 0; k < clipPaths.length; k++) {
+            // ⚠️ k 是【成片里的第几段】,i 是【原分镜的第几镜】。跳过没出片的镜之后这两个
+            //    不再相等 —— 直接拿 k 去索引 aiShots 会让字幕整体串行(第 3 段配第 3 镜的
+            //    台词,而第 3 段其实是第 4 镜)。台词/时长一律按 clipShot 映射回原镜。
+            const i = clipShot[k];
+            const real = await probeDuration(clipPaths[k]).catch(() => 0);
             const d = real > 0 ? real : (sceneDurations[i] || aiShots[i]?.seconds || 5);
             const line = (aiShots[i]?.narration || '').trim();
             // 首尾各留 0.1s,别和镜头切换撞在一帧上。
