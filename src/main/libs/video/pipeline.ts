@@ -1080,13 +1080,12 @@ async function runVideoPipeline(
     let script = userText;
     if (scriptMode === 'ai') {
       const isHotspot = input.engine === 'hotspot';
-      // 电影级(ai)不带赛道/关键词 —— 题材全在用户那句想法里(向导已强制必填),
-      //   拿它当 topic。老任务可能还存着默认赛道/关键词,userText 优先于它们。
-      const isCinematic = input.engine === 'ai';
+      // 电影级(ai)不带赛道/关键词,但也不需要 topic:它的想法是必填的 → userText 非空 →
+      //   下面 referenceScript 有值 → generateScript 走「参考文案就是内容主题」那条 user
+      //   message,整条不引用 topic。只有【没有任何文案】时 topic 才会被用到。
       const topic = isHotspot && hotspotTopic
         ? hotspotTopic.title
-        : ((isCinematic && userText.trim() ? userText.trim().slice(0, 120) : '')
-          || (input.keywords || []).filter(Boolean).join('、') || input.track || '生活方式');
+        : ((input.keywords || []).filter(Boolean).join('、') || input.track || '生活方式');
       tracker.progress(isHotspot
         ? `AI 正在紧贴热点资料撰写口播（目标约 ${input.targetSeconds ?? 45}s）…`
         : (userText
@@ -2609,7 +2608,10 @@ async function runVideoPipeline(
 
     const { width, height } = aspectToSize(input.aspect);
     // 纯画面模式(无旁白)→ 无旁白文本时间轴,强制关字幕。
-    const subtitleEnabled = wantNarration && input.subtitleEnabled !== false;
+    // ⚠️ 电影级(aiNativeAudio)也没有 TTS 时间轴,但它的字幕【不靠】TTS:文本是每镜台词、
+    //    时间是实测片段时长(见下面原生拼接那段)。原来只认 wantNarration,而电影级恒为
+    //    false → 用户在向导里打开的字幕开关永远点不亮,一条都烧不出来。
+    const subtitleEnabled = (wantNarration || aiNativeAudio) && input.subtitleEnabled !== false;
     const subtitle: SubtitleStyle = {
       enabled: subtitleEnabled,
       fontSize: input.subtitleFontSize && input.subtitleFontSize > 0 ? input.subtitleFontSize : 52,
@@ -2715,7 +2717,7 @@ async function runVideoPipeline(
         //     内容 = 每镜台词(就是喂给 Seedance 念的那句)
         //     时间 = 【实测片段时长】,比以前靠 TTS 词边界估算更准 ——
         //            那时对的是我们自己合成的音频,现在对的是成片里真实播放的那段。
-        //   默认关(用户拍板:先全交给 Seedance),想开改 subtitleEnabled 即可。
+        //   走向导的「字幕」开关(默认开 —— 用户拍板:配音交给 Seedance,字幕我们本地烧)。
         let nativeCues: { text: string; start: number; end: number }[] | undefined;
         if (subtitleEnabled && aiShots) {
           const cues: { text: string; start: number; end: number }[] = [];
