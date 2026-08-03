@@ -20,7 +20,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { runFfmpeg, probeDuration } from './ffmpegRuntime';
+import { runFfmpeg, probeDuration, probeImageSize } from './ffmpegRuntime';
 import { isPackaged, getResourcesPath, getUserDataPath } from '../platformAdapter';
 
 const FPS = 30;

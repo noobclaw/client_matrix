@@ -1265,6 +1265,13 @@ async function runVideoPipeline(
     //   台词不再走 TTS,而是写进每镜的 prompt 交给 Seedance 念(见 buildMotionPrompt)。
     const aiNativeAudio = input.engine === 'ai';
     const wantNarration = !aiNativeAudio && !(input.engine === 'ai' && input.narrationEnabled === false);
+    // 哪些镜用的是【自己生成的】片段(不是借邻镜的)。
+    // ⚠️ 原生音频下这个区分是必须的:片段自带音轨,借来的片段会把邻镜的台词【再念一遍】,
+    //    而本镜那句彻底消失 —— 画面上还看不出异常,只有听才发现。以前音频是我们自己配的,
+    //    借片段只影响画面贴题度,所以无所谓;现在不行了。
+    // ⚠️ 必须声明在【函数体这一层】,不能放进 engine==='ai' 那个分支块里:填它的是那个分支,
+    //    但读它的是后面 compose 阶段的原生音轨判断(在分支外)—— 放块里 = 读的地方根本看不见它。
+    const aiOwnClip: boolean[] = [];
     // 每镜时长来源:有旁白 → 各句真实配音时长;纯画面 → 分镜稿字数估算。下游(Seedance
     //   生成 / 本地拼接 / compose)统一读 sceneDurations,不再直接摸 audios[i].durationSec。
     const sceneDurations: number[] = [];
@@ -1659,11 +1666,6 @@ async function runVideoPipeline(
         return { ok: false, error: err };
       }
       // 一镜都不用生成 → 跳过 Seedance,直接进静帧分配(避免空数组调用把服务端打出 400)。
-      // 哪些镜用的是【自己生成的】片段(不是借邻镜的)。
-      // ⚠️ 原生音频下这个区分是必须的:片段自带音轨,借来的片段会把邻镜的台词【再念一遍】,
-      //    而本镜那句彻底消失 —— 画面上还看不出异常,只有听才发现。以前音频是我们自己配的,
-      //    借片段只影响画面贴题度,所以无所谓;现在不行了。
-      const aiOwnClip: boolean[] = [];
       const clipResults: SeedanceClipResult[] = Array.from(
         { length: aiScenes.length },
         (): SeedanceClipResult => ({ path: null }),
