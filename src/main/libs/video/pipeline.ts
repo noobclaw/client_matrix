@@ -1506,6 +1506,11 @@ async function runVideoPipeline(
       // 服务端逐片段计费(时长×分辨率)+ 失败自动退款。失败镜降级:就近复用成功片段,
       // 再不行用参考图静帧;一条都没成则整任务失败(钱已被服务端退回)。
       const refImagesAi = (input.referenceImages || []).filter((p) => p && fs.existsSync(p)).slice(0, 2);
+      // 首尾帧串接开关。⚠️ 出图张数和 Seedance 调用方式【必须用同一个判据】——
+      //   串接时后续每镜的首帧来自上一镜末帧,故事板只要第 1 张;两处判据一旦不一致,
+      //   就会出现「出满 N 张却只用 1 张」(真机实测:出 6 张用 1 张,白烧 5 张还白等一两分钟)。
+      //   用户传了参考图时不串接(火山那边首尾帧与参考图互斥,参考图是更强的人设锚)。
+      const chainFrames = refImagesAi.length === 0;
       // 档位/分辨率不在客户端定:透传(可能 undefined)→ 服务端 seedance create 端点决定。
       const resolution = input.seedanceResolution;
       // 每镜时长:Seedance 单镜上限 12s(1.x/lite)→ clamp 到 [4,12]。
@@ -1517,10 +1522,12 @@ async function runVideoPipeline(
             prompt: buildMotionPrompt(shot, {
               shotIndex: i,
               durationSec: clampDur(i),
-              // 首帧图在下面故事板那步生成;这里先按「会有首帧」写 prompt(即只描述运动)。
-              // 若某镜首帧最终没出来,seedanceProvider 会退化成文生视频 —— 那种情况下运动
-              // prompt 里缺画面描述,但 motion 本身已经含主体动作,足以生成可用画面。
-              hasKeyframe: true,
+              // 有没有首帧,决定 prompt 要不要带画面描述:
+              //   · 串接模式:第 1 镜是【文生视频】(没有任何图)→ 必须把画面写进 prompt,
+              //     否则模型不知道要画什么;第 2 镜起首帧 = 上一镜末帧 → 只写运动
+              //     (i2v 复述画面会导致主体漂移,这是 Seedance 社区共识)。
+              //   · 非串接(用户传了参考图 / 老链路):每镜都有故事板首帧 → 一律只写运动。
+              hasKeyframe: chainFrames ? i > 0 : true,
               // ⚠️ 尾帧图目前【没有生成】(故事板只出首帧),所以这里必须是 false。
               //   置 true 会让 prompt 写成「从首帧自然过渡到尾帧画面」,而模型根本收不到尾帧 →
               //   等于给它一个不存在的目标。首尾帧(flf2v)要等故事板支持出两张图再打开。
@@ -1548,7 +1555,12 @@ async function runVideoPipeline(
       // ── 故事板模式:先用 Seedream 组图出每镜【首帧】(同角色/画风),再图生视频(i2v,更稳)──
       //   首帧也存一份到本次输出目录的「故事板」文件夹(用户要的本地存档)。
       //   故事板失败/未配置 → 退化为纯文生视频(不挂首帧),不阻塞。
-      try {
+      //
+      // ⚠️【串接模式一张图都不出】第 1 镜走文生视频(画面描述直接进 prompt —— buildMotionPrompt
+      //    在无首帧时本来就会带上 visualFirst),第 2..N 镜用上一镜的末帧。整条链路不需要任何
+      //    故事板图,连「视觉锚」那次 LLM 调用也一起省掉 —— 它的产出只喂给图像模型,不出图就是白烧。
+      //    真机实测过反例:出了 6 张只用 1 张,白花钱还白等一两分钟。
+      if (!chainFrames) try {
         // 视觉锚生成(纯 AI 模式专用,有参考图时跳过 —— 用户参考图本身就是最强锚)。
         //   把 character 字段从「persona · track」两词拼接(导致 Seedream 出套路图,如「亚洲女性看
         //   手机」)升级为【LLM 5 字段结构化视觉描述】(shot_type / subject / environment /
@@ -1571,7 +1583,10 @@ async function runVideoPipeline(
           }
         }
 
-        tracker.progress(`🎨 生成故事板首帧(逐张出 ${aiScenes.length} 张,保持角色一致)…`);
+        // 走到这里必然是【非串接】(整块被 `if (!chainFrames)` 包着):用户传了参考图,
+        //   或是老链路。这种情况才逐镜出首帧图。串接模式一张都不出,见上面的说明。
+        const wantKeyframes = aiScenes.length;
+        tracker.progress(`🎨 生成故事板首帧(逐张出 ${wantKeyframes} 张,保持角色一致)…`);
         // ⚠️ 喂给【图像模型】的必须是画面描述,不是 aiScenes[].prompt(那是给视频模型的运动
         //   描述:"运动:镜头缓慢推近…不要剪切、不要画面闪烁")。老代码两处共用一个 prompt,
         //   图像模型完全不知道要画什么 —— 这是首帧画错、整片跑偏的根因。
@@ -1586,12 +1601,12 @@ async function runVideoPipeline(
         // 逐张生成:每张独立短请求(绕开 Cloudflare 100s/HTTP524),并逐张回进度。
         const storyboard = await generateStoryboard(
           {
-            shots: framePrompts,
+            shots: framePrompts.slice(0, wantKeyframes),
             character: anchorCharacter,
-            count: aiScenes.length,
+            count: wantKeyframes,
             aspect: input.aspect,
             // 图表/文字卡/Logo 这类镜必须允许画面内出现文字,否则出来是空白板。
-            allowText: aiShots ? aiShots.map((s) => shotAllowsText(s.type)) : undefined,
+            allowText: aiShots ? aiShots.slice(0, wantKeyframes).map((s) => shotAllowsText(s.type)) : undefined,
             // 出图是分钟级的一步,不接 signal 的话点停止要干等它跑完。
             signal,
             // 组图一次出一整批,中途没有逐张进度 —— 批次级的话由它来说,否则计数器
@@ -1625,7 +1640,7 @@ async function runVideoPipeline(
               }
             } catch { /* 单张存盘失败不影响 */ }
           });
-          tracker.progress(`🎨 故事板已生成 ${okFrames}/${aiScenes.length} 张首帧(已存「故事板」文件夹),转图生视频…`);
+          tracker.progress(`🎨 故事板已生成 ${okFrames}/${wantKeyframes} 张首帧(已存「故事板」文件夹),转图生视频…`);
           // 失败的镜显式报出来 —— 老实现是静默降级成文生视频,用户只看到「7/12 张」,
           //   却不知道剩下 5 镜的画风会完全跑到另一个世界去(钱还照花)。
           if (storyboard.failedIndices.length > 0) {
@@ -1678,7 +1693,7 @@ async function runVideoPipeline(
         // 首尾帧串接:上一镜末帧当下一镜首帧,跨镜人物/光影/画风物理连续。
         // ⚠️ 用户自带参考图时【不串接】—— 火山那边首尾帧和参考图互斥,用户的参考图
         //    是更强的人设锚,优先保它。
-        chainFrames: refImagesAi.length === 0,
+        chainFrames,
         resolution,
         tier: input.seedanceModel,
         ratio: aspectToSeedanceRatio(input.aspect),
