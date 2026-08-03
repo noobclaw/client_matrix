@@ -10,7 +10,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { shortId } from '../../utils/shortId';
-import { scenarioService, exchangeSquarePlatformKey, type Task, type Draft, type Scenario } from '../../services/scenario';
+import { scenarioService, exchangeSquareBadge, exchangeSquarePlatformKey, type Task, type Draft, type Scenario } from '../../services/scenario';
 import { LoginRequiredModal } from './LoginRequiredModal';
 import { MATRIX_EDITION } from '../../matrixEdition';
 import { noobClawAuth } from '../../services/noobclawAuth';
@@ -711,6 +711,11 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
   const isToutiaoTask = (scenario?.platform as any) === 'toutiao' || task.scenario_id?.startsWith('toutiao_');
   const typeBadge = (() => {
     const sid = task.scenario_id;
+    // 交易所广场(gate/okx/bitget/bybit × engage/post/repost)。这是第 4 处写死的平台链条,
+    // 同样没登记这 12 个 sid → 详情页徽章掉到 tdTypeXhsAutoEngage,OKX 任务显示成
+    // 「💬 💬 小红书 · 互动涨粉」(那条文案自带 💬,和 icon 撞成两个,用户实拍)。
+    const ex = exchangeSquareBadge(sid);
+    if (ex) return { icon: ex.icon, label: `${i18nService.t(ex.platKey)} · ${i18nService.t(ex.actionKey)}`, color: ex.color };
     if (sid === 'x_auto_engage')                  return { icon: '🐦', label: i18nService.t('tdTypeXAutoEngage'), color: 'text-emerald-500 bg-emerald-500/10 border-emerald-500/30' };
     if (sid === 'x_post_creator')                 return { icon: '📝', label: i18nService.t('tdTypeXPostCreator'), color: 'text-sky-500 bg-sky-500/10 border-sky-500/30' };
     if (sid === 'x_link_rewrite')                 return { icon: '✍️', label: i18nService.t('tdTypeXLinkRewrite'), color: 'text-violet-500 bg-violet-500/10 border-violet-500/30' };
