@@ -25,7 +25,7 @@ import { inspectHoldMs } from './inspectHold';
 import { installedKernelPath } from './kernelInstaller';
 import { matrixCmd } from './cdpCommands';
 import { runMatrixDriver, runMatrixDouyinSearch } from './driverCtx';
-import { contentUsageStore, defaultContentReuseCap, type ContentUsage } from './contentUsage';
+import { contentUsageStore, type ContentUsage } from './contentUsage';
 import { getAccount, setAccountStatus, effectiveKeywords, appendDerivedKeywords, accountBadgeLabel, matrixGroupTitle, markAccountAlive, platformKey } from './accountManager';
 import { promptReloginForExpiredAccount } from './reloginPrompt';
 import { getNoobClawAuthToken } from '../claudeSettings';
@@ -178,8 +178,9 @@ function keywordMatch(text: any, kws: any): boolean {
   return kws.some((k: any) => k && t.indexOf(String(k).toLowerCase()) >= 0);
 }
 
-// 采集号内容去重 + 复用计数:同一条源最多用 cap 次(默认 3,见 contentUsage)。.set=已用满的 id;.record(id)=+1。
-const REPOST_CONTENT_CAP = defaultContentReuseCap();
+// 搬运的复用上限固定为 1 =【一个平台一条源内容只搬一次】(用户 2026-08-04 明确要求),
+// 所以这里【不再】读 env MATRIX_CONTENT_REUSE_CAP —— 那个 env 只影响爆款仿写等其它生产型任务。
+const REPOST_CONTENT_CAP = 1;
 
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
@@ -801,8 +802,15 @@ export async function runBinanceRepostTask(opts: BinanceRepostTaskOptions): Prom
 
   coworkLog('INFO', 'binanceRepostRunner', `repost src=${cfg.sourcePlatform} want=${postCount} → binance x${accIds.length}`);
 
-  // 采集号内容复用计数(默认 cap=1=只用一次)。采集只查(seen.set.has 跳过已用满的),发布成功后才 record。
-  const srcSeen = contentUsageStore(cfg.sourceAccountId, cfg.sourcePlatform, REPOST_CONTENT_CAP);
+  // 搬运去重 —— 口径是【发布平台 × 源内容】:某条源内容在某个平台搬成功过一次,这个平台以后
+  //   就不再搬它;但【别的平台还能搬】。
+  // 🚨 原来按【采集号】记(contentUsageStore(sourceAccountId, sourcePlatform)):同一个小红书采集号
+  //   喂 Gate 和 Bitget 两个任务时,Gate 先发成功就把这条记满了,Bitget 再也拿不到 —— 一条内容
+  //   全网只能用一次,交易所越多越明显(用户 2026-08-04 提出按平台各记各的)。
+  //   现在改成按发布平台建库(账号位写 `_platform_<平台>`),文件落
+  //   content_usage/<源平台>/_platform_<发布平台>.json;cap 固定 1 = 一个平台最多搬一次。
+  //   注:同平台多个发布号共用这一份记录,所以 A 号发过的内容 B 号也不会再发(符合"一个平台一次")。
+  const srcSeen = contentUsageStore(`_platform_${opts.platform}`, cfg.sourcePlatform, REPOST_CONTENT_CAP);
 
   // ── 阶段A:采集 ──
   if (opts.signal?.aborted) return { platform: opts.platform, total: accIds.length, success: 0, failed: 0, skipped: accIds.length, items: accIds.map((id) => ({ accountId: id, state: 'skipped' as const, reason: 'aborted' })) };
