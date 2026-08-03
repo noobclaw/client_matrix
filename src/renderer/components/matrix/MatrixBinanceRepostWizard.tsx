@@ -145,7 +145,10 @@ const MatrixBinanceRepostWizard: React.FC<Props> = ({ platformLabel, platform, a
     setSaving(true);
     try {
       await onSave({
-        name: initialTask?.name || tp('wzBnRepostTaskName').replace('{platform}', PLATFORM_NAME[sourcePlatform]).replace('{n}', String(selectedIds.length)),
+        name: initialTask?.name || tp('wzBnRepostTaskName')
+          .replace(/\{target\}/g, PLATFORM_NAME[String(platform || '')] || String(platform || ''))
+          .replace('{platform}', PLATFORM_NAME[sourcePlatform] || sourcePlatform)
+          .replace('{n}', String(selectedIds.length)),
         accountIds: selectedIds,
         concurrency: 1,
         frequency: runInterval,
