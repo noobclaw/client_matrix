@@ -358,7 +358,7 @@ const MatrixBinanceRepostWizard: React.FC<Props> = ({ platformLabel, platform, a
             <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 px-4 py-3 text-sm space-y-1.5">
               <div className="font-semibold dark:text-gray-200 mb-1">📋 {i18nService.t('wzBnRepostSummaryTitle')}</div>
               <SummaryRow label={i18nService.t('wzBnRepostSummarySource')} value={`${PLATFORM_NAME[sourcePlatform]} · ${i18nService.t('wzBnRepostSummarySourceCollector').replace('{name}', srcAcc ? (srcAcc.nickname || srcAcc.displayName) : i18nService.t('wzBnRepostSummaryNotSelected'))}`} />
-              <SummaryRow label={i18nService.t('wzBnRepostSummaryKeyword')} value={srcAcc && Array.isArray(srcAcc.keywords) && srcAcc.keywords.length ? i18nService.t('wzBnRepostSummaryKeywordCount').replace('{n}', String(srcAcc.keywords.length)) : i18nService.t('wzBnRepostSummaryKeywordPlain')} />
+              <SummaryRow label={i18nService.t('wzBnRepostSummaryKeyword')} value={publishKeywords.length ? i18nService.t('wzBnRepostSummaryKeywordCount').replace('{n}', String(publishKeywords.length)) : i18nService.t('wzBnRepostSummaryKeywordPlain')} />
               <SummaryRow label={i18nService.t('wzBnRepostSummaryMaterial')} value={material === 'image' ? i18nService.t('wzBnRepostSummaryMaterialImage') : i18nService.t('wzBnRepostSummaryMaterialVideo')} />
               <SummaryRow label={i18nService.t('wzBnRepostSummaryPublisher')} value={tp('wzBnRepostSummaryPublisherValue').replace('{n}', String(selectedIds.length))} />
               <SummaryRow label={i18nService.t('wzBnRepostSummaryLanguage')} value={langLabel(language)} />
