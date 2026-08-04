@@ -644,9 +644,12 @@ export function formatScriptToShots(
   const reSfx = field('音效|sfx');
   const reBgm = field('配乐|背景音乐|bgm');
 
+  // ⚠️ type 必须是 ShotType 的合法取值(chart/textcard/scene/person/logo/transition)。
+  //    第一版写成 'video' 并用 `as any` 压过类型检查 —— tsc 不报,但 shotAllowsText 等
+  //    按 type 分支的地方全都落到未知分支。通用镜头取 'scene'(实景空镜)最稳。
   const blank = (): StoryShot => ({
     title: undefined, seconds: 0, narration: '', visualFirst: '',
-    type: 'video' as any, animate: true, locked: [],
+    type: 'scene', animate: true, locked: [],
   });
   const shots: StoryShot[] = [];
   let cur: StoryShot | null = null;
