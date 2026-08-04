@@ -41,7 +41,7 @@ import { runRepostPipeline, transcribeAudio } from './repost-pipeline';
 import { generateStoryboardAnchor } from './storyboardAnchor';
 // 电影级(engine='ai')分镜表:把用户脚本 / 口播稿解析成结构化分镜,口播与画面彻底分家。
 import {
-  parseStoryboardScript, deriveStoryboard, storyboardToText, shotAllowsText, type StoryShot,
+  parseStoryboardScript, deriveStoryboard, formatScriptToShots, storyboardToText, shotAllowsText, type StoryShot,
 } from './storyboardScript';
 import { buildFramePrompt, buildMotionPrompt, buildLegacyPrompt, DEFAULT_STYLE_LOCK } from './shotPrompts';
 
@@ -1164,7 +1164,7 @@ async function runVideoPipeline(
     } else if (input.engine === 'ai' && input.useStoryboardTable !== false) {
       // strict = 用户粘了脚本(可能是完整分镜脚本)→ 解析;ai = 稿子是 AI 写的口播 → 派生分镜。
       const isUserScript = scriptMode === 'strict';
-      tracker.progress(isUserScript ? '🎬 正在解析你的分镜脚本…' : '🎬 正在为口播稿设计分镜…');
+      tracker.progress(isUserScript ? '🎬 按你的脚本原文分镜(逐字照用,不做改写)…' : '🎬 正在为口播稿设计分镜…');
       try {
         const sbInput = {
           lang: contentLang,
@@ -1173,8 +1173,15 @@ async function runVideoPipeline(
           styleHint: isUserScript ? undefined : [input.track, input.persona].filter(Boolean).join('、') || undefined,
           signal,
         };
+        // 🚨 有脚本时【不再过 LLM】(用户 2026-08-04 拍板:「有详细脚本就不要再过一次 LLM,
+        //   基本格式化一下直接给 Seedance」)。formatScriptToShots 是纯本地正则:认结构标记、
+        //   切镜、台词【逐字照抄】,一个字不改也不花 AI 的钱。逐字保真恒为 1(原文即输出)。
+        //   只有「只是一个想法」才走 deriveStoryboard 让 AI 写。
         const sb = isUserScript
-          ? await parseStoryboardScript(script, sbInput)
+          ? (() => {
+            const f = formatScriptToShots(script, contentLang);
+            return { shots: f.shots, tokens: 0, costUsd: 0, fidelity: 1, warnings: f.warnings };
+          })()
           : await deriveStoryboard(script, sbInput);
         if (sb && sb.shots.length > 0) {
           tracker.addTokens(sb.tokens, sb.costUsd);
