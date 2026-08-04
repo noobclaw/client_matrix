@@ -37,7 +37,7 @@ import { generateSeedanceClips, generateStoryboard, type SeedanceClipResult, typ
 import type { TemplateOptions } from './templateHtmlWriter';
 import { runTemplatePipeline } from './template-pipeline';
 import { runThreadPipeline } from './thread-pipeline';
-import { runRepostPipeline } from './repost-pipeline';
+import { runRepostPipeline, transcribeAudio } from './repost-pipeline';
 import { generateStoryboardAnchor } from './storyboardAnchor';
 // 电影级(engine='ai')分镜表:把用户脚本 / 口播稿解析成结构化分镜,口播与画面彻底分家。
 import {
@@ -2749,12 +2749,42 @@ async function runVideoPipeline(
           if (cues.length > 0) nativeCues = cues;
         }
 
+        // 🚨 字幕必须来自【成片音频的转写】,不能用分镜稿的台词。
+        //   电影级的声音是 Seedance 生成的 —— 它是生成模型不是朗读器,prompt 里写了
+        //   「人物说:「台词」」也不保证逐字念(实测会改词/换语序/说别的),所以拿稿子当字幕
+        //   必然对不上(用户 2026-08-04 实测「文字和配音内容都完全对不上」)。
+        //   转写之后:字幕 = 它实际说的那句,时间轴 = 它实际说话的时刻,两边天然一致。
+        //   转写失败/没人声 → 回落到 nativeCues(稿子),至少还有字幕,并在日志里说明可能不一致。
+        const asrSubtitles = subtitleEnabled ? async (mergedPath: string) => {
+          const wav = path.join(assetDir, `native_asr_${Date.now()}.wav`);
+          const ax = await runFfmpeg(
+            ['-y', '-i', mergedPath, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', wav],
+            { timeoutMs: 180_000, signal },
+          );
+          if (!ax.ok || !fs.existsSync(wav)) return [];
+          const dur = await probeDuration(wav).catch(() => 0);
+          tracker.progress(`${label ? label + ' · ' : ''}🎧 转写成片人声,生成与配音完全一致的字幕…`);
+          const asr = await transcribeAudio(wav, dur, contentLang || 'zh', signal);
+          try { fs.unlinkSync(wav); } catch { /* ignore */ }
+          if (!asr.ok || asr.noSpeech) return [];
+          // 句级优先(带时间戳,粒度正好是一行字幕);没有就退回粗粒度 segments。
+          const segs = (asr.sentences && asr.sentences.length > 0) ? asr.sentences : (asr.segments || []);
+          const out = segs
+            .filter((s) => s && s.text && s.text.trim() && s.end > s.start)
+            .map((s) => ({ text: s.text.trim(), start: s.start, end: s.end }));
+          if (out.length > 0) tracker.progress(`${label ? label + ' · ' : ''}✓ 字幕已按真实人声对齐(${out.length} 句)`);
+          // 转写是要花钱的,记进本次成本(与翻译搬运同口径)。
+          if (asr.tokens) tracker.addTokens(asr.tokens, asr.costUsd || 0);
+          return out;
+        } : undefined;
+
         await concatNativeClips({
           clipPaths,
           outputPath: outPath,
           bgmPath,
           bgmVolume: input.bgmVolume !== undefined && input.bgmVolume >= 0 ? input.bgmVolume : undefined,
           subtitles: nativeCues,
+          subtitlesFromAudio: asrSubtitles,
           subtitleFontSize: input.subtitleFontSize && input.subtitleFontSize > 0 ? input.subtitleFontSize : undefined,
           width, height,
           onProgress: (m) => tracker.progress(`${label ? label + ' · ' : ''}${m}`),
