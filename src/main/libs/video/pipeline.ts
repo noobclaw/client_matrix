@@ -44,6 +44,28 @@ import {
   parseStoryboardScript, deriveStoryboard, storyboardToText, shotAllowsText, type StoryShot,
 } from './storyboardScript';
 import { buildFramePrompt, buildMotionPrompt, buildLegacyPrompt, DEFAULT_STYLE_LOCK } from './shotPrompts';
+
+/**
+ * 用户文案框里的东西是【完整脚本】还是【一句想法】?
+ *
+ * 决定 scriptMode:脚本 → strict(逐字保真,只做结构化,绝不让 AI 改写);
+ *                想法 → ai(拿它当主题去写一篇合适的稿子)。
+ * 🚨 原来只判「非空」,于是「讲讲比特币减半」这种一句话想法也被当成完整脚本,
+ *   整条片子就只剩那一句。判据(任一成立即视为脚本):
+ *     ① 带分镜/场景/旁白/台词这类结构标记(明显是写好的脚本)
+ *     ② 够长(≥60 字)
+ *     ③ 多句(≥3 句)
+ * 宁可把「短脚本」误判成想法 —— 那条路会拿它当主题扩写,产出仍然合理;
+ * 反过来把想法当脚本才是灾难(片子只有一句话)。
+ */
+function looksLikeFullScript(text: string): boolean {
+  const s = (text || '').trim();
+  if (!s) return false;
+  if (/分镜|镜头\s*[\d一二三四五六七八九十]|场景\s*[\d一二三四五六七八九十]|画面[：:]|旁白[：:]|台词[：:]|字幕[：:]|shot\s*\d|scene\s*\d/i.test(s)) return true;
+  if (s.length >= 60) return true;
+  const sentences = s.split(/[。！？!?\n]+/).map((x) => x.trim()).filter((x) => x.length > 1).length;
+  return sentences >= 3;
+}
 import { resolvePublishCaption } from './publishCaptionWriter';
 import { setCurrentVideoTask, clearCurrentVideoTask, videoTypeLabel } from './videoRunWindow';
 
@@ -1058,9 +1080,13 @@ async function runVideoPipeline(
 
     const userText = (input.script || '').trim();
     // 热搜成片恒为 AI 写稿(用户不填稿)。
+    // 用户在向导里显式选过就听用户的;没选才自动判定。
+    // 🚨 原来的自动判定是「文案框非空 = 完整脚本」—— 用户敲一句想法(「讲讲比特币减半」)
+    //   也会被当成脚本去逐字解析成分镜,于是整条片子就只有那一句话。用户要的是:
+    //   【详细脚本→不许改写,只做结构化】/【只是想法→才让 AI 写稿】。所以按内容判。
     const scriptMode: 'strict' | 'ai' = input.engine === 'hotspot'
       ? 'ai'
-      : (input.scriptMode || (userText ? 'strict' : 'ai'));
+      : (input.scriptMode || (looksLikeFullScript(userText) ? 'strict' : 'ai'));
     // 内容语言:口播稿 + 素材搜索词都用它。用户在向导显式选了创作语言(scriptLang)且由 AI
     // 写稿时用它;strict 逐字朗读模式下稿子就是用户原文,语言探测原文才对(选了语言也不生效,
     // 避免「英文语言 + 中文原稿」错配)。无显式选择维持自动:有视频文案就按文案语言走,再按
