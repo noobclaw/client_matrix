@@ -984,9 +984,22 @@ export async function runBinanceRepostTask(opts: BinanceRepostTaskOptions): Prom
   if (perAcc > 1) {
     for (const id of accIds) opts.onLog?.(id, `📋 本轮计划发布 ${plan.length} 条(每号最多 ${perAcc} 条,按轮次交替)`);
   }
+  // 🚨 一条都没分到的号必须补一条 skipped。改成按 plan 迭代后,这些号在 items 里【完全消失】,
+  //   而 sidecar 只按 items 回填每号状态(runP.then 里 `for (const it of report.items)`)——
+  //   没出现的号会永远停在「运行中」,运行记录里也查无此号。旧代码本来有这条(no_more_candidate),
+  //   重构时被我一并删掉了,审计时才发现。
+  const planned = new Set(plan.map((p) => p.accountId));
+  const preItems: EngageItemResult[] = [];
+  for (const id of accIds) {
+    if (planned.has(id)) continue;
+    opts.onLog?.(id, 'ℹ️ 候选素材已分完,本号本轮不发');
+    const it: EngageItemResult = { accountId: id, state: 'skipped', reason: 'no_more_candidate' };
+    preItems.push(it);
+    try { opts.onItem?.(it); } catch { /* ignore */ }
+  }
 
   // ── 阶段B:分发(顺序执行,每条之间睡 60-120s 防连坐)──
-  const items: EngageItemResult[] = [];
+  const items: EngageItemResult[] = preItems.slice();   // 先带上「没分到素材」的那些号
   for (let i = 0; i < plan.length; i++) {
     if (opts.signal?.aborted) { items.push({ accountId: plan[i].accountId, state: 'skipped', reason: 'aborted' }); continue; }
     const candidate = plan[i].candidate;
