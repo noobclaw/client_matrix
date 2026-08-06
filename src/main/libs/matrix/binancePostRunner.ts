@@ -441,7 +441,7 @@ export async function runBinancePostTask(opts: BinancePostTaskOptions): Promise<
   //      在里面套循环等于重构五条【真发布 + 真扣费】的链路,风险远大于收益;
   //   ② 选题去重本来就在客户端:ctx.newsUsage 背后是 newsUsageStore(按 scenarioId + 标题
   //      持久化),剧本每跑一次都会 markUsed → 重跑自然换选题,不用改剧本一行;
-  //   ③ 每条之间隔 60-120s(同搬运的防连坐口径),避免同号短时间连发被平台盯上。
+  //   ③ 每条之间隔 10-60s(同搬运的防连坐口径),避免同号短时间连发被平台盯上。
   const perAcc = Math.max(1, Math.min(10, Number((opts.config as any)?.dailyCount) || 1));
   coworkLog('INFO', 'binancePostRunner', `binance_post ${opts.platform} x${opts.accountIds.length} (${scenarioId}) perAcc=${perAcc}`);
   const items = await runPool(opts.accountIds, k, async (id) => {
@@ -449,7 +449,7 @@ export async function runBinancePostTask(opts: BinancePostTaskOptions): Promise<
     for (let n = 0; n < perAcc; n++) {
       if (opts.signal?.aborted) break;
       if (n > 0) {
-        const gap = randInt(60000, 120000);
+        const gap = randInt(10000, 60000);
         opts.onLog?.(id, `⏳ 距上一条发布间隔 ${Math.round(gap / 1000)}s…(本号第 ${n + 1}/${perAcc} 条)`);
         await abortableSleep(gap, opts.signal);
         if (opts.signal?.aborted) break;

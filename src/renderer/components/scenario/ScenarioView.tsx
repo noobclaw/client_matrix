@@ -667,6 +667,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       isBlueV: input.isBlueV,
       autoPublish: input.autoPublish,
       references: input.references,
+      dailyCount: input.dailyCount,   // 每号每轮发几条(runner 循环,每条隔 10-60s)
     };
     const r = await m?.saveTask?.({ id: matrixTweetTask?.id, platform: matrixTweetPlatform, type: 'x_post', name: input.name, accountIds: input.accountIds, tweetPost, quota: {}, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
     if (!r?.ok) {
@@ -728,6 +729,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       localImages: input.localImages,
       language: input.language,
       autoPublish: input.autoPublish,
+      dailyCount: input.dailyCount,   // 每号每轮发几条(runner 循环,每条隔 10-60s)
     };
     // 🚨 type 是【任务类型枚举】(MatrixTaskType),不是剧本 id —— 不能拼成 `${platform}_post`。
     //    binance 只是碰巧拼出合法的 'binance_post';gate/okx/bitget/bybit 拼出 'gate_post' 这种
@@ -798,6 +800,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       sourceKind: input.sourceKind,
       source: input.source,
       catKey: input.catKey,
+      dailyCount: input.dailyCount,   // 每号每轮发几条(runner 循环,每条隔 10-60s)
     };
     const r = await m?.saveTask?.({ id: matrixFacebookTask?.id, platform: matrixFacebookPlatform, type: 'facebook_post', name: input.name, accountIds: input.accountIds, facebookPost, quota: {}, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
     if (!r?.ok) {
@@ -862,6 +865,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       source: input.source,
       catKey: input.catKey,
       subreddit: input.subreddit,
+      dailyCount: input.dailyCount,   // 每号每轮发几条(runner 循环,每条隔 10-60s)
     };
     const r = await m?.saveTask?.({ id: matrixRedditTask?.id, platform: matrixRedditPlatform, type: 'reddit_post', name: input.name, accountIds: input.accountIds, redditPost, quota: {}, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
     if (!r?.ok) {
@@ -928,6 +932,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       sourceKind: input.sourceKind,
       source: input.source,
       catKey: input.catKey,
+      dailyCount: input.dailyCount,   // 每号每轮发几条(runner 循环,每条隔 10-60s)
     };
     const r = await m?.saveTask?.({ id: matrixInstagramTask?.id, platform: matrixInstagramPlatform, type: 'instagram_post', name: input.name, accountIds: input.accountIds, instagramPost, quota: {}, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
     if (!r?.ok) {

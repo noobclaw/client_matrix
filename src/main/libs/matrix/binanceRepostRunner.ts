@@ -5,7 +5,7 @@
  *   阶段A · 采集(1 个采集号):用 config.sourceAccountId(在 sourcePlatform 上已登录)的指纹内核,
  *     跑 binance_repost_collect_<sourcePlatform> 剧本,按关键词搜索 → 筛选 → 下源图,采够 N 条候选。
  *   阶段B · 分发(N 个币安号):把候选逐条分给勾选的币安账号,每号在各自指纹内核里跑 binance_repost
- *     发布剧本(AI 仿写 + 配源图 → 发币安广场),每条之间睡 60-120s,成功一条扣 repost_image_text。
+ *     发布剧本(AI 仿写 + 配源图 → 发币安广场),每条之间睡 10-60s,成功一条扣 repost_image_text。
  *
  * 设计要点:① 采集只跑一次(币安号不需要各自登录源平台);② 候选按 post_id 任务内去重 + 采集号跨运行
  * 去重(seen 库),两号不撞同源;③ 每号【独立仿写】→ 同源也出不同文案,降低连坐。
@@ -81,7 +81,7 @@ export interface BinanceRepostTaskOptions {
   taskId?: string;
   accountIds: string[];             // 币安发布号
   config: BinanceRepostConfig;      // 搬运配置(含 sourcePlatform / sourceAccountId / keyword / material …)
-  concurrency?: number;             // 此处忽略:分发阶段顺序执行(每条睡 60-120s)
+  concurrency?: number;             // 此处忽略:分发阶段顺序执行(每条睡 10-60s)
   jitterMinMs?: number; jitterMaxMs?: number;
   kernelPath?: string;
   authToken?: string;
@@ -963,7 +963,7 @@ export async function runBinanceRepostTask(opts: BinanceRepostTaskOptions): Prom
 
   // ── 发布计划:每号 perAcc 条。按【轮次】铺开(第 1 轮每号各一条,第 2 轮再各一条…),
   //   而不是同一个号连着发 perAcc 条 —— 这样同号两条之间天然隔着其它号的发布 + 各自的
-  //   60-120s 间隔,节奏更像真人,也避免同一账号短时间内连续发帖被平台盯上。
+  //   10-60s 间隔,节奏更像真人,也避免同一账号短时间内连续发帖被平台盯上。
   //   每轮都重新 allocateByNiche 一次,让本轮剩余候选继续按各号赛道就近分配。
   const plan: Array<{ accountId: string; candidate: any }> = [];
   {
@@ -998,7 +998,7 @@ export async function runBinanceRepostTask(opts: BinanceRepostTaskOptions): Prom
     try { opts.onItem?.(it); } catch { /* ignore */ }
   }
 
-  // ── 阶段B:分发(顺序执行,每条之间睡 60-120s 防连坐)──
+  // ── 阶段B:分发(顺序执行,每条之间睡 10-60s 防连坐)──
   const items: EngageItemResult[] = preItems.slice();   // 先带上「没分到素材」的那些号
   for (let i = 0; i < plan.length; i++) {
     if (opts.signal?.aborted) { items.push({ accountId: plan[i].accountId, state: 'skipped', reason: 'aborted' }); continue; }
@@ -1014,10 +1014,10 @@ export async function runBinanceRepostTask(opts: BinanceRepostTaskOptions): Prom
       try { const ck = capKeyOf(candidate.text); if (ck) srcSeen.record(ck); } catch { /* ignore */ }
     }
     try { opts.onItem?.(r); } catch { /* ignore */ }
-    // 下一条发布前睡 60-120s(最后一条不睡;停止立即退)。同号连发也走这条 = 1~2 分钟间隔。
+    // 下一条发布前睡 10-60s(最后一条不睡;停止立即退)。同号连发也走这条 = 1~2 分钟间隔。
     const hasNext = i < plan.length - 1;
     if (hasNext && !opts.signal?.aborted) {
-      const gap = randInt(60000, 120000);
+      const gap = randInt(10000, 60000);
       opts.onLog?.(plan[i + 1].accountId, `⏳ 防连坐:距上一条发布间隔 ${Math.round(gap / 1000)}s…`);
       await new Promise<void>((resolve) => { const t = setTimeout(resolve, gap); try { opts.signal?.addEventListener('abort', () => { clearTimeout(t); resolve(); }, { once: true }); } catch { /* ignore */ } });
     }
