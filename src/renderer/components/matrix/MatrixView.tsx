@@ -306,6 +306,9 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
   const [logs, setLogs] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
   const [runningTaskId, setRunningTaskId] = useState<string | null>(null);
+  // 正在跑的平台集合。并发是【按平台】算的(sidecar 允许多个平台同时跑),不能拿全局 running
+  //   一刀切 —— 那会把服务端给的并发能力白白浪费掉(跑着币安就点不动 Gate)。
+  const [runningPlatforms, setRunningPlatforms] = useState<string[]>([]);
   const [doneReport, setDoneReport] = useState<any>(null);
 
   // 账号弹窗 + 通知
@@ -356,7 +359,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
   const [kernelMenuOpen, setKernelMenuOpen] = useState(false);
 
   const reload = useCallback(async () => { const r = await M()?.listAccounts(); if (r?.ok) setAccounts(r.accounts || []); }, []);
-  const reloadTasks = useCallback(async () => { const r = await M()?.listTasks?.(); if (r?.ok) { setTasks(r.tasks || []); if (typeof r.running === 'boolean') setRunning(r.running); } }, []);
+  const reloadTasks = useCallback(async () => { const r = await M()?.listTasks?.(); if (r?.ok) { setTasks(r.tasks || []); if (typeof r.running === 'boolean') setRunning(r.running); setRunningPlatforms(Array.isArray(r.runningPlatforms) ? r.runningPlatforms : []); } }, []);
   const reloadRuns = useCallback(async () => { const r = await M()?.listRuns?.(); if (r?.ok) setRuns(r.runs || []); }, []);
 
   useEffect(() => { reload(); reloadTasks(); }, [reload, reloadTasks]);
@@ -722,7 +725,9 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
     //   与 TaskDetailPage.handleRunNow 口径一致(手动运行都先拦一道)。
     if (!noobClawAuth.hasEnoughBalanceForTask()) return;
     if (!requireKernel()) return;
-    if (running) { setNotice(i18nService.t('mvAnotherTaskRunning')); return; }
+    // 只拦【同一平台】已有任务在跑:同平台共用一套指纹内核会打架,不同平台各跑各的没问题。
+    //   原来判的是全局 running —— 任意一个任务在跑就谁也点不了。
+    if (runningPlatforms.includes(t.platform)) { setNotice(i18nService.t('mvAnotherTaskRunning')); return; }
     setItems({}); setLogs([]); setDoneReport(null); setRunning(true); setSelectedTaskId(t.id);
     const r = await M()?.runTaskById({ taskId: t.id, kernelPath });
     if (!r?.ok) { setRunning(false); setNotice(i18nService.t('mvStartFailed') + (r?.error === 'another_task_running' ? i18nService.t('mvHasTaskRunning') : r?.error || i18nService.t('mvUnknown'))); }
@@ -1085,7 +1090,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
                       <div className="mt-2 pt-2 border-t border-gray-100 dark:border-gray-800 flex items-center justify-end">
                         {isRunning
                           ? <span onClick={(e) => { e.stopPropagation(); stopTask(); }} className="text-xs px-3 py-1 rounded-lg font-semibold bg-red-500 text-white hover:bg-red-600">⏹ {i18nService.t('mvStop')}</span>
-                          : <span onClick={(e) => { e.stopPropagation(); runTaskNow(t); }} className={`text-xs px-3 py-1 rounded-lg font-semibold ${running ? 'bg-gray-300 text-gray-500 dark:bg-gray-700' : 'bg-violet-500 text-white hover:bg-violet-600'}`}>🎯 {i18nService.t('mvRun')}</span>}
+                          : <span onClick={(e) => { e.stopPropagation(); runTaskNow(t); }} className={`text-xs px-3 py-1 rounded-lg font-semibold ${runningPlatforms.includes(t.platform) ? 'bg-gray-300 text-gray-500 dark:bg-gray-700' : 'bg-violet-500 text-white hover:bg-violet-600'}`}>🎯 {i18nService.t('mvRun')}</span>}
                       </div>
                     </button>
                   );
@@ -1106,7 +1111,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
               <div className="ml-auto flex gap-2">
                 {runningTaskId === selectedTask.id
                   ? <button onClick={stopTask} className="px-4 py-2 rounded-lg text-sm font-semibold bg-red-500 text-white hover:bg-red-600">⏹ {i18nService.t('mvStop')}</button>
-                  : <button onClick={() => runTaskNow(selectedTask)} disabled={running} className={`px-4 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50 ${selectedIsReply ? 'bg-fuchsia-500 hover:bg-fuchsia-600' : 'bg-violet-500 hover:bg-violet-600'}`}>{running ? i18nService.t('mvRunningEllipsis') : i18nService.t('mvRunNow')}</button>}
+                  : <button onClick={() => runTaskNow(selectedTask)} disabled={runningPlatforms.includes(selectedTask.platform)} className={`px-4 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50 ${selectedIsReply ? 'bg-fuchsia-500 hover:bg-fuchsia-600' : 'bg-violet-500 hover:bg-violet-600'}`}>{runningPlatforms.includes(selectedTask.platform) ? i18nService.t('mvRunningEllipsis') : i18nService.t('mvRunNow')}</button>}
                 <button onClick={() => { if (!requireLogin()) return; if (selectedIsReply) { setReplyEditId(selectedTask.id); setShowReplyEditModal(true); } else { setTaskEditId(selectedTask.id); setShowTaskEditModal(true); } }} className="px-3 py-2 rounded-lg text-sm font-medium border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800">{i18nService.t('mvEdit')}</button>
                 <button onClick={() => deleteTask(selectedTask)} className="px-3 py-2 rounded-lg text-sm font-medium border border-red-500/40 text-red-500 hover:bg-red-500/5">{i18nService.t('mvDelete')}</button>
               </div>
