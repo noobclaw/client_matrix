@@ -981,6 +981,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       withImage: input.withImage,
       language: input.language,
       autoPublish: input.autoPublish,
+      perAccountCount: input.perAccountCount,   // 每号每轮搬几条(采集量 = 号数 × 本值)
     };
     // 同上:type 用枚举 'binance_repost',剧本 id 走 `${platform}_repost` 由 runner 推。
     const r = await m?.saveTask?.({ id: matrixRepostTask?.id, platform: matrixRepostPlatform, type: 'binance_repost', name: input.name, accountIds: input.accountIds, binanceRepost, quota: {}, concurrency: input.concurrency, frequency: input.frequency, enabled: true });

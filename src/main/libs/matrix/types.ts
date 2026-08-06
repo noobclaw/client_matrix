@@ -261,7 +261,10 @@ export interface BinanceRepostConfig {
   withImage: boolean;            // 图文模式恒配源图;视频模式此项保留兼容(一般 true)
   language: string;   // 'mixed'/'auto'=跟随账号;或 9 种语言码之一(见 postLangs.ts) // 仿写语言(mixed 跟随客户端)
   autoPublish: boolean;          // true=直接发布,false=仅本地生成(不发)
-  perRunCount?: number;          // 本轮目标条数;缺省=min(币安号数, 候选池数)。封顶见 runner
+  perRunCount?: number;          // 【旧】本轮目标条数;缺省=min(币安号数, 候选池数)。老任务仍按此语义
+  // 【新】每号每轮搬几条(1-10,默认 1 = 老行为)。采集量 = 号数 × 本值;分发按轮次交替
+  //   (第 1 轮每号各一条、第 2 轮再各一条…),同号两条之间隔着其它号 + 各自 60-120s 间隔。
+  perAccountCount?: number;
 }
 
 // 互动(点赞/评论/关注)= engage;自动回复粉丝评论 = reply_fan(抖音创作者中心评论管理);
