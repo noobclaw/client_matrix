@@ -584,14 +584,15 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   const saveMatrixImageTextTask = async (input: ImageTextWizardSave) => {
     if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); throw new Error('请先登录 NoobClaw 账号'); }
     const m = (window as any).electron?.matrix;
-    // 各号各自参考文案(wizard 已过滤空值,只含填了的号);每号每轮固定 1 篇。
+    // 各号各自参考文案(wizard 已过滤空值,只含填了的号)。
+    // dailyCount 原来在这里写死 1(9a49558 删滑杆时一并写死),导致向导选了也没用 —— 现在透传。
     const imageText = {
       useRealPhotos: input.useRealPhotos,
       // 图源三选一('ai'/'real'/'local');local 带本地图绝对路径(≤6,runner 读盘转 base64)。
       imageSource: input.imageSource,
       localImages: input.localImages,
       imageCount: input.imageCount,
-      dailyCount: 1,
+      dailyCount: input.dailyCount,
       aiImageStyle: input.aiImageStyle,
       autoPublish: input.autoPublish,
       references: input.references,
