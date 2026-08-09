@@ -7,7 +7,7 @@ import MembershipPanel from '../membership/MembershipPanel';
 import { getPendingWalletTab } from '../../services/walletNav';
 import { readCachedProfile, writeCachedProfile } from '../../services/profileCache';
 import { readCachedPaymentInfo, writeCachedPaymentInfo, readCachedRedeemInfo, writeCachedRedeemInfo } from '../../services/paymentInfoCache';
-import { ContactInlinePanel } from '../common/ContactWidgets';
+import { ContactFloatWidget } from '../common/ContactWidgets';
 import { i18nService } from '../../services/i18n';
 import SidebarToggleIcon from '../icons/SidebarToggleIcon';
 import ComposeIcon from '../icons/ComposeIcon';
@@ -2131,8 +2131,9 @@ export const WalletView: React.FC<WalletViewProps> = ({ isSidebarCollapsed, onTo
             </div>
           )}
 
-        {/* 联系我们 — 与官网页脚同源(GET /api/site/contact),充值遇到问题一眼能找到人 */}
-        <ContactInlinePanel />
+        {/* 联系我们 — 与首页同款右侧悬浮组件(fixed 定位,GET /api/site/contact 同源);
+            充值遇到问题一眼找到人。不再用底部横排。 */}
+        <ContactFloatWidget />
 
       </div>
     </div>
