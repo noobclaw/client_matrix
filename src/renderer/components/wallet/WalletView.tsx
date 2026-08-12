@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { noobClawAuth } from '../../services/noobclawAuth';
-import { noobClawApi, PaymentInfo, RedeemPackagesResponse } from '../../services/noobclawApi';
+import { noobClawApi, PaymentInfo, ChainBlock, RedeemPackagesResponse } from '../../services/noobclawApi';
 import { CnyWithdrawModal } from './CnyWithdrawModal';
 import MembershipPanel from '../membership/MembershipPanel';
 import { getPendingWalletTab } from '../../services/walletNav';
@@ -105,7 +105,7 @@ function getStatusColor(status: string): string {
 
 // Network logo for the deposit-chain selector + order rows. Inline SVG so we
 // have a single source of truth and no extra asset fetch. Sizes are square px.
-const ChainLogo: React.FC<{ chain: 'BSC' | 'TRON' | 'WXPAY'; size?: number }> = ({ chain, size = 18 }) => {
+const ChainLogo: React.FC<{ chain: 'BSC' | 'TRON' | 'WXPAY' | 'DODO'; size?: number }> = ({ chain, size = 18 }) => {
   if (chain === 'WXPAY') {
     // 微信支付绿气泡(简化标)
     return (
@@ -119,6 +119,16 @@ const ChainLogo: React.FC<{ chain: 'BSC' | 'TRON' | 'WXPAY'; size?: number }> = 
         <circle cx="11.4" cy="9.6" r="0.75" fill="#07C160" />
         <circle cx="14" cy="12.8" r="0.65" fill="#07C160" />
         <circle cx="16.9" cy="12.8" r="0.65" fill="#07C160" />
+      </svg>
+    );
+  }
+  if (chain === 'DODO') {
+    // 银行卡(Dodo 海外收单)。通用卡片图标,不打 Dodo 品牌 —— 用户认的是「银行卡支付」。
+    return (
+      <svg width={size} height={size} viewBox="0 0 24 24" style={{ verticalAlign: 'middle' }}>
+        <rect x="1.5" y="4" width="21" height="16" rx="2.5" fill="#635BFF" />
+        <rect x="1.5" y="7.5" width="21" height="3" fill="#1a1a2e" />
+        <rect x="4" y="14" width="6" height="2" rx="1" fill="white" opacity=".9" />
       </svg>
     );
   }
@@ -142,11 +152,28 @@ const ChainLogo: React.FC<{ chain: 'BSC' | 'TRON' | 'WXPAY'; size?: number }> = 
 // Get the active chain block + a list of packages for it from PaymentInfo,
 // falling back to legacy top-level fields when the backend predates the
 // multi-chain block.
-function chainBlockFor(info: PaymentInfo | null, chain: 'BSC' | 'TRON' | 'WXPAY') {
+function chainBlockFor(info: PaymentInfo | null, chain: 'BSC' | 'TRON' | 'WXPAY' | 'DODO') {
   if (!info) return null;
   const fromChains: any = info.chains && info.chains[chain];
   if (fromChains) return fromChains;
   // legacy fallback: only BSC was supported, top-level packages == BSC
+  if (chain === 'DODO') {
+    // 银行卡档位是固定美元面值。映射成通用 packages 形状(usdt 字段承载美元数),
+    //   这样下游档位渲染/下单不用为它单开一套。
+    const d = info?.chains?.DODO;
+    if (!d?.enabled || !d.packages?.length) return null;
+    return {
+      treasuryWallet: '',
+      enabled: true,
+      packages: d.packages.map((p) => ({
+        usdt: p.usd,
+        label: p.label || `$${p.usd}`,
+        usdValue: String(p.usd),
+        tokens: p.tokens,
+        tokensDisplay: p.tokensDisplay,
+      })),
+    } as ChainBlock;
+  }
   if (chain === 'BSC') {
     return {
       treasuryWallet: info.treasuryWallet,
@@ -175,19 +202,23 @@ export const WalletView: React.FC<WalletViewProps> = ({ isSidebarCollapsed, onTo
   // right unit + treasury address. Kept as a single string + chain rather
   // than two separate states to avoid drift between the two on chain switch.
   const [pendingAmount, setPendingAmount] = useState('');
-  const [pendingChain, setPendingChain] = useState<'BSC' | 'TRON' | 'WXPAY'>('BSC');
+  const [pendingChain, setPendingChain] = useState<'BSC' | 'TRON' | 'WXPAY' | 'DODO'>('BSC');
   const [pendingCreatedAt, setPendingCreatedAt] = useState('');
   // 微信 Native 下单返回的 weixin:// 付款链接(渲染成二维码)。只在下单响应里有,
   // 为了让「充值记录 → 查看待支付订单」也能重新展示,同时落一份 localStorage
   //(单 key:pending 订单同时最多 1 笔)。
   const [pendingCodeUrl, setPendingCodeUrl] = useState('');
+  // 银行卡(Dodo)收银台地址 —— 等待界面上的「重新打开支付页」用。
+  const [pendingCheckoutUrl, setPendingCheckoutUrl] = useState('');
   // Currently selected deposit chain on the package picker. Defaulted to
   // TRON in loadData() when the backend reports TRON is available, since
   // USDT is the more common new-user path. lazy-init reads the cached
   // paymentInfo so on second-and-later visits the picker doesn't flash
   // BSC for one frame before flipping to TRON.
-  const [currentChain, setCurrentChain] = useState<'BSC' | 'TRON' | 'WXPAY'>(() => {
+  const [currentChain, setCurrentChain] = useState<'BSC' | 'TRON' | 'WXPAY' | 'DODO'>(() => {
     const cached = readCachedPaymentInfo();
+    // 银行卡覆盖面最广(境内外都能用)且是推荐渠道 → 有就默认选它。
+    if (cached?.chains?.DODO) return 'DODO';
     if (cached?.chains?.WXPAY && (i18nService.currentLanguage === 'zh' || i18nService.currentLanguage === 'zh-TW')) return 'WXPAY';
     return cached?.chains?.TRON ? 'TRON' : 'BSC';
   });
@@ -304,7 +335,9 @@ export const WalletView: React.FC<WalletViewProps> = ({ isSidebarCollapsed, onTo
       // deposit is the more discoverable first option for new users.
       // 中文界面且后端开了微信支付 → 默认选微信(人民币扫码是中文用户最顺路径);
       // 否则维持 TRON 优先的原决策。
-      if (info?.chains?.WXPAY && (i18nService.currentLanguage === 'zh' || i18nService.currentLanguage === 'zh-TW')) {
+      if (info?.chains?.DODO) {
+        setCurrentChain('DODO');
+      } else if (info?.chains?.WXPAY && (i18nService.currentLanguage === 'zh' || i18nService.currentLanguage === 'zh-TW')) {
         setCurrentChain('WXPAY');
       } else if (info?.chains?.TRON) {
         setCurrentChain('TRON');
@@ -508,7 +541,7 @@ export const WalletView: React.FC<WalletViewProps> = ({ isSidebarCollapsed, onTo
     };
   }, [partnerColor]);
 
-  const handleSelectPackage = async (amount: number, chain: 'BSC' | 'TRON' | 'WXPAY' = currentChain) => {
+  const handleSelectPackage = async (amount: number, chain: 'BSC' | 'TRON' | 'WXPAY' | 'DODO' = currentChain) => {
     setLoading(true);
     setError('');
     const result = await noobClawApi.createOrder(amount, chain);
@@ -519,6 +552,8 @@ export const WalletView: React.FC<WalletViewProps> = ({ isSidebarCollapsed, onTo
       const order = result.order;
       const amountStr = chain === 'WXPAY'
         ? String(parseFloat(order.face_value_rmb ?? result.cnyAmount ?? 0))
+        : chain === 'DODO'
+        ? String(parseFloat(order.usd_amount))
         : chain === 'TRON'
         ? String(parseFloat(order.usdt_amount))
         : String(parseFloat(order.bnb_amount));
@@ -527,6 +562,14 @@ export const WalletView: React.FC<WalletViewProps> = ({ isSidebarCollapsed, onTo
       setPendingChain(chain);
       setPendingCreatedAt(order.created_at);
       setPendingCodeUrl(chain === 'WXPAY' ? (result.codeUrl || '') : '');
+      // 银行卡:付款在 Dodo 托管的收银台完成 → 用系统浏览器打开(客户端不内嵌三方收银台)。
+      //   本页进等待态轮询到账 —— 入账靠 webhook,用户付完直接关浏览器也能到账。
+      if (chain === 'DODO') {
+        setPendingCheckoutUrl(result.checkoutUrl || '');
+        if (result.checkoutUrl) window.electron?.shell?.openExternal(result.checkoutUrl);
+      } else {
+        setPendingCheckoutUrl('');
+      }
       if (chain === 'WXPAY' && result.codeUrl) {
         try { localStorage.setItem('noobclaw_wxpay_qr', JSON.stringify({ orderNo: order.order_no, codeUrl: result.codeUrl })); } catch { /* quota */ }
       }
@@ -548,12 +591,19 @@ export const WalletView: React.FC<WalletViewProps> = ({ isSidebarCollapsed, onTo
   const startSubscriptionPay = async (
     planCode: string,
     period: 'month' | 'quarter' | 'half' | 'year',
-    chain: 'BSC' | 'TRON' | 'WXPAY',
+    chain: 'BSC' | 'TRON' | 'WXPAY' | 'DODO',
   ): Promise<string | null> => {
     setError('');
     const result = await noobClawApi.createSubscriptionOrder(planCode, period, chain);
     if (result?.order) {
       const order = result.order;
+      // 银行卡:开系统浏览器去 Dodo 收银台,本页进等待态(同充值)。
+      if (chain === 'DODO') {
+        setPendingCheckoutUrl(result.checkoutUrl || '');
+        if (result.checkoutUrl) window.electron?.shell?.openExternal(result.checkoutUrl);
+      } else {
+        setPendingCheckoutUrl('');
+      }
       const amountStr = chain === 'WXPAY'
         ? String(parseFloat(order.face_value_rmb ?? result.cnyAmount ?? 0))
         : chain === 'TRON' ? String(parseFloat(order.usdt_amount)) : String(parseFloat(order.bnb_amount));
@@ -605,7 +655,7 @@ export const WalletView: React.FC<WalletViewProps> = ({ isSidebarCollapsed, onTo
 
   const handleViewPendingOrder = (order: any) => {
     const rawChain = (order.chain || 'BSC').toUpperCase();
-    const chain: 'BSC' | 'TRON' | 'WXPAY' = rawChain === 'TRON' ? 'TRON' : rawChain === 'WXPAY' ? 'WXPAY' : 'BSC';
+    const chain: 'BSC' | 'TRON' | 'WXPAY' | 'DODO' = rawChain === 'TRON' ? 'TRON' : rawChain === 'WXPAY' ? 'WXPAY' : 'BSC';
     const amountStr = chain === 'WXPAY'
       ? String(parseFloat(order.face_value_rmb ?? 0))
       : chain === 'TRON'
@@ -1782,7 +1832,7 @@ export const WalletView: React.FC<WalletViewProps> = ({ isSidebarCollapsed, onTo
               <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
             </button>
           </div>
-          <MembershipPanel onPay={startSubscriptionPay} wxpayEnabled={!!paymentInfo?.chains?.WXPAY} />
+          <MembershipPanel onPay={startSubscriptionPay} wxpayEnabled={!!paymentInfo?.chains?.WXPAY} dodoEnabled={!!paymentInfo?.chains?.DODO} dodoPlans={paymentInfo?.chains?.DODO?.subscriptionPlans} />
         </div>
         )}
 
@@ -1812,8 +1862,17 @@ export const WalletView: React.FC<WalletViewProps> = ({ isSidebarCollapsed, onTo
                   老单 grid)。现在 CNY 卡密通道(redeemInfo 非空)也会让这行露出,
                   即使只有 BSC + CNY 两个选项。USDT/TRON 按产品决策排第一。
                   cnySelected 标记当前是否在卡密面板,与 currentChain 正交。 */}
-              {(paymentInfo?.chains?.TRON || paymentInfo?.chains?.WXPAY || redeemInfo) && (
+              {(paymentInfo?.chains?.TRON || paymentInfo?.chains?.WXPAY || paymentInfo?.chains?.DODO || redeemInfo) && (
                 <div className="mb-3 flex gap-2 p-1 rounded-lg dark:bg-claude-darkSurface bg-claude-surface border dark:border-claude-darkBorder border-claude-border">
+                  {paymentInfo?.chains?.DODO && (
+                    <button
+                      onClick={() => { setCnySelected(false); setCurrentChain('DODO'); }}
+                      className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-xs font-semibold transition-all ${!cnySelected && currentChain === 'DODO' ? 'bg-primary/15 text-primary' : 'dark:text-claude-darkTextSecondary text-claude-textSecondary hover:dark:text-claude-darkText hover:text-claude-text'}`}
+                    >
+                      <ChainLogo chain="DODO" size={16} />
+                      {i18nService.t('dodoCardTabWx')}
+                    </button>
+                  )}
                   {paymentInfo?.chains?.WXPAY && (
                     <button
                       onClick={() => { setCnySelected(false); setCurrentChain('WXPAY'); }}
@@ -1962,6 +2021,41 @@ export const WalletView: React.FC<WalletViewProps> = ({ isSidebarCollapsed, onTo
                   >
                     {i18nService.t('walletBack')}
                   </button>
+                </div>
+              ) : pendingChain === 'DODO' ? (
+                /* ─── 银行卡等待界面 ───
+                   付款在 Dodo 托管的收银台完成(已用系统浏览器打开),本页只负责等到账:
+                   轮询订单状态,成功后走与其它渠道相同的成功页。
+                   ⚠️ 入账靠 webhook —— 用户在浏览器付完直接关掉也能到账,不必切回来。 */
+                <div className="text-center py-6">
+                  <div className="w-12 h-12 mx-auto mb-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                  <h4 className="text-sm font-bold dark:text-claude-darkText text-claude-text mb-2">
+                    {i18nService.t('dodoWaitTitle')}
+                  </h4>
+                  <p className="text-xs dark:text-claude-darkTextSecondary text-claude-textSecondary mb-1">
+                    {i18nService.t('dodoWaitOpened')}
+                  </p>
+                  <p className="text-[11px] dark:text-claude-darkTextSecondary text-claude-textSecondary opacity-70 mb-5">
+                    {i18nService.t('dodoWaitAuto')}
+                  </p>
+                  <div className="flex items-center justify-center gap-2">
+                    <button
+                      onClick={() => { if (pendingCheckoutUrl) window.electron?.shell?.openExternal(pendingCheckoutUrl); }}
+                      disabled={!pendingCheckoutUrl}
+                      className="px-4 py-2 rounded-lg text-xs font-semibold bg-primary/15 text-primary hover:bg-primary/25 disabled:opacity-40 transition-all"
+                    >
+                      {i18nService.t('dodoWaitReopen')}
+                    </button>
+                    <button
+                      onClick={() => handleCancelOrder(pendingOrderNo)}
+                      className="px-4 py-2 rounded-lg text-xs dark:text-claude-darkTextSecondary text-claude-textSecondary hover:text-red-400 bg-black/5 dark:bg-white/5 transition-all"
+                    >
+                      {i18nService.t('walletCancelOrder')}
+                    </button>
+                  </div>
+                  <p className="mt-4 text-[10px] dark:text-claude-darkTextSecondary text-claude-textSecondary opacity-50">
+                    {pendingOrderNo}
+                  </p>
                 </div>
               ) : pendingChain === 'WXPAY' ? (
                 /* ─── 微信扫码支付面板 ───
