@@ -586,7 +586,13 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string): Pr
           fs.mkdirSync(dir, { recursive: true });
           const safeName = String(name || 'state').replace(/[\\/:*?"<>|]/g, '_').slice(0, 100);
           const filePath = path.join(dir, safeName + '.json');
-          fs.writeFileSync(filePath, JSON.stringify(obj), 'utf8');
+          // ⚠️ 必须原子落盘(临时文件 + rename):这份账本承载「新潜客只计费一次」的去重语义,
+          //   裸 writeFileSync 若在写入中途崩溃/断电会留下截断的半截 JSON → 下次 readState
+          //   parse 失败返回 null → 剧本按空账本重来 → 已收录的潜客被当新客【重复采集 + 重复扣费】。
+          //   同目录 rename 在同一文件系统上是原子的(taskStore.persist 也是这个写法)。
+          const tmp = filePath + '.tmp';
+          fs.writeFileSync(tmp, JSON.stringify(obj), 'utf8');
+          fs.renameSync(tmp, filePath);
           return { ok: true, path: filePath };
         } catch (err: any) {
           coworkLog('WARN', 'engage', `[${accountId}] writeState failed: ${String(err?.message || err)}`);
