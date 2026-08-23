@@ -54,12 +54,13 @@ import MatrixViralRewriteWizard, { type ViralRewriteWizardSave } from '../matrix
 
 type PlatformId = 'xhs' | 'x' | 'binance' | 'gate' | 'bitget' | 'bybit' | 'okx' | 'douyin' | 'shipinhao' | 'toutiao' | 'kuaishou' | 'bilibili' | 'tiktok' | 'youtube' | 'instagram' | 'facebook' | 'reddit' | 'video';
 
-// 矩阵 tab 顺序:多平台视频创作放最前(用户要求),其后与「我的矩阵账号」平台顺序一致(含视频号/头条)。
+// 矩阵 tab 顺序:与「我的矩阵账号」平台顺序一致(含视频号/头条),多平台视频创作放【最后】
+//   (2026-08-14 用户要求:首屏优先露出各平台的精准获客/互动入口)。
 // ⚠️ 这是【平台 tab 的唯一顺序来源】,账号页(MatrixView 的 PLATFORMS)必须与它保持一致
 //    —— 两处曾经漂移过(本文件末尾是 facebook/reddit/instagram,账号页却是 instagram/facebook/reddit,
 //    而旧注释还写着"已与 PLATFORMS 一致"),用户在两个页面之间来回切会觉得错乱。改任一处都要同步另一处。
 // 交易所广场三家紧跟在币安广场后面(同类平台聚在一起,用户按"广场"找得到)。
-const MATRIX_TAB_ORDER: PlatformId[] = ['video', 'douyin', 'xhs', 'kuaishou', 'bilibili', 'shipinhao', 'toutiao', 'x', 'binance', 'okx', 'bitget', 'bybit', 'gate', 'youtube', 'tiktok', 'facebook', 'reddit', 'instagram'];
+const MATRIX_TAB_ORDER: PlatformId[] = ['douyin', 'xhs', 'kuaishou', 'bilibili', 'shipinhao', 'toutiao', 'x', 'binance', 'okx', 'bitget', 'bybit', 'gate', 'youtube', 'tiktok', 'facebook', 'reddit', 'instagram', 'video'];
 // 后端 backend/matrix/scenarios 有 <platform>_auto_engage 互动涨粉剧本的平台(共 8 个)。
 // 视频号/头条暂无 engage 剧本 → tab 仍展示(与账号页一致),但「开始创作」标注「即将上线」不放行,避免跑出错任务。
 const MATRIX_ENGAGE_PLATFORMS = new Set<PlatformId>(['douyin', 'xhs', 'kuaishou', 'bilibili', 'x', 'binance', 'gate', 'bitget', 'bybit', 'okx', 'youtube', 'tiktok', 'facebook', 'reddit', 'instagram']);
@@ -76,7 +77,11 @@ const MATRIX_ENGAGE_PLATFORMS = new Set<PlatformId>(['douyin', 'xhs', 'kuaishou'
 const MATRIX_REPLY_FAN_PLATFORMS = new Set<PlatformId>(['douyin', 'xhs', 'kuaishou', 'bilibili', 'toutiao', 'shipinhao']);
 // 定向获客:有 <平台>_lead_engage 剧本的平台。每个平台一张独立卡片、独立任务(type='lead_engage'
 //   按平台各存一条)、独立向导与详情 —— 与互动涨粉/回复粉丝互不影响。
-const MATRIX_LEAD_PLATFORMS = new Set<PlatformId>(['tiktok', 'douyin', 'xhs', 'kuaishou', 'bilibili']);
+const MATRIX_LEAD_PLATFORMS = new Set<PlatformId>(['tiktok', 'douyin', 'xhs', 'kuaishou', 'bilibili', 'youtube']);
+// YouTube 的「关注」在平台上叫【订阅】,卡片/向导/详情的文案都要说平台自己的词
+//   (用户 2026-08-23:「任务详情要独立、和自己平台名字切合」)。计数键仍统一是 follow。
+const LEAD_FOLLOW_WORD = (p: PlatformId | string): [string, string] =>
+  (p === 'youtube' ? ['订阅', 'subscribe'] : ['关注', 'follow']);
 // 后端 backend/matrix/scenarios 有 <platform>_video_download「视频无水印下载」剧本的平台(单账号工具任务)。
 // 抖音(页面 fetch wrapper 签名拿 detail)/快手(读 <video> src)/哔哩哔哩(playurl html5 单文件 mp4)/
 // TikTok(SSR __UNIVERSAL_DATA__ + 多级 fallback,须 VPN 真机)。都走【主站】登录态,取主站号。
@@ -1678,11 +1683,17 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
               <div className="flex items-center gap-2 text-xs font-semibold text-cyan-600 dark:text-cyan-400 mb-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-cyan-500" /> {i18nService.currentLanguage === 'zh' ? '精准获客' : 'Lead Finder'}
               </div>
-              <div className="text-xl font-bold dark:text-white mb-1">🎯 {platLabel} · {i18nService.currentLanguage === 'zh' ? '定向获客' : 'Lead Finder'}</div>
+              <div className="flex items-start justify-between gap-2 mb-1">
+                <div className="text-xl font-bold dark:text-white">🎯 {platLabel} · {i18nService.currentLanguage === 'zh' ? '精准定向获客' : 'Lead Finder'}</div>
+                {/* 推荐角标:定向获客是当前主推能力,右上角小火苗(纯展示,不影响逻辑) */}
+                <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-orange-500/15 text-orange-500 dark:text-orange-400 border border-orange-500/30">
+                  🔥 {i18nService.currentLanguage === 'zh' ? '推荐' : 'Top pick'}
+                </span>
+              </div>
               <div className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed mb-4">
                 {i18nService.currentLanguage === 'zh'
-                  ? <>采集<strong>同行作品评论区</strong>里的潜在客户,去重存成本地名单,再逐个去他们主页点赞 / 评论 / 关注,把人引回来看你。</>
-                  : <>Harvests potential customers from <strong>competitors' comment sections</strong>, dedupes them into a local roster, then likes / comments / follows on each to pull them back to you.</>}
+                  ? <>采集<strong>同行作品评论区</strong>里的潜在客户,去重存成本地名单,再逐个去他们主页点赞 / 评论 / {LEAD_FOLLOW_WORD(currentPlatform)[0]},把人引回来看你。</>
+                  : <>Harvests potential customers from <strong>competitors' comment sections</strong>, dedupes them into a local roster, then likes / comments / {LEAD_FOLLOW_WORD(currentPlatform)[1]}s each to pull them back to you.</>}
               </div>
               <div className="mt-auto flex items-center flex-wrap pt-1">
                 <button
@@ -2644,7 +2655,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
               platformLabel={(() => {
                 const p = matrixLeadPlatform;
                 return p === 'tiktok' ? 'TikTok' : p === 'douyin' ? '抖音' : p === 'xhs' ? '小红书'
-                  : p === 'kuaishou' ? '快手' : p === 'bilibili' ? '哔哩哔哩' : String(p);
+                  : p === 'kuaishou' ? '快手' : p === 'bilibili' ? '哔哩哔哩' : p === 'youtube' ? 'YouTube' : String(p);
               })()}
               platform={matrixLeadPlatform}
               accounts={matrixLeadAccounts}
