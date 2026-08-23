@@ -225,8 +225,10 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   // v6.x: 菜单拆分后,本实例的「主页/落地段」由 mode 决定:
   //   create 模式落在 'create'(新建页);manage 模式落在 'tasks'(我的涨粉任务)。
   const baseSection: SectionId = mode === 'create' ? 'create' : mode === 'runs' ? 'history' : 'tasks';
-  // 默认平台 tab:统一默认【多平台视频创作】(video)。
-  const defaultPlatform: PlatformId = 'video';
+  // 默认平台 tab:2026-08-14 起落在 MATRIX_TAB_ORDER 的【第一个平台】(抖音),不再默认视频创作
+  //   —— 视频创作已移到 tab 最后一位,再默认选它会让页面一进来就停在最右端、且首屏看不到
+  //   各平台的精准获客/互动入口。非矩阵(旧视频版)不走 MATRIX_TAB_ORDER,保持 'video' 不变。
+  const defaultPlatform: PlatformId = matrixMode ? MATRIX_TAB_ORDER[0] : 'video';
   const [view, setView] = useState<ViewState>({ kind: 'main', section: baseSection, platform: initialPlatform || defaultPlatform });
 
   // Seed scenarios from the bundled snapshot so the "立即开始" buttons in
