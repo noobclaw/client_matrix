@@ -660,6 +660,10 @@ export const WalletView: React.FC<WalletViewProps> = ({ isSidebarCollapsed, onTo
     if (t?.packages?.length) return t.packages.map(p => ({ usd: Number(p.usdt), tokens: p.tokens }));
     const w = paymentInfo?.chains?.WXPAY;
     if (w?.packages?.length) return w.packages.map(p => ({ usd: Number(p.usdt), tokens: p.tokens }));
+    // 支付宝/银行卡-only(无 DODO/TRON/WXPAY 链块):读顶层 cnyPackages(usdt 字段承载美元数)。
+    //   否则「只开支付宝」时档位为空,买积分页会空白。
+    const cp = (paymentInfo as any)?.cnyPackages as Array<{ usdt: number; tokens: number }> | undefined;
+    if (cp?.length) return cp.map(p => ({ usd: Number(p.usdt), tokens: p.tokens }));
     return [];
   })();
 
