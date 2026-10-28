@@ -631,6 +631,8 @@ function mxRunToTaskRun(r: any): ScenarioTaskRun {
       ...(typeof t.download === 'number' ? { download: t.download } : {}),
       ...(typeof t.lead_new === 'number' ? { lead_new: t.lead_new } : {}),
       ...(typeof t.lead_engaged === 'number' ? { lead_engaged: t.lead_engaged } : {}),
+      // 批量拉黑:只有真的拉黑过才带(totals 里所有任务都有 block:0,不带 0 免得别的任务多出一个 0)。
+      ...(Number(t.block) > 0 ? { block: Number(t.block) } : {}),
     },
     // 累计/上次消耗:从运行记录的 cost 取(老记录无 cost → 0)。
     tokens_used: Number(r.cost?.credits) || 0,
@@ -703,6 +705,7 @@ function mxRunToRecord(r: any): any {
         ...(typeof t.favorite === 'number' ? { favorite: t.favorite } : {}),
         ...(typeof t.post === 'number' ? { post: t.post } : {}),
         ...(typeof t.download === 'number' ? { download: t.download } : {}),
+        ...(Number(t.block) > 0 ? { block: Number(t.block) } : {}),
       },
       // 在跑的那条带上目标值,列表就能渲染「11/32」这种 X/Y 进度 —— 老 scenario 页正是靠
       //   action_counts + action_targets 显示实时进度的(见 RunHistoryPage 里那段注释)。

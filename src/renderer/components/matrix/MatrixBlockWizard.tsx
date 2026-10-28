@@ -126,7 +126,7 @@ const MatrixBlockWizard: React.FC<Props> = ({ platformLabel, platform, accounts,
                 👤 {L('名单', '名單', 'Accounts')}<span className="text-xs text-gray-400 font-normal ml-1">{L('每行 1 个:主页链接 / 作品链接 / 短链 / 抖音号', '每行 1 個:主頁連結 / 作品連結 / 短連結 / 抖音號', 'one per line: profile link / post link / short link / Douyin ID')}</span>
               </label>
               <textarea value={targetsText} onChange={(e) => setTargetsText(e.target.value)} rows={6} disabled={saving}
-                placeholder={'https://www.douyin.com/user/MS4wLjABAAAA...\nhttps://v.douyin.com/xxxxxx/\nhttps://www.douyin.com/video/7xxxxxxxxxxxx\n抖音号123456'}
+                placeholder={'https://www.douyin.com/user/MS4wLjABAAAA...\nhttps://v.douyin.com/xxxxxx/\nhttps://www.douyin.com/video/7xxxxxxxxxxxx\ndy123456  (抖音号)'}
                 className="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500/40 resize-y min-h-[110px] font-mono" />
               <div className="flex items-center gap-3 text-[11px] mt-1">
                 <span className="text-red-500">{L(`有效 ${validTargets.length} 条`, `有效 ${validTargets.length} 條`, `${validTargets.length} valid`)}</span>

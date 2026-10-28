@@ -1639,7 +1639,7 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
                 <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm">
                   {(() => {
                     const isZhLead = i18nService.currentLanguage === 'zh';
-                    const ICONS: Record<string, string> = { lead_new: '📇', lead_engaged: '🤝', like: '👍', follow: '➕', favorite: '⭐', subscribe: '📌', comment: '💬', reply: '💬', post: '📤', download: '⬇️' };
+                    const ICONS: Record<string, string> = { lead_new: '📇', lead_engaged: '🤝', like: '👍', follow: '➕', favorite: '⭐', subscribe: '📌', comment: '💬', reply: '💬', post: '📤', download: '⬇️', block: '🚫' };
                     const ORDER = ['lead_new', 'lead_engaged', 'like', 'follow', 'favorite', 'subscribe', 'comment', 'reply', 'post', 'download'];
                     const labels = { lead_new: isZhLead ? '获得潜客' : 'leads', lead_engaged: isZhLead ? '互动潜客' : 'engaged', like: i18nService.t('tdLblLike'), follow: (scenario?.id === 'facebook_auto_engage' ? i18nService.t('tdLblAddFriend') : scenario?.id === 'youtube_lead_engage' ? i18nService.t('tdLblSubscribe') : i18nService.t('tdLblFollow')), favorite: (i18nService.currentLanguage === 'zh' ? '收藏' : 'favorites'), comment: i18nService.t('tdLblComment'), reply: i18nService.t('tdLblReply'), subscribe: i18nService.t('tdLblSubscribe'), post: i18nService.t('tdLblPost'), download: i18nService.t('tdLblDownload') };
                     const ap = progress.action_progress || {};
@@ -1882,7 +1882,7 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
           || (scenario?.workflow_type as any) === 'lead_engage';
         // 作品评论区点赞同理:只点赞,没有草稿/发布。
         const isCommentLikeTask = /_comment_like$/.test(String(task.scenario_id || ''));
-        const showUploadBadge = !isAutoReplyTask && !isVideoDownloadTask && !isLeadEngageTask && !isCommentLikeTask;
+        const showUploadBadge = !isAutoReplyTask && !isVideoDownloadTask && !isLeadEngageTask && !isCommentLikeTask && !/_block$/.test(String(task.scenario_id || ''));
         const isXhsViral = scenario?.platform === 'xhs';
         const autoUploadLabel = isXhsViral
           ? i18nService.t('tdAutoUploadDrafts')
@@ -2342,6 +2342,7 @@ function formatActionBreakdown(
     subscribe: '📌',
     post: '📤',
     download: '⬇️',
+    block: '🚫',
   };
   const ORDER = ['lead_new', 'lead_engaged', 'like', 'follow', 'favorite', 'subscribe', 'comment', 'reply', 'post', 'download'];
   // v5.x+: keep 0-count keys when they're explicitly present in the map.
