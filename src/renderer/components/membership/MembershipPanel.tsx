@@ -400,7 +400,7 @@ const MembershipPanel: React.FC<{
         })}
       </div>
 
-      {/* 「订阅赠送的算力按月发放、到期清零」已挪到页面标题下(同官网),这里不再重复 */}
+      <p className="mt-5 text-[11px] dark:text-claude-darkTextSecondary text-claude-textSecondary">{i18nService.t('mpFooterNote')}</p>
 
       {/* ── 支付方式弹窗:点套餐卡片后选怎么付 ──
           顺序即推荐序:银行卡(推荐,走 Dodo,连续订阅)→ USDT → BNB → 官方店铺(卡密)。
