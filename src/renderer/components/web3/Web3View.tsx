@@ -375,7 +375,7 @@ export const Web3View: React.FC<Web3ViewProps> = ({ isSidebarCollapsed, onToggle
                     <button
                       type="button"
                       onClick={() => openModal('telegram')}
-                      className="px-4 py-1.5 rounded-xl text-xs font-semibold bg-claude-accent text-white hover:bg-claude-accentHover transition-colors"
+                      className="px-4 py-1.5 rounded-xl text-xs font-semibold bg-claude-accent text-black hover:bg-claude-accentHover transition-colors"
                     >
                       {i18nService.t('web3Setup')}
                     </button>
@@ -407,7 +407,7 @@ export const Web3View: React.FC<Web3ViewProps> = ({ isSidebarCollapsed, onToggle
                     <button
                       type="button"
                       onClick={() => openModal('feishu')}
-                      className="px-4 py-1.5 rounded-xl text-xs font-semibold bg-claude-accent text-white hover:bg-claude-accentHover transition-colors"
+                      className="px-4 py-1.5 rounded-xl text-xs font-semibold bg-claude-accent text-black hover:bg-claude-accentHover transition-colors"
                     >
                       {i18nService.t('web3Setup')}
                     </button>
@@ -439,7 +439,7 @@ export const Web3View: React.FC<Web3ViewProps> = ({ isSidebarCollapsed, onToggle
                     <button
                       type="button"
                       onClick={() => openModal('lark')}
-                      className="px-4 py-1.5 rounded-xl text-xs font-semibold bg-claude-accent text-white hover:bg-claude-accentHover transition-colors"
+                      className="px-4 py-1.5 rounded-xl text-xs font-semibold bg-claude-accent text-black hover:bg-claude-accentHover transition-colors"
                     >
                       {i18nService.t('web3Setup')}
                     </button>
@@ -473,7 +473,7 @@ export const Web3View: React.FC<Web3ViewProps> = ({ isSidebarCollapsed, onToggle
                     <button
                       type="button"
                       onClick={() => openModal('dingtalk')}
-                      className="px-4 py-1.5 rounded-xl text-xs font-semibold bg-claude-accent text-white hover:bg-claude-accentHover transition-colors"
+                      className="px-4 py-1.5 rounded-xl text-xs font-semibold bg-claude-accent text-black hover:bg-claude-accentHover transition-colors"
                     >
                       {i18nService.t('web3Setup')}
                     </button>
@@ -506,7 +506,7 @@ export const Web3View: React.FC<Web3ViewProps> = ({ isSidebarCollapsed, onToggle
                               <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{i18nService.currentLanguage === 'zh' ? item.description_zh : item.description_en}</p>
                             </div>
                             <button type="button" onClick={() => { try { window.electron?.shell?.openExternal(item.link); } catch {} }}
-                              className="flex-shrink-0 px-3 py-1 rounded-xl text-xs font-semibold bg-claude-accent text-white hover:bg-claude-accentHover transition-colors">
+                              className="flex-shrink-0 px-3 py-1 rounded-xl text-xs font-semibold bg-claude-accent text-black hover:bg-claude-accentHover transition-colors">
                               {i18nService.t('web3Visit')}
                             </button>
                           </div>
@@ -529,7 +529,7 @@ export const Web3View: React.FC<Web3ViewProps> = ({ isSidebarCollapsed, onToggle
                               <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{i18nService.currentLanguage === 'zh' ? item.description_zh : item.description_en}</p>
                             </div>
                             <button type="button" onClick={() => { try { window.electron?.shell?.openExternal(item.link); } catch {} }}
-                              className="flex-shrink-0 px-3 py-1 rounded-xl text-xs font-semibold bg-claude-accent text-white hover:bg-claude-accentHover transition-colors">
+                              className="flex-shrink-0 px-3 py-1 rounded-xl text-xs font-semibold bg-claude-accent text-black hover:bg-claude-accentHover transition-colors">
                               {i18nService.t('web3Visit')}
                             </button>
                           </div>
@@ -550,7 +550,7 @@ export const Web3View: React.FC<Web3ViewProps> = ({ isSidebarCollapsed, onToggle
                   onClick={() => setKolLang('zh')}
                   className={`px-4 py-1.5 rounded-full text-xs font-medium transition-colors ${
                     kolLang === 'zh'
-                      ? 'bg-claude-accent text-white'
+                      ? 'bg-claude-accent text-black'
                       : 'dark:bg-claude-darkSurface bg-gray-100 dark:text-gray-400 text-gray-500 hover:dark:text-gray-300'
                   }`}
                 >
@@ -560,7 +560,7 @@ export const Web3View: React.FC<Web3ViewProps> = ({ isSidebarCollapsed, onToggle
                   onClick={() => setKolLang('en')}
                   className={`px-4 py-1.5 rounded-full text-xs font-medium transition-colors ${
                     kolLang === 'en'
-                      ? 'bg-claude-accent text-white'
+                      ? 'bg-claude-accent text-black'
                       : 'dark:bg-claude-darkSurface bg-gray-100 dark:text-gray-400 text-gray-500 hover:dark:text-gray-300'
                   }`}
                 >
@@ -633,7 +633,7 @@ export const Web3View: React.FC<Web3ViewProps> = ({ isSidebarCollapsed, onToggle
                   onClick={() => { setJobSource('web3career'); setJobPage(1); }}
                   className={`px-4 py-1.5 rounded-full text-xs font-medium transition-colors ${
                     jobSource === 'web3career'
-                      ? 'bg-claude-accent text-white'
+                      ? 'bg-claude-accent text-black'
                       : 'dark:bg-claude-darkSurface bg-gray-100 dark:text-gray-400 text-gray-500 hover:dark:text-gray-300'
                   }`}
                 >
@@ -643,7 +643,7 @@ export const Web3View: React.FC<Web3ViewProps> = ({ isSidebarCollapsed, onToggle
                   onClick={() => { setJobSource('cryptojobs'); setJobPage(1); }}
                   className={`px-4 py-1.5 rounded-full text-xs font-medium transition-colors ${
                     jobSource === 'cryptojobs'
-                      ? 'bg-claude-accent text-white'
+                      ? 'bg-claude-accent text-black'
                       : 'dark:bg-claude-darkSurface bg-gray-100 dark:text-gray-400 text-gray-500 hover:dark:text-gray-300'
                   }`}
                 >
@@ -653,7 +653,7 @@ export const Web3View: React.FC<Web3ViewProps> = ({ isSidebarCollapsed, onToggle
                   onClick={() => { setJobSource('dejob'); setJobPage(1); }}
                   className={`px-4 py-1.5 rounded-full text-xs font-medium transition-colors ${
                     jobSource === 'dejob'
-                      ? 'bg-claude-accent text-white'
+                      ? 'bg-claude-accent text-black'
                       : 'dark:bg-claude-darkSurface bg-gray-100 dark:text-gray-400 text-gray-500 hover:dark:text-gray-300'
                   }`}
                 >
@@ -979,7 +979,7 @@ export const Web3View: React.FC<Web3ViewProps> = ({ isSidebarCollapsed, onToggle
                 <button type="button" onClick={closeModal} className="px-4 py-2 text-xs font-medium rounded-xl border dark:border-claude-darkBorder border-claude-border dark:text-claude-darkText text-claude-text dark:hover:bg-claude-darkSurfaceHover hover:bg-gray-50 transition-colors">
                   {i18nService.t('cancel')}
                 </button>
-                <button type="button" onClick={handleSave} className="px-5 py-2 text-xs font-semibold rounded-xl bg-claude-accent text-white hover:bg-claude-accentHover transition-colors">
+                <button type="button" onClick={handleSave} className="px-5 py-2 text-xs font-semibold rounded-xl bg-claude-accent text-black hover:bg-claude-accentHover transition-colors">
                   {i18nService.t('save')}
                 </button>
               </div>
