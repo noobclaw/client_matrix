@@ -131,10 +131,12 @@ export interface EngageTaskOptions {
   // 关键词为空时后端剧本也会自动进入 binge(兜底),此字段是向导显式开关的透传。
   engageMode?: 'search' | 'binge' | 'precise';
   scenarioId?: string;             // 显式指定后端剧本 id(reply_fan→*_reply_fans_comment / video_download→*_video_download);缺省按平台推
-  funnel?: { funnel_phrase?: string; funnel_probability?: number }; // 引流尾巴配置:reply_fan 走后端剧本;engage 由 makeAiCall 对 comment_composer 融入
+  funnel?: { funnel_phrase?: string; funnel_probability?: number; funnel_rewrite?: boolean }; // 引流尾巴配置:reply_fan 走后端剧本;engage 由 makeAiCall 对 comment_composer 融入
   // 各账号独立引流语:有值时按 accountId 取,未配的账号视为不带引流(不回落共用值);
   // undefined 时沿用 funnel(共用,老行为)。
-  funnelByAccount?: Record<string, { funnel_phrase?: string; funnel_probability?: number }>;
+  funnelByAccount?: Record<string, { funnel_phrase?: string; funnel_probability?: number; funnel_rewrite?: boolean }>;
+  // AI自主评论(任务级):只有 false 才关 —— 评论只发引流语(AI 改写或原样);缺省 = 老行为。
+  aiComment?: boolean;
   // 单个用户评论最大回复数(仅抖音回复粉丝剧本读它;不传 → 剧本回落 1 = 老行为)
   maxReplyPerComment?: number;
   // 每号本次运行最多回复几条(仅抖音回复粉丝剧本读它;不传 → 剧本按 100 兜底;只管本次运行,不跨运行累计)
@@ -254,7 +256,25 @@ const FUNNEL_WEAVE_PROMPT = [
   '# 差异签名: {{nonce}}(仅用来让每次结果不同,不要把它写进评论)',
 ].join('\n');
 
-function makeAiCall(pack: any, authToken: string | undefined, report: (m: string) => void, onCost?: (credits: number, usd: number) => void, signal?: AbortSignal, funnel?: { phrase?: string; prob?: number; langHint?: string }) {
+// AI自主评论关闭时:把一行引流语用 AI 自己的话改写成一条评论(不评价内容、不加别的)。
+const FUNNEL_LEAD_ONLY_PROMPT = [
+  '你的任务:把一句「引流文案」用你自己的话改写成一条可以直接发出去的评论/回复。',
+  '',
+  '# 核心要求',
+  '1. 【严禁照抄引流文案】换措辞、换句式、换角度重新说一遍;但意思必须保留 ——',
+  '   要引导对方做的事,以及名称/账号/号码/链接/暗号等关键信息,一个字都不能改错、不能漏。',
+  '2. 只表达这句引流的意思:不要评价帖子/视频/评论内容,不要加与引流无关的寒暄或长篇大论。',
+  '3. 读起来像真人随口一说,自然、简短,别像硬广;长度跟原文案差不多。',
+  '4. 输出语言:{{lang}}。',
+  '',
+  '# 输出',
+  '只输出改写后的纯文本,不要 JSON、不要引号包裹、不要任何解释。',
+].join('\n');
+
+// funnel.aiComment / funnel.rewrite:只有显式 false 才生效(缺省 = 老行为)。
+// funnel.backendHandles:该剧本自己实现了这两个开关(如 tiktok_lead_engage)→ 客户端不重复处理,
+//   且两个开关任一关闭时不在 comment_composer 上做融合(剧本会自己接原句/只发引流语)。
+function makeAiCall(pack: any, authToken: string | undefined, report: (m: string) => void, onCost?: (credits: number, usd: number) => void, signal?: AbortSignal, funnel?: { phrase?: string; prob?: number; langHint?: string; aiComment?: boolean; rewrite?: boolean; backendHandles?: boolean }) {
   // 单次 chat 调用(系统提示 + 用户消息 → content 文本)。主评论与引流融入复用它。
   const doChat = async (systemPrompt: string, userMessage: string, wantJson: boolean, model?: string): Promise<string> => {
     if (!authToken) throw new Error('AI_NOT_CONFIGURED');
@@ -342,22 +362,89 @@ function makeAiCall(pack: any, authToken: string | undefined, report: (m: string
     return baseComment;
   };
 
+  const funnelLinesAll = () => String(funnel?.phrase || '').split(/\r?\n/).map((x) => x.trim()).filter(Boolean).slice(0, 20);
+  const say = (m: string) => { try { report(m); } catch { /* ignore */ } };
+  let leadOnlyNoticed = false;
+  // AI自主评论关闭:不写自由评论,每条 = 随机一行引流语(概率视为 100%)。
+  //   funnel_rewrite=false → 原样发(不调 AI);否则 AI 改写,改写失败/垃圾 → 返回 '' 跳过这条(绝不发原句)。
+  //   没填引流语 → 返回 '' (剧本按「评论为空」跳过,点赞/关注照常),只记一次日志。
+  const leadOnlyComment = async (composerInput: string): Promise<string> => {
+    const lines = funnelLinesAll();
+    if (!leadOnlyNoticed) {
+      leadOnlyNoticed = true;
+      say(!lines.length ? '⚠️ 已关闭AI自主评论但没填引流语,本次不发评论' : (funnel?.rewrite === false ? '🎣 AI自主评论已关闭 · 只发引流语(原样发布,已关闭AI改写)' : '🎣 AI自主评论已关闭 · 只发引流语(AI 改写)'));
+    }
+    if (!lines.length) return '';
+    const phrase = lines[Math.floor(Math.random() * lines.length)];
+    if (funnel?.rewrite === false) {
+      say('   🎣 引流语原样发布(已关闭AI改写): "' + phrase.slice(0, 40) + (phrase.length > 40 ? '…' : '') + '"');
+      return phrase;
+    }
+    const lang = funnel?.langHint
+      ? funnel.langHint
+      : '与这条内容相同的语言(内容:「' + String(composerInput || '').slice(0, 200) + '」,只用来判断语言,不要回应它的内容)';
+    const sys = FUNNEL_LEAD_ONLY_PROMPT.split('{{lang}}').join(lang);
+    let t = '', why = '';
+    for (let at = 0; at < 2 && !t; at++) {
+      if (signal?.aborted) break;
+      try {
+        t = String(await doChat(sys, JSON.stringify({ task: 'rewrite_lead_phrase', funnel_phrase: phrase, nonce: Date.now().toString(36) + Math.random().toString(36).slice(2, 6) }), false) || '').trim()
+          .replace(/^```[a-z]*\n?/i, '').replace(/```\s*$/i, '')
+          .replace(/^["'“”「『]+|["'“”」』]+$/g, '').trim();
+        if (/^[\[{]/.test(t) || /"\s*:\s*["\[{]/.test(t)) { why = '返回像 JSON'; t = ''; }
+        else if (t.length < 4) { why = t ? '太短:"' + t + '"' : '为空'; t = ''; }
+        else if (t.replace(/\s+/g, '') === phrase.replace(/\s+/g, '')) { why = '照抄了原句'; t = ''; }
+      } catch (e: any) {
+        if (String(e?.message || e) === 'user_stopped') throw e;
+        why = String(e?.message || e).slice(0, 60); t = '';
+      }
+    }
+    if (!t) { say('   ⚠️ 引流语改写失败(' + (why || '未知') + '),这条评论跳过 —— 不发原句、不改发自由评论'); return ''; }
+    say('   🎣 引流语已改写(' + t.length + '字): "' + t.slice(0, 40) + (t.length > 40 ? '…' : '') + '"');
+    return t;
+  };
+  // AI自主评论开 + 关闭AI改写:按概率把随机一行引流语【原样】接在 AI 评论末尾(代替 AI 融合)。
+  //   剧本普遍把评论截到 150 字,接不下时先截评论正文,引流语本身超长就不接。
+  const VERBATIM_CAP = 150;
+  const maybeAppendVerbatim = (baseComment: string): string => {
+    const base = String(baseComment || '').trim();
+    const lines = funnelLinesAll();
+    const prob = typeof funnel?.prob === 'number' ? funnel.prob : 0;
+    if (!base || !lines.length || prob <= 0) return baseComment;
+    if (Math.floor(Math.random() * 100) + 1 > prob) return baseComment;
+    const phrase = lines[Math.floor(Math.random() * lines.length)];
+    if (phrase.length + 1 > VERBATIM_CAP) { say('   ⚠️ 引流语比字数上限还长,这条不加引流'); return baseComment; }
+    const body = base.length + 1 + phrase.length > VERBATIM_CAP ? base.slice(0, VERBATIM_CAP - phrase.length - 1).trim() : base;
+    say('   🎣 引流语原样发布(已关闭AI改写),已接在评论末尾');
+    return body ? body + ' ' + phrase : phrase;
+  };
+
   return async (promptNameOrRaw: string, promptOrInput: any, rawInput?: string, opts?: any) => {
     const prompt = promptNameOrRaw === '__raw__' ? String(promptOrInput) : String(pack?.prompts?.[promptNameOrRaw] || '');
     const userMessage = promptNameOrRaw === '__raw__'
       ? String(rawInput || '')
       : (typeof promptOrInput === 'string' ? promptOrInput : JSON.stringify(promptOrInput));
     const wantJson = opts?.expectJson !== false;
+    const isComposer = promptNameOrRaw === 'comment_composer' && opts?.expectJson === false;
+    const aiOff = funnel?.aiComment === false, rewriteOff = funnel?.rewrite === false;
+    // AI自主评论关闭(客户端负责的剧本):不调主评论 AI,直接只发引流语。
+    if (isComposer && aiOff && !funnel?.backendHandles) return await leadOnlyComment(userMessage);
     const content = await doChat(prompt, userMessage, wantJson, opts && opts.model);
     if (opts?.expectJson === false) {
       // 互动评论(comment_composer)是纯文本评论出口 → 在这里按概率融入引流语。
       // 其它 expectJson:false 的调用(关键词衍生等)不叫 comment_composer,不受影响。
-      if (promptNameOrRaw === 'comment_composer') return await maybeWeaveFunnel(content);
+      if (isComposer) {
+        if (funnel?.backendHandles) return (aiOff || rewriteOff) ? content : await maybeWeaveFunnel(content);
+        return rewriteOff ? maybeAppendVerbatim(content) : await maybeWeaveFunnel(content);
+      }
       return content;
     }
     try { return JSON.parse(content); } catch { return content; }
   };
 }
+
+// 自己实现了 AI自主评论 / AI改写引流语、但融合仍挂在客户端 comment_composer 上的剧本。
+const BACKEND_FUNNEL_SCENARIOS = new Set(['tiktok_lead_engage']);
 
 async function chargeAction(authToken: string | undefined, actionType: string, platform: string, refId?: string) {
   if (!authToken) return { ok: false, reason: 'auth_missing' };
@@ -507,9 +594,14 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string, cha
         const f = opts.funnelByAccount ? (opts.funnelByAccount[accountId] || {}) : (opts.funnel || {});
         return {
           funnel_phrase: f.funnel_phrase || '',
-          funnel_probability: typeof f.funnel_probability === 'number' ? f.funnel_probability : 0,
+          // AI自主评论关闭 → 概率视为 100(向导已存 100,这里再兜一次)。
+          funnel_probability: opts.aiComment === false ? 100 : (typeof f.funnel_probability === 'number' ? f.funnel_probability : 0),
+          // AI改写引流语:本账号那份优先(各账号模式),否则任务级 funnel 里的;只有 false 才下发 false。
+          funnel_rewrite: (f.funnel_rewrite ?? opts.funnel?.funnel_rewrite) === false ? false : true,
         };
       })(),
+      // AI自主评论(任务级):只有 false 才关;缺省 true = 老行为。
+      ai_comment: opts.aiComment !== false,
       // 回复粉丝:单个用户评论最大回复数(仅抖音向导有这个选项)。
       max_reply_per_comment: opts.maxReplyPerComment,
       // 回复粉丝:每号本次运行最多回复几条(1~300;只管本次运行)。
@@ -596,6 +688,10 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string, cha
       phrase: task.funnel_phrase || '',
       prob: typeof task.funnel_probability === 'number' ? task.funnel_probability : 0,
       langHint: task.comment_language_hint || '', // 强制评论语言时,引流融合输出也锁同一语言
+      aiComment: task.ai_comment,
+      rewrite: task.funnel_rewrite,
+      // 这些剧本自己实现了 ai_comment / funnel_rewrite(只是借 comment_composer 做融合),客户端别重复处理。
+      backendHandles: BACKEND_FUNNEL_SCENARIOS.has(opts.scenarioId || (opts.taskType === 'lead_engage' ? `${opts.platform}_lead_engage` : '')),
     }); // 传 abort signal:点停止时这次 AI 调用立即中断
     const browserFn: any = (command: string, params?: any, timeout?: number) => matrixCmd(accountId, command, params, timeout);
     // task-tab 对象:orchestrator 在 _activeTab 上调 browser/navigate/scroll/id。

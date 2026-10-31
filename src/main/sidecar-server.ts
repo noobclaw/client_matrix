@@ -579,6 +579,8 @@ const { runYoutubeDownloadTask } = await import('./libs/matrix/youtubeDownloadRu
           funnel: task.funnel,
           // 各账号独立引流语:runner 在逐账号装配 task.funnel_* 时按 accountId 覆写。
           funnelByAccount: task.funnelByAccount,
+          // AI自主评论(任务级,缺省 = 开):runner 铺进 task.ai_comment,并据此处理 comment_composer。
+          aiComment: task.ai_comment,
           // 回复粉丝:单个用户评论最大回复数(仅抖音)。不传 → 剧本回落 1 = 老行为。
           maxReplyPerComment: task.maxReplyPerComment,
           // 回复粉丝:每号本次运行最多回复几条(仅抖音向导有)。不传 → 剧本按 100 兜底。

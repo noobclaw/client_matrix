@@ -232,7 +232,7 @@ const MatrixFunnelConfig: React.FC<Props> = ({ accounts, accent, perMode, setPer
           <div className="flex items-start justify-between gap-3 mb-1.5">
             <label className="text-sm font-medium dark:text-gray-200 block">
               {/* i18n 文案自带 🎣,JSX 不再前置(原来显示成「🎣 🎣」) */}
-              {i18nService.t(aiComment ? 'wzEngageFunnelPhraseLabel' : 'wzEngageFunnelPhraseLabelReq')}<span className="text-xs text-gray-400 font-normal ml-1">{i18nService.t(rewriteOn ? 'wzEngageFunnelPhraseHintRewrite' : 'wzEngageFunnelPhraseHintRaw')}</span>
+              {i18nService.t(aiComment ? 'wzEngageFunnelPhraseLabel' : 'wzEngageFunnelPhraseLabelReq')}<span className="text-xs text-gray-400 font-normal ml-1">{i18nService.t(aiComment ? (rewriteOn ? 'wzEngageFunnelPhraseHintRewrite' : 'wzEngageFunnelPhraseHintRaw') : (rewriteOn ? 'wzEngageFunnelPhraseHintOnlyRewrite' : 'wzEngageFunnelPhraseHintOnlyRaw'))}</span>
             </label>
             {/* AI改写引流语:跟着当前编辑的这份引流语(共用 = 全部账号;各账号 = 当前账号)。关闭要确认,打开不用。 */}
             <span className="inline-flex items-center gap-1.5 shrink-0 text-xs text-gray-500 dark:text-gray-400">
@@ -265,13 +265,9 @@ const MatrixFunnelConfig: React.FC<Props> = ({ accounts, accent, perMode, setPer
           />
           <div className="text-[11px] text-gray-400 mt-1">{i18nService.t('wzEngageFunnelCharCount').replace('{n}', String(editorValue.funnel_phrase.trim().length)).replace('{max}', String(FUNNEL_PHRASE_MAX))}</div>
         </div>
-        <div>
-          <label className="text-sm font-medium dark:text-gray-200 mb-1.5 block">
-            {i18nService.t('wzEngageFunnelProbLabel').replace('{n}', String(!aiComment ? FUNNEL_PROB_MAX : hasPhrase ? editorValue.funnel_probability : 0))}
-            <span className="text-xs text-gray-400 font-normal ml-1">
-              {!aiComment ? i18nService.t('wzEngageFunnelProbHintFixed') : hasPhrase ? '' : i18nService.t('wzEngageFunnelProbHintOff')}
-            </span>
-          </label>
+        {/* 概率:标签与 −/值/%/+ 同一行;关了 AI自主评论 时控件禁用在 100,提示跟在控件后面 */}
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-sm font-medium dark:text-gray-200">{i18nService.t('wzEngageFunnelProbLabel')}</span>
           <NumBox
             value={aiComment ? editorValue.funnel_probability : FUNNEL_PROB_MAX}
             onChange={(n) => setEditorValue({ ...editorValue, funnel_probability: n })}
@@ -282,6 +278,7 @@ const MatrixFunnelConfig: React.FC<Props> = ({ accounts, accent, perMode, setPer
             accent="fuchsia"
             suffix="%"
           />
+          {!aiComment && <span className="text-xs text-gray-400">{i18nService.t('wzEngageFunnelProbHintFixed')}</span>}
         </div>
         {aiOffErr && (
           <div className="rounded-lg border px-3 py-2 text-xs leading-relaxed border-red-500/30 bg-red-500/5 text-red-600 dark:text-red-400">

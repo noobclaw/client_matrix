@@ -198,7 +198,7 @@ export const XhsReplyFansCommentWizard: React.FC<Props> = ({
                   <label className="text-sm font-medium dark:text-gray-200 block">
                     {i18nService.t(aiComment ? 'wzEngageFunnelPhraseLabel' : 'wzEngageFunnelPhraseLabelReq')}
                     <span className="text-xs text-gray-400 font-normal ml-1">
-                      {i18nService.t(funnelRewrite ? 'wzEngageFunnelPhraseHintRewrite' : 'wzEngageFunnelPhraseHintRaw')}
+                      {i18nService.t(aiComment ? (funnelRewrite ? 'wzEngageFunnelPhraseHintRewrite' : 'wzEngageFunnelPhraseHintRaw') : (funnelRewrite ? 'wzEngageFunnelPhraseHintOnlyRewrite' : 'wzEngageFunnelPhraseHintOnlyRaw'))}
                     </span>
                   </label>
                   {/* AI改写引流语:关闭要确认,打开不用 */}
