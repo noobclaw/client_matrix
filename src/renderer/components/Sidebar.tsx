@@ -87,6 +87,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [aiChatOpen, setAiChatOpen] = useState(false);
   // 「浏览器窗口」二级组(我的矩阵账号 / 新建任务 / 我的任务 / 任务运行记录),默认展开(2026-10-31)。仅专业版。
   const [browserOpen, setBrowserOpen] = useState(true);
+  // 「云手机环境」二级组(我的云手机),默认展开。仅专业版。
+  const [phoneOpen, setPhoneOpen] = useState(true);
   const aiChildActive = activeView === 'cowork' || activeView === 'coworkHistory' || activeView === 'mcp' || activeView === 'web3news' || activeView === 'scheduledTasks' || activeView === 'skills';
   useEffect(() => { if (aiChildActive) setAiChatOpen(true); }, [aiChildActive]);
   const [isBatchMode, setIsBatchMode] = useState(false);
@@ -313,8 +315,25 @@ const Sidebar: React.FC<SidebarProps> = ({
                   )}
                 </button>
                 {browserOpen && <div className="space-y-1 pl-3">{browserItems.map(([k, l, h]) => navBtn(k, l, h))}</div>}
-                {/* 雲手機:安卓手機上的 NoobClaw Mobile(簡潔版在頂部菜單) */}
-                {onShowCloudPhone && navBtn('cloudPhone', '📱 ' + (zh ? '云手机' : tw ? '雲手機' : 'Cloud Phones'), onShowCloudPhone)}
+                {/* 云手机环境:安卓手机上的 NoobClaw Mobile(简洁版在顶部菜单) */}
+                {onShowCloudPhone && (<>
+                  <button
+                    type="button"
+                    onClick={() => setPhoneOpen(o => !o)}
+                    className={`w-full inline-flex items-center justify-between rounded-lg px-2.5 py-2 text-sm font-medium transition-colors ${
+                      activeView === 'cloudPhone' && !phoneOpen
+                        ? 'bg-claude-accent/10 text-claude-accent hover:bg-claude-accent/20'
+                        : 'dark:text-claude-darkTextSecondary text-claude-textSecondary hover:text-claude-text dark:hover:text-claude-darkText hover:bg-claude-surfaceHover dark:hover:bg-claude-darkSurfaceHover'
+                    }`}
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      <span className="text-sm">{'📱'}</span>
+                      {zh ? '云手机环境' : tw ? '雲手機環境' : 'Cloud Phones'}
+                    </span>
+                    <span className={`text-xs transition-transform ${phoneOpen ? 'rotate-90' : ''}`}>{'▸'}</span>
+                  </button>
+                  {phoneOpen && <div className="space-y-1 pl-3">{navBtn('cloudPhone', '📱 ' + (zh ? '我的云手机' : tw ? '我的雲手機' : 'My Cloud Phones'), onShowCloudPhone)}</div>}
+                </>)}
               </div>
             );
           })()}
