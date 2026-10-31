@@ -85,6 +85,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   // v6.x:「AI对话」二级折叠组(新建对话 / web3连接 / 行业热点)。默认收起;
   //   当组内某子项激活时强制展开,避免高亮项被折叠藏起来。
   const [aiChatOpen, setAiChatOpen] = useState(false);
+  // 「浏览器」二级组(我的矩阵账号 / 新建任务 / 我的任务 / 任务运行记录),默认展开(2026-10-31)。仅专业版。
+  const [browserOpen, setBrowserOpen] = useState(true);
   const aiChildActive = activeView === 'cowork' || activeView === 'coworkHistory' || activeView === 'mcp' || activeView === 'web3news' || activeView === 'scheduledTasks' || activeView === 'skills';
   useEffect(() => { if (aiChildActive) setAiChatOpen(true); }, [aiChildActive]);
   const [isBatchMode, setIsBatchMode] = useState(false);
@@ -259,16 +261,17 @@ const Sidebar: React.FC<SidebarProps> = ({
           </button>
           </>)}
 
-          {/* 矩阵号导航:我的矩阵号 / 新建涨粉任务 / 我的涨粉任务 / 运行记录(矩阵 edition 整个 app 就这一组,不再加组头) */}
-          <div className="space-y-1">
-            {(([
+          {/* 矩阵号导航:专业版收进「浏览器」二级组(默认展开);云手机在组外。简洁版仍平铺(只留 我的矩阵账号 / 我的任务)。 */}
+          {(() => {
+            const zh = i18nService.currentLanguage === 'zh', tw = i18nService.currentLanguage === 'zh-TW';
+            const browserItems = ([
               ['matrix', '👥 ' + i18nService.t('matrixMyAccounts'), onShowMatrix],
               ['matrixTaskNew', '✨ ' + i18nService.t('matrixNewFanTask'), onShowMatrixTaskNew],
-              ['matrixTasks', '📋 ' + (simple ? (i18nService.currentLanguage === 'zh' ? '我的任务' : i18nService.currentLanguage === 'zh-TW' ? '我的任務' : 'My Tasks') : i18nService.t('matrixMyFanTasks')), onShowMatrixTasks],
+              ['matrixTasks', '📋 ' + (simple ? (zh ? '我的任务' : tw ? '我的任務' : 'My Tasks') : i18nService.t('matrixMyFanTasks')), onShowMatrixTasks],
               ['matrixRuns', '📊 ' + i18nService.t('matrixRunHistory'), onShowMatrixRuns],
-              // 雲手機:安卓手機上的 NoobClaw Mobile(簡潔版在頂部菜單)
-              ['cloudPhone', '📱 ' + (i18nService.currentLanguage === 'zh' ? '云手机' : i18nService.currentLanguage === 'zh-TW' ? '雲手機' : 'Cloud Phones'), onShowCloudPhone],
-            ] as const).filter(([key, , handler]) => (key !== 'cloudPhone' || !!handler) && (!simple || key === 'matrix' || key === 'matrixTasks'))).map(([key, label, handler]) => (
+            ] as const).filter(([key]) => !simple || key === 'matrix' || key === 'matrixTasks');
+            const browserKeys = browserItems.map(([key]) => key as string);
+            const navBtn = (key: string, label: string, handler: (() => void) | undefined) => (
               <button
                 key={key}
                 type="button"
@@ -285,8 +288,36 @@ const Sidebar: React.FC<SidebarProps> = ({
                   <span className="absolute top-1 right-1.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold leading-none">{matrixExpiredCount}</span>
                 )}
               </button>
-            ))}
-          </div>
+            );
+            if (simple) return <div className="space-y-1">{browserItems.map(([k, l, h]) => navBtn(k, l, h))}</div>;
+            const childActive = browserKeys.includes(activeView);
+            return (
+              <div className="space-y-1">
+                <button
+                  type="button"
+                  onClick={() => setBrowserOpen(o => !o)}
+                  className={`relative w-full inline-flex items-center justify-between rounded-lg px-2.5 py-2 text-sm font-medium transition-colors ${
+                    childActive && !browserOpen
+                      ? 'bg-claude-accent/10 text-claude-accent hover:bg-claude-accent/20'
+                      : 'dark:text-claude-darkTextSecondary text-claude-textSecondary hover:text-claude-text dark:hover:text-claude-darkText hover:bg-claude-surfaceHover dark:hover:bg-claude-darkSurfaceHover'
+                  }`}
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <span className="text-sm">{'🌐'}</span>
+                    {zh ? '浏览器' : tw ? '瀏覽器' : 'Browser'}
+                  </span>
+                  <span className={`text-xs transition-transform ${browserOpen ? 'rotate-90' : ''}`}>{'▸'}</span>
+                  {/* 收起时把「过期账号」角标挂到组头上,别藏起来 */}
+                  {!browserOpen && matrixExpiredCount > 0 && (
+                    <span className="absolute top-1 right-6 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold leading-none">{matrixExpiredCount}</span>
+                  )}
+                </button>
+                {browserOpen && <div className="space-y-1 pl-3">{browserItems.map(([k, l, h]) => navBtn(k, l, h))}</div>}
+                {/* 雲手機:安卓手機上的 NoobClaw Mobile(簡潔版在頂部菜單) */}
+                {onShowCloudPhone && navBtn('cloudPhone', '📱 ' + (zh ? '云手机' : tw ? '雲手機' : 'Cloud Phones'), onShowCloudPhone)}
+              </div>
+            );
+          })()}
 
           {!simple && (<>
           {/* 全网热搜 — 仅简体/繁体中文显示(知乎/微博/百度/雪球/抖音/B站热榜) */}
