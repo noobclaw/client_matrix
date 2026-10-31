@@ -270,7 +270,7 @@ const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, platform, accounts, 
             max_comment_per_work: maxCmtPerWork,
             comment_lang: commentLang, engage_mode: (bingeSupported && bingeMode) ? 'binge' : '',
           },
-        // 引流:评论时按概率把引流文案融进 AI 评论。留空/平台不支持 → funnel_probability=0 → 视作未配,纯 AI 评论。
+        // 引流:评论时由后端剧本按概率把引流语接在评论尾巴。留空/平台不支持 → funnel_probability=0 → 视作未配,纯 AI 评论。
         // 各账号模式:任务级 funnel 置空,逐账号配置走 funnelByAccount;共用模式显式传 null 清掉旧的逐账号配置。
         funnel: (funnelSupported && !funnelPerMode && hasFunnel) ? { funnel_phrase: funnelPhrase.trim(), funnel_probability: effFunnelProb(aiComment, funnelProb), ...rewriteField({ funnel_rewrite: funnelRewrite }) } : { funnel_phrase: '', funnel_probability: 0 },
         funnelByAccount: (funnelSupported && funnelPerMode) ? cleanPerMap() : null,

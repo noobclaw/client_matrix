@@ -137,7 +137,9 @@ export const XhsReplyFansCommentWizard: React.FC<Props> = ({
         run_interval: runInterval,
         funnel_phrase: funnelPhrase.trim(),
         funnel_probability: hasFunnel ? effProb : 0,
-        ...(hasFunnel && !funnelRewrite ? { funnel_rewrite: false } : {}),
+        // 始终带上这个键:updateTask 是 {...旧任务, ...patch} 合并,不带的话关过一次就再也开不回来。
+        //   true = 开(矩阵 scenarioInputToMxSave 只在 false 时写入 → 存储里清掉);走 JSON 的通道会丢 undefined,所以用 true。
+        funnel_rewrite: !(hasFunnel && !funnelRewrite),
         ai_comment: aiComment,
         auto_upload: false,
         auto_publish: false,

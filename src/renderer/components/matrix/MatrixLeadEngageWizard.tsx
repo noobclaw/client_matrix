@@ -225,7 +225,7 @@ const MatrixLeadEngageWizard: React.FC<Props> = ({ platformLabel, platform, acco
   const [maxFollows, setMaxFollows] = useState<number>(typeof le.maxFollows === 'number' ? le.maxFollows : 0);
   const [maxComments, setMaxComments] = useState<number>(typeof le.maxComments === 'number' ? le.maxComments : 0);
 
-  // 引流语(评论时按概率融进 AI 评论)。与互动涨粉同一套口径,直接复用 MatrixFunnelConfig。
+  // 引流语(评论时由后端剧本按概率接在评论尾巴)。与互动涨粉同一套口径,直接复用 MatrixFunnelConfig。
   const [funnelPerMode, setFunnelPerMode] = useState<boolean>(!!initialTask?.funnelByAccount && Object.keys(initialTask.funnelByAccount).length > 0);
   const [funnelPhrase, setFunnelPhrase] = useState<string>(initialTask?.funnel?.funnel_phrase || '');
   const [funnelProb, setFunnelProb] = useState<number>(

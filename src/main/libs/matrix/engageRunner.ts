@@ -131,7 +131,7 @@ export interface EngageTaskOptions {
   // 关键词为空时后端剧本也会自动进入 binge(兜底),此字段是向导显式开关的透传。
   engageMode?: 'search' | 'binge' | 'precise';
   scenarioId?: string;             // 显式指定后端剧本 id(reply_fan→*_reply_fans_comment / video_download→*_video_download);缺省按平台推
-  funnel?: { funnel_phrase?: string; funnel_probability?: number; funnel_rewrite?: boolean }; // 引流尾巴配置:reply_fan 走后端剧本;engage 由 makeAiCall 对 comment_composer 融入
+  funnel?: { funnel_phrase?: string; funnel_probability?: number; funnel_rewrite?: boolean }; // 引流配置:下发给剧本,引流尾巴 / 只发引流语全部由后端剧本处理(客户端不加工评论)
   // 各账号独立引流语:有值时按 accountId 取,未配的账号视为不带引流(不回落共用值);
   // undefined 时沿用 funnel(共用,老行为)。
   funnelByAccount?: Record<string, { funnel_phrase?: string; funnel_probability?: number; funnel_rewrite?: boolean }>;
@@ -430,7 +430,7 @@ async function runOne(opts: EngageTaskOptions, pack: any, accountId: string, cha
       selfUid: acc.boundUid || acc.displayId || '',
       selfDisplayId: acc.displayId || '',
       // 引流语按模式取:各账号模式下取本账号的(未配=不带引流,【不】回落共用值);
-      // 共用模式(funnelByAccount 为空)沿用任务级 funnel。reply_fan 剧本与 engage 融合都吃这两个字段。
+      // 共用模式(funnelByAccount 为空)沿用任务级 funnel。reply_fan 与 engage 剧本都读这些字段自己接引流尾巴。
       ...(() => {
         const f = opts.funnelByAccount ? (opts.funnelByAccount[accountId] || {}) : (opts.funnel || {});
         return {

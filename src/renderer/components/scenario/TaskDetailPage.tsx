@@ -1041,8 +1041,8 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
                       </div>
                     );
                   })()}
-                  {/* 互动任务的「评论引流」(填了才显示):评论时 AI 按概率把引流语融进评论。 */}
-                  {/* 定向获客(_lead_engage)的评论同样走 comment_composer + 引流融合,
+                  {/* 互动任务的「评论引流」(填了才显示):评论时由后端剧本按概率把引流语接在评论尾巴。 */}
+                  {/* 定向获客(_lead_engage)的评论同样带引流尾巴(后端剧本处理),
                       不放行的话详情页看不到已配的引流语,用户会以为没保存上。 */}
                   {isMatrix && !isReplyFan && /_auto_engage$|_lead_engage$/.test(String(task.scenario_id || '')) && (() => {
                     const fba = (task as any).funnel_by_account as Record<string, any> | undefined;

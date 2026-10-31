@@ -574,12 +574,12 @@ const { runYoutubeDownloadTask } = await import('./libs/matrix/youtubeDownloadRu
           leadEngage: task.type === 'lead_engage' ? task.leadEngage : undefined,
           scenarioId: isReplyFan ? `${task.platform}_reply_fans_comment` : isVideoDownload ? `${task.platform}_video_download` : isReport ? `${task.platform}_report` : isCommentLike ? `${task.platform}_comment_like` : isBlock ? `${task.platform}_block` : undefined,
           // 引流尾巴配置:reply_fan(回复粉丝)+ engage(互动评论)都带上。
-          // engage 由客户端 makeAiCall 对 comment_composer 输出按概率融入;reply_fan 走后端剧本。
+          // 引流尾巴 / 只发引流语都由后端剧本按 task.funnel_* / ai_comment / funnel_rewrite 处理,客户端只透传。
           // 老任务没配 funnel → undefined → 两条路径都视作未填,行为不变(向后兼容)。
           funnel: task.funnel,
           // 各账号独立引流语:runner 在逐账号装配 task.funnel_* 时按 accountId 覆写。
           funnelByAccount: task.funnelByAccount,
-          // AI自主评论(任务级,缺省 = 开):runner 铺进 task.ai_comment,并据此处理 comment_composer。
+          // AI自主评论(任务级,缺省 = 开):runner 铺进 task.ai_comment 交给剧本。
           aiComment: task.ai_comment,
           // 回复粉丝:单个用户评论最大回复数(仅抖音)。不传 → 剧本回落 1 = 老行为。
           maxReplyPerComment: task.maxReplyPerComment,

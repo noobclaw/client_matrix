@@ -313,7 +313,7 @@ function mxTaskToScenario(t: any): ScenarioTaskIPC {
     precise_favorite: q.precise_favorite, precise_follow: q.precise_follow,
     precise_comment: q.precise_comment,
     // 回复粉丝 + 互动(评论引流)都带引流尾巴配置(供详情页展示 + 编辑回填)。
-    // 互动任务的引流用于「评论时按概率把引流语融进 AI 评论」(见 engageRunner.makeAiCall)。
+    // 互动任务的引流:评论时由后端剧本按概率把引流语接在评论尾巴(engageRunner 只透传)。
     funnel_phrase: (isReply || isEngage || isLead) ? (fn.funnel_phrase || '') : undefined,
     funnel_probability: (isReply || isEngage || isLead) ? (typeof fn.funnel_probability === 'number' ? fn.funnel_probability : 0) : undefined,
     // 各账号独立引流语:必须透传,否则 updateTask 兜底(如 MyTasksPage 改启用)会把它抹掉(与 comment_lang 同类坑)。

@@ -685,8 +685,8 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
   const saveMatrixLeadTask = async (input: { name: string; accountIds: string[]; concurrency: number; frequency: string; leadEngage: any; funnel?: any; funnelByAccount?: any }) => {
     if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); throw new Error('请先登录 NoobClaw 账号'); }
     const m = (window as any).electron?.matrix;
-    // 引流语走既有的 funnel / funnelByAccount 通道 —— engageRunner 的 makeAiCall 会按概率
-    //   把它融进 comment_composer 出来的评论,与互动涨粉同一条链路,无需后端改动。
+    // 引流语走既有的 funnel / funnelByAccount 通道 —— engageRunner 把它下发给剧本,
+    //   由后端剧本按概率接在评论尾巴(与互动涨粉同一条链路)。
     const r = await m?.saveTask?.({ id: matrixLeadTask?.id, platform: matrixLeadPlatform, type: 'lead_engage', name: input.name, accountIds: input.accountIds, leadEngage: input.leadEngage, funnel: input.funnel, funnelByAccount: input.funnelByAccount, ai_comment: (input as any).aiComment !== false, quota: {}, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
     if (!r?.ok) {
       if (r?.error === 'duplicate_type') { const dp = matrixLeadPlatform; setMatrixLeadPlatform(null); setMatrixLeadTask(null); setDupNotice({ platform: dp as string, label: '定向获客' }); return; }
