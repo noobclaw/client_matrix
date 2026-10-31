@@ -148,6 +148,7 @@ const MatrixFunnelConfig: React.FC<Props> = ({ accounts, accent, perMode, setPer
   const hasPhrase = editorValue.funnel_phrase.trim().length > 0;
   const rewriteOn = editorValue.funnel_rewrite !== false;
   const [rewriteConfirm, setRewriteConfirm] = useState(false);
+  const [aiOffConfirm, setAiOffConfirm] = useState(false);   // 关 AI自主评论 前的确认(打开不用确认)
   const aiOffErr = funnelAiOffError(aiComment, perMode, accounts, shared, perMap);
   const cardRing = `${ac.border} ${ac.bg} ring-1 ${ac.ring}`;
 
@@ -171,7 +172,7 @@ const MatrixFunnelConfig: React.FC<Props> = ({ accounts, accent, perMode, setPer
             label={i18nService.t('wzFunnelAiComment')}
             desc={i18nService.t('wzFunnelAiCommentDesc')}
             on={aiComment}
-            onToggle={() => setAiComment(!aiComment)}
+            onToggle={() => { if (aiComment) setAiOffConfirm(true); else setAiComment(true); }}
             disabled={disabled}
           />
         )}
@@ -292,6 +293,16 @@ const MatrixFunnelConfig: React.FC<Props> = ({ accounts, accent, perMode, setPer
           </div>
         )}
       </div>
+      {aiOffConfirm && setAiComment && (
+        <FunnelConfirmDialog
+          accent={accent}
+          title={`⚠️ ${i18nService.t('wzFunnelAiOffConfirm')}`}
+          backLabel={i18nService.t('wzFunnelRewriteOffCancel')}
+          okLabel={i18nService.t('wzFunnelRewriteOffOk')}
+          onBack={() => setAiOffConfirm(false)}
+          onOk={() => { setAiOffConfirm(false); setAiComment(false); }}
+        />
+      )}
       {rewriteConfirm && (
         <FunnelConfirmDialog
           accent={accent}

@@ -78,6 +78,7 @@ export const XhsReplyFansCommentWizard: React.FC<Props> = ({
   const [aiComment, setAiComment] = useState<boolean>((initialTask as any)?.ai_comment !== false);
   const [funnelRewrite, setFunnelRewrite] = useState<boolean>((initialTask as any)?.funnel_rewrite !== false);
   const [rewriteConfirm, setRewriteConfirm] = useState(false);
+  const [aiOffConfirm, setAiOffConfirm] = useState(false);   // 关 AI自主评论 前的确认(打开不用确认)
   // 关了 AI自主评论:引流语必填,概率固定 100%
   const effProb = aiComment ? funnelProb : FUNNEL_PROB_MAX;
   // 关了 AI自主评论时引流语必填。本向导只编辑共用那份;任务若是「各账号」模式(在矩阵向导里配的,
@@ -201,7 +202,7 @@ export const XhsReplyFansCommentWizard: React.FC<Props> = ({
                 label={i18nService.t('wzFunnelAiComment')}
                 desc={i18nService.t('wzFunnelAiCommentDesc')}
                 on={aiComment}
-                onToggle={() => setAiComment(!aiComment)}
+                onToggle={() => { if (aiComment) setAiOffConfirm(true); else setAiComment(true); }}
                 disabled={saving}
               />
 
@@ -267,6 +268,16 @@ export const XhsReplyFansCommentWizard: React.FC<Props> = ({
                 />
                 {!aiComment && <span className="text-xs text-gray-400">{i18nService.t('wzEngageFunnelProbHintFixed')}</span>}
               </div>
+              {aiOffConfirm && (
+                <FunnelConfirmDialog
+                  accent="fuchsia"
+                  title={`⚠️ ${i18nService.t('wzFunnelAiOffConfirm')}`}
+                  backLabel={i18nService.t('wzFunnelRewriteOffCancel')}
+                  okLabel={i18nService.t('wzFunnelRewriteOffOk')}
+                  onBack={() => setAiOffConfirm(false)}
+                  onOk={() => { setAiOffConfirm(false); setAiComment(false); }}
+                />
+              )}
               {rewriteConfirm && (
                 <FunnelConfirmDialog
                   accent="fuchsia"
