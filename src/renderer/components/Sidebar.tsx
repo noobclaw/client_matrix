@@ -267,10 +267,11 @@ const Sidebar: React.FC<SidebarProps> = ({
           {(() => {
             const zh = i18nService.currentLanguage === 'zh', tw = i18nService.currentLanguage === 'zh-TW';
             const browserItems = ([
-              ['matrix', '👥 ' + i18nService.t('matrixMyAccounts'), onShowMatrix],
-              ['matrixTaskNew', '✨ ' + i18nService.t('matrixNewFanTask'), onShowMatrixTaskNew],
-              ['matrixTasks', '📋 ' + (simple ? (zh ? '我的任务' : tw ? '我的任務' : 'My Tasks') : i18nService.t('matrixMyFanTasks')), onShowMatrixTasks],
-              ['matrixRuns', '📊 ' + i18nService.t('matrixRunHistory'), onShowMatrixRuns],
+              // 专业版是二级菜单 → 不带图标(和一级菜单区分开);简洁版平铺,保留图标
+              ['matrix', (simple ? '👥 ' : '') + i18nService.t('matrixMyAccounts'), onShowMatrix],
+              ['matrixTaskNew', (simple ? '✨ ' : '') + i18nService.t('matrixNewFanTask'), onShowMatrixTaskNew],
+              ['matrixTasks', (simple ? '📋 ' : '') + (simple ? (zh ? '我的任务' : tw ? '我的任務' : 'My Tasks') : i18nService.t('matrixMyFanTasks')), onShowMatrixTasks],
+              ['matrixRuns', (simple ? '📊 ' : '') + i18nService.t('matrixRunHistory'), onShowMatrixRuns],
             ] as const).filter(([key]) => !simple || key === 'matrix' || key === 'matrixTasks');
             const browserKeys = browserItems.map(([key]) => key as string);
             const navBtn = (key: string, label: string, handler: (() => void) | undefined) => (
@@ -314,7 +315,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     <span className="absolute top-1 right-6 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold leading-none">{matrixExpiredCount}</span>
                   )}
                 </button>
-                {browserOpen && <div className="space-y-1 pl-3">{browserItems.map(([k, l, h]) => navBtn(k, l, h))}</div>}
+                {browserOpen && <div className="space-y-1 pl-6">{browserItems.map(([k, l, h]) => navBtn(k, l, h))}</div>}
                 {/* 云手机环境:安卓手机上的 NoobClaw Mobile(简洁版在顶部菜单) */}
                 {onShowCloudPhone && (<>
                   <button
@@ -332,7 +333,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     </span>
                     <span className={`text-xs transition-transform ${phoneOpen ? 'rotate-90' : ''}`}>{'▸'}</span>
                   </button>
-                  {phoneOpen && <div className="space-y-1 pl-3">{navBtn('cloudPhone', '📱 ' + (zh ? '我的云手机' : tw ? '我的雲手機' : 'My Cloud Phones'), onShowCloudPhone)}</div>}
+                  {phoneOpen && <div className="space-y-1 pl-6">{navBtn('cloudPhone', (zh ? '我的云手机' : tw ? '我的雲手機' : 'My Cloud Phones'), onShowCloudPhone)}</div>}
                 </>)}
               </div>
             );
