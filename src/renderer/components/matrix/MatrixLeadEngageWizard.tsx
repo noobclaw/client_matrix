@@ -17,7 +17,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { i18nService } from '../../services/i18n';
 import MatrixFunnelConfig, {
-  FunnelUnsetConfirm, countUnconfigured, FUNNEL_PHRASE_MAX, FUNNEL_PROB_DEFAULT,
+  FunnelUnsetConfirm, countUnconfigured, funnelAiOffError, effFunnelProb, rewriteField, FUNNEL_PHRASE_MAX, FUNNEL_PROB_DEFAULT,
   type FunnelValue,
 } from './MatrixFunnelConfig';
 import { NumRow } from './NumberStepper';
@@ -67,6 +67,7 @@ interface Props {
     leadEngage: LeadEngageInput;
     funnel: FunnelValue;
     funnelByAccount: Record<string, FunnelValue> | null;
+    aiComment: boolean;
   }) => Promise<void> | void;
 }
 
@@ -232,6 +233,10 @@ const MatrixLeadEngageWizard: React.FC<Props> = ({ platformLabel, platform, acco
       ? initialTask.funnel.funnel_probability : FUNNEL_PROB_DEFAULT);
   const [funnelPerMap, setFunnelPerMap] = useState<Record<string, FunnelValue>>(initialTask?.funnelByAccount || {});
   const [funnelUnsetConfirm, setFunnelUnsetConfirm] = useState<number | null>(null);
+  // AI改写引流语(共用模式那份;各账号模式存在各自 FunnelValue.funnel_rewrite):缺省 = 开。
+  const [funnelRewrite, setFunnelRewrite] = useState<boolean>(initialTask?.funnel?.funnel_rewrite !== false);
+  // AI自主评论(任务级 ai_comment):老任务没这个字段 = 开(老行为);只有显式存了 false 才是关。
+  const [aiComment, setAiComment] = useState<boolean>(initialTask?.ai_comment !== false);
   const [seedUnsetConfirm, setSeedUnsetConfirm] = useState<number | null>(null);
   // 账号横条:当前编辑哪个号 + 左右渐隐(号多到滚出视野时提示两边还有)。
   const [activeSeedId, setActiveSeedId] = useState<string>('');
@@ -289,7 +294,8 @@ const MatrixLeadEngageWizard: React.FC<Props> = ({ platformLabel, platform, acco
     // 点赞/关注/评论三个总量都填 0 = 采完潜客后挨个打开主页干等、什么也不做(采集那步照样跑)。
     //   这肯定不是用户想要的,拦在第 5 步(评论数是最后一个填的)。
     5: (clampInt(maxLikes, 0, 5000) + clampInt(maxFollows, 0, 100) + clampInt(maxComments, 0, 100)) > 0
-      ? { ok: true }
+      // 关了 AI自主评论 → 引流语必填,硬卡(不走「不管了,下一步」确认)。
+      ? (() => { const e = funnelAiOffError(aiComment, funnelPerMode, funnelAccounts, { funnel_phrase: funnelPhrase, funnel_probability: funnelProb }, funnelPerMap); return e ? { ok: false, reason: e } : { ok: true }; })()
       : { ok: false, reason: t(`点赞 / ${followWord} / 评论至少要开一项,否则获取到潜客后什么也不会做`, `Enable at least one of like / ${followWord} / comment — otherwise nothing happens after leads are collected`) },
     6: termsAccepted ? { ok: true } : { ok: false, reason: t('请先同意条款', 'Please accept the terms') },
   };
@@ -321,7 +327,7 @@ const MatrixLeadEngageWizard: React.FC<Props> = ({ platformLabel, platform, acco
     for (const id of selected) {
       const v = funnelPerMap[id];
       const ph = (v?.funnel_phrase || '').trim();
-      if (ph) out[id] = { funnel_phrase: ph, funnel_probability: v.funnel_probability };
+      if (ph) out[id] = { funnel_phrase: ph, funnel_probability: effFunnelProb(aiComment, v.funnel_probability), ...rewriteField(v) };
     }
     return out;
   };
@@ -368,9 +374,10 @@ const MatrixLeadEngageWizard: React.FC<Props> = ({ platformLabel, platform, acco
           commentPrompt: le.commentPrompt || '',
         },
         funnel: (!funnelPerMode && hasShared)
-          ? { funnel_phrase: funnelPhrase.trim(), funnel_probability: funnelProb }
+          ? { funnel_phrase: funnelPhrase.trim(), funnel_probability: effFunnelProb(aiComment, funnelProb), ...rewriteField({ funnel_rewrite: funnelRewrite }) }
           : { funnel_phrase: '', funnel_probability: 0 },
         funnelByAccount: funnelPerMode ? cleanPerMap() : null,
+        aiComment,
       });
     } catch (err) {
       setSaveError(String(err instanceof Error ? err.message : err) || t('保存失败', 'Save failed'));
@@ -630,10 +637,12 @@ const MatrixLeadEngageWizard: React.FC<Props> = ({ platformLabel, platform, acco
               accent="fuchsia"
               perMode={funnelPerMode}
               setPerMode={setFunnelPerMode}
-              shared={{ funnel_phrase: funnelPhrase, funnel_probability: funnelProb }}
-              setShared={(v) => { setFunnelPhrase(v.funnel_phrase.slice(0, FUNNEL_PHRASE_MAX)); setFunnelProb(v.funnel_probability); }}
+              shared={{ funnel_phrase: funnelPhrase, funnel_probability: funnelProb, funnel_rewrite: funnelRewrite }}
+              setShared={(v) => { setFunnelPhrase(v.funnel_phrase.slice(0, FUNNEL_PHRASE_MAX)); setFunnelProb(v.funnel_probability); setFunnelRewrite(v.funnel_rewrite !== false); }}
               perMap={funnelPerMap}
               setPerMap={setFunnelPerMap}
+              aiComment={aiComment}
+              setAiComment={setAiComment}
               disabled={saving}
             />
             {/* 未配置确认用【共用的 fixed 浮层】,不能内联在滚动内容末尾 ——
@@ -678,7 +687,7 @@ const MatrixLeadEngageWizard: React.FC<Props> = ({ platformLabel, platform, acco
                 clampInt(maxFollows,0,100) > 0 ? `➕${clampInt(maxFollows,0,100)}` : null,
               ].filter(Boolean).join(' · ') || '—'}</span></div>
               <div className="flex justify-between"><span className="text-gray-500">{t('每个潜客', 'Per lead')}</span><span>{t('只做 1 个动作', 'one action')}</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">{t('评论引流', 'Funnel')}</span><span>{funnelPerMode ? t(`各账号各自(${funnelAccounts.length - countUnconfigured(funnelAccounts, funnelPerMap)}/${funnelAccounts.length} 已配)`, `per account`) : (funnelPhrase.trim() ? t(`共用 · ${funnelProb}%`, `shared · ${funnelProb}%`) : t('未配置', 'none'))}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">{i18nService.t('wzEngageSummaryFunnel')}</span><span>{funnelPerMode ? t(`各账号各自(${funnelAccounts.length - countUnconfigured(funnelAccounts, funnelPerMap)}/${funnelAccounts.length} 已配)`, `per account`) : (funnelPhrase.trim() ? t(`共用 · ${effFunnelProb(aiComment, funnelProb)}%`, `shared · ${effFunnelProb(aiComment, funnelProb)}%`) + (funnelRewrite ? '' : ` · ${i18nService.t('wzFunnelRewriteOffTag')}`) : t('未配置', 'none'))}{aiComment ? '' : ` · ${i18nService.t('wzFunnelAiOffTag')}`}</span></div>
               <div className="flex justify-between"><span className="text-gray-500">{t('频率', 'Frequency')}</span><span>{intervalLabel}</span></div>
             </div>
             <label className="flex items-start gap-2 text-xs text-gray-500 dark:text-gray-400 cursor-pointer">

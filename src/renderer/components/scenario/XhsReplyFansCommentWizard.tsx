@@ -12,6 +12,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { i18nService } from '../../services/i18n';
 import type { Scenario, Task } from '../../services/scenario';
 import { NumBox } from '../matrix/NumberStepper';
+import { FunnelConfirmDialog, SwitchCard } from '../matrix/MatrixFunnelConfig';
 
 interface Props {
   scenario: Scenario;
@@ -73,6 +74,13 @@ export const XhsReplyFansCommentWizard: React.FC<Props> = ({
       : FUNNEL_PROB_DEFAULT
   );
 
+  // ── AI自主评论(任务级 ai_comment)+ AI改写引流语(funnel_rewrite):缺省都 = 开(老行为) ──
+  const [aiComment, setAiComment] = useState<boolean>((initialTask as any)?.ai_comment !== false);
+  const [funnelRewrite, setFunnelRewrite] = useState<boolean>((initialTask as any)?.funnel_rewrite !== false);
+  const [rewriteConfirm, setRewriteConfirm] = useState(false);
+  // 关了 AI自主评论:引流语必填,概率固定 100%
+  const effProb = aiComment ? funnelProb : FUNNEL_PROB_MAX;
+
   // ── 调度 ──
   const dailyTime = useMemo(() => {
     if (initialTask?.daily_time) return String(initialTask.daily_time);
@@ -92,10 +100,10 @@ export const XhsReplyFansCommentWizard: React.FC<Props> = ({
   useEffect(() => {
     if (saveError) setSaveError(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [funnelPhrase, funnelProb, runInterval]);
+  }, [funnelPhrase, funnelProb, runInterval, aiComment]);
 
   const canAdvance: Record<WizardStep, { ok: boolean; reason?: string }> = {
-    1: { ok: true },
+    1: (!aiComment && !hasFunnel) ? { ok: false, reason: i18nService.t('wzFunnelAiOffErrShared') } : { ok: true },
     2: { ok: allTermsAccepted, reason: isZh ? '请勾选使用条款' : 'Please accept the terms' },
   };
 
@@ -105,6 +113,7 @@ export const XhsReplyFansCommentWizard: React.FC<Props> = ({
       setSaveError(canAdvance[2].reason || (isZh ? '请确认条款' : 'Please confirm'));
       return;
     }
+    if (!canAdvance[1].ok) { setSaveError(canAdvance[1].reason || ''); return; }
     setSaving(true);
     try {
       await onSave({
@@ -116,7 +125,9 @@ export const XhsReplyFansCommentWizard: React.FC<Props> = ({
         daily_time: dailyTime,
         run_interval: runInterval,
         funnel_phrase: funnelPhrase.trim(),
-        funnel_probability: hasFunnel ? funnelProb : 0,
+        funnel_probability: hasFunnel ? effProb : 0,
+        ...(hasFunnel && !funnelRewrite ? { funnel_rewrite: false } : {}),
+        ai_comment: aiComment,
         auto_upload: false,
         auto_publish: false,
       });
@@ -170,14 +181,42 @@ export const XhsReplyFansCommentWizard: React.FC<Props> = ({
                       : <>This task opens your <strong>Creator Center</strong>, walks each note's detail page, reads fan comments → AI writes replies → posts on human-paced jitter. <strong>Auto-skips comments you've already replied to or your own.</strong></>)}
               </div>
 
+              {/* AI自主评论开关(与 MatrixFunnelConfig 同款卡片) */}
+              <SwitchCard
+                accent="fuchsia"
+                ring="border-fuchsia-500 bg-fuchsia-500/5 ring-1 ring-fuchsia-500/40"
+                label={i18nService.t('wzFunnelAiComment')}
+                desc={i18nService.t('wzFunnelAiCommentDesc')}
+                on={aiComment}
+                onToggle={() => setAiComment(!aiComment)}
+                disabled={saving}
+              />
+
               {/* 引流语 textarea */}
               <div>
-                <label className="text-sm font-medium dark:text-gray-200 mb-1.5 block">
-                  {isZh ? '🎣 核心引流语（选填）' : '🎣 Funnel phrase (optional)'}
-                  <span className="text-xs text-gray-400 font-normal ml-1">
-                    {isZh ? `· 一行一条(最多 20 条),发送时随机选一条;留空则回复不带引流尾巴` : `· One per line (up to 20), one picked at random; empty = no funnel tail`}
+                <div className="flex items-start justify-between gap-3 mb-1.5">
+                  <label className="text-sm font-medium dark:text-gray-200 block">
+                    {i18nService.t(aiComment ? 'wzEngageFunnelPhraseLabel' : 'wzEngageFunnelPhraseLabelReq')}
+                    <span className="text-xs text-gray-400 font-normal ml-1">
+                      {i18nService.t(funnelRewrite ? 'wzEngageFunnelPhraseHintRewrite' : 'wzEngageFunnelPhraseHintRaw')}
+                    </span>
+                  </label>
+                  {/* AI改写引流语:关闭要确认,打开不用 */}
+                  <span className="inline-flex items-center gap-1.5 shrink-0 text-xs text-gray-500 dark:text-gray-400">
+                    {i18nService.t('wzFunnelRewrite')}
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={funnelRewrite}
+                      aria-label={i18nService.t('wzFunnelRewrite')}
+                      disabled={saving}
+                      onClick={() => { if (funnelRewrite) setRewriteConfirm(true); else setFunnelRewrite(true); }}
+                      className={`relative w-8 h-[18px] rounded-full transition-colors shrink-0 ${funnelRewrite ? 'bg-fuchsia-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                    >
+                      <span className={`absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white transition-all ${funnelRewrite ? 'left-[16px]' : 'left-[2px]'}`} />
+                    </button>
                   </span>
-                </label>
+                </div>
                 <textarea
                   value={funnelPhrase}
                   onChange={e => {
@@ -204,25 +243,35 @@ export const XhsReplyFansCommentWizard: React.FC<Props> = ({
               <div>
                 <label className="text-sm font-medium dark:text-gray-200 mb-2 block">
                   {isZh
-                    ? `🎲 引流尾巴出现概率: ${hasFunnel ? funnelProb : 0}%`
-                    : `🎲 Funnel tail probability: ${hasFunnel ? funnelProb : 0}%`}
+                    ? `🎲 引流尾巴出现概率: ${!aiComment ? FUNNEL_PROB_MAX : hasFunnel ? funnelProb : 0}%`
+                    : `🎲 Funnel tail probability: ${!aiComment ? FUNNEL_PROB_MAX : hasFunnel ? funnelProb : 0}%`}
                   <span className="text-xs text-gray-400 font-normal ml-1">
-                    {hasFunnel
+                    {!aiComment ? i18nService.t('wzEngageFunnelProbHintFixed') : hasFunnel
                       ? (isZh ? '· AI 会按概率把引流语自然衔接到回复尾部' : '· AI weaves funnel into reply tail by probability')
                       : (isZh ? '· 引流语未填,概率失效' : '· Funnel empty, probability disabled')}
                   </span>
                 </label>
                 <NumBox
-                  value={funnelProb}
+                  value={effProb}
                   onChange={setFunnelProb}
                   min={FUNNEL_PROB_MIN}
                   max={FUNNEL_PROB_MAX}
                   step={5}
-                  disabled={saving || !hasFunnel}
+                  disabled={saving || !hasFunnel || !aiComment}
                   accent="fuchsia"
                   suffix="%"
                 />
               </div>
+              {rewriteConfirm && (
+                <FunnelConfirmDialog
+                  accent="fuchsia"
+                  title={`⚠️ ${i18nService.t('wzFunnelRewriteOffConfirm')}`}
+                  backLabel={i18nService.t('wzFunnelRewriteOffCancel')}
+                  okLabel={i18nService.t('wzFunnelRewriteOffOk')}
+                  onBack={() => setRewriteConfirm(false)}
+                  onOk={() => { setRewriteConfirm(false); setFunnelRewrite(false); }}
+                />
+              )}
             </>
           )}
 
@@ -257,7 +306,7 @@ export const XhsReplyFansCommentWizard: React.FC<Props> = ({
                 <SummaryRow
                   label={isZh ? '引流语' : 'Funnel'}
                   value={hasFunnel
-                    ? `"${funnelPhrase.trim().slice(0, 40)}${funnelPhrase.trim().length > 40 ? '...' : ''}" · ${funnelProb}%`
+                    ? `"${funnelPhrase.trim().slice(0, 40)}${funnelPhrase.trim().length > 40 ? '...' : ''}" · ${effProb}%${funnelRewrite ? '' : ` · ${i18nService.t('wzFunnelRewriteOffTag')}`}${aiComment ? '' : ` · ${i18nService.t('wzFunnelAiOffTag')}`}`
                     : (isZh ? '（未填,纯 AI 回复）' : '(empty, pure AI reply)')} />
                 <SummaryRow
                   label={isZh ? '回复范围' : 'Scope'}

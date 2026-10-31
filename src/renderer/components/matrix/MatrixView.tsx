@@ -38,7 +38,8 @@ interface MatrixTask {
   quota: { daily_like_min?: number; daily_like_max?: number; daily_follow_min?: number; daily_follow_max?: number; daily_comment_min?: number; daily_comment_max?: number;
     daily_favorite_min?: number; daily_favorite_max?: number; max_comment_per_work?: number; engage_mode?: string;
     precise_urls?: string[]; precise_like?: number; precise_favorite?: number; precise_follow?: number; precise_comment?: number };
-  funnel?: { funnel_phrase?: string; funnel_probability?: number };
+  funnel?: { funnel_phrase?: string; funnel_probability?: number; funnel_rewrite?: boolean };
+  ai_comment?: boolean;   // AI自主评论:缺省 = 开;false = AI 只发引流语
   concurrency?: number; frequency: string; nextPlannedRunAt?: number; lastRunAt?: number; createdAt: number;
 }
 // reply_fan 任务进度里 comment 计数 = 回复条数(沿用 engage 的 counts.comment 通道)。
@@ -825,19 +826,19 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
 
   // ── 任务 ──
   // 向导(MatrixTaskWizard)保存:成功回 tasks 屏;失败抛出让向导显示红字。
-  const saveTaskFromWizard = async (input: { name: string; accountIds: string[]; concurrency: number; frequency: string; quota: any; funnel?: { funnel_phrase: string; funnel_probability: number }; funnelByAccount?: Record<string, { funnel_phrase: string; funnel_probability: number }> | null }) => {
+  const saveTaskFromWizard = async (input: { name: string; accountIds: string[]; concurrency: number; frequency: string; quota: any; funnel?: { funnel_phrase: string; funnel_probability: number }; funnelByAccount?: Record<string, { funnel_phrase: string; funnel_probability: number }> | null; aiComment?: boolean }) => {
     if (!requireLogin()) throw new Error(i18nService.t('mvLoginFirst'));
     // funnel:互动评论引流(选填)。留空 → funnel_probability=0 → 视作未配,评论纯 AI 内容(向后兼容)。
-    const r = await M()?.saveTask({ id: taskEditId || undefined, platform, type: 'engage', name: input.name, accountIds: input.accountIds, quota: input.quota, funnel: input.funnel, funnelByAccount: input.funnelByAccount, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
+    const r = await M()?.saveTask({ id: taskEditId || undefined, platform, type: 'engage', name: input.name, accountIds: input.accountIds, quota: input.quota, funnel: input.funnel, funnelByAccount: input.funnelByAccount, ai_comment: input.aiComment !== false, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
     if (!r?.ok) throw new Error(({ platform_task_limit: i18nService.t('mvTaskLimit'), duplicate_type: i18nService.t('mvDuplicateEngage'), task_not_found: i18nService.t('mvTaskNotFound') } as any)[r?.error] || r?.error || i18nService.t('mvSaveFailed'));
     await reloadTasks(); setNotice(i18nService.t('mvTaskSaved'));
     setShowTaskEditModal(false); setTaskEditId(null);
     onNavigate?.('tasks');
   };
   // 「自动回复粉丝」向导保存:type='reply_fan' + funnel(无配额)。与 engage 同平台可并存(不同 type)。
-  const saveTaskFromReplyWizard = async (input: { name: string; accountIds: string[]; concurrency: number; frequency: string; funnel: { funnel_phrase: string; funnel_probability: number }; funnelByAccount?: Record<string, { funnel_phrase: string; funnel_probability: number }> | null; maxReplyPerComment?: number; maxRepliesPerRun?: number }) => {
+  const saveTaskFromReplyWizard = async (input: { name: string; accountIds: string[]; concurrency: number; frequency: string; funnel: { funnel_phrase: string; funnel_probability: number }; funnelByAccount?: Record<string, { funnel_phrase: string; funnel_probability: number }> | null; aiComment?: boolean; maxReplyPerComment?: number; maxRepliesPerRun?: number }) => {
     if (!requireLogin()) throw new Error(i18nService.t('mvLoginFirst'));
-    const r = await M()?.saveTask({ id: replyEditId || undefined, platform, type: 'reply_fan', maxReplyPerComment: input.maxReplyPerComment, maxRepliesPerRun: input.maxRepliesPerRun, name: input.name, accountIds: input.accountIds, funnel: input.funnel, funnelByAccount: input.funnelByAccount, quota: {}, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
+    const r = await M()?.saveTask({ id: replyEditId || undefined, platform, type: 'reply_fan', maxReplyPerComment: input.maxReplyPerComment, maxRepliesPerRun: input.maxRepliesPerRun, name: input.name, accountIds: input.accountIds, funnel: input.funnel, funnelByAccount: input.funnelByAccount, ai_comment: input.aiComment !== false, quota: {}, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
     if (!r?.ok) throw new Error(({ platform_task_limit: i18nService.t('mvTaskLimit'), duplicate_type: i18nService.t('mvDuplicateReply'), task_not_found: i18nService.t('mvTaskNotFound') } as any)[r?.error] || r?.error || i18nService.t('mvSaveFailed'));
     await reloadTasks(); setNotice(i18nService.t('mvTaskSaved'));
     setShowReplyEditModal(false); setReplyEditId(null);
@@ -1311,7 +1312,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
                       </div>
                       <div className="text-xs text-gray-600 dark:text-gray-300 mb-1">👥 {i18nService.t('mvAccountCountLabel').replace('{n}', String(t.accountIds.length))} · {isReply ? i18nService.t('mvReplyOwnFans') : i18nService.t('mvUseOwnKeywords')}</div>
                       {isReply
-                        ? <div className="text-xs text-gray-500 dark:text-gray-400">⏰ {freqLabel(t.frequency)} · 🎣 {t.funnel?.funnel_phrase ? i18nService.t('mvFunnelTail').replace('{n}', String(t.funnel.funnel_probability || 0)) : i18nService.t('mvPureAiReply')}</div>
+                        ? <div className="text-xs text-gray-500 dark:text-gray-400">⏰ {freqLabel(t.frequency)} · 🎣 {t.funnel?.funnel_phrase ? i18nService.t('mvFunnelTail').replace('{n}', String(t.funnel.funnel_probability || 0)) : i18nService.t('mvPureAiReply')}{t.ai_comment === false ? ` · ${i18nService.t('wzFunnelAiOffTag')}` : ''}</div>
                         : <div className="text-xs text-gray-500 dark:text-gray-400">⏰ {freqLabel(t.frequency)} · {engageQuotaSummary(t.quota, i18nService.currentLanguage === 'zh')}{String(t.quota?.engage_mode || '') === 'precise' ? '' : ` / ${i18nService.t('mvPerRun')}`}</div>}
                       <div className="text-[11px] text-gray-400 mt-1">{t.lastRunAt ? i18nService.t('mvLastRun').replace('{time}', fmtTime(t.lastRunAt)) : i18nService.t('mvNotRunYet')}</div>
                       <div className="mt-2 pt-2 border-t border-gray-100 dark:border-gray-800 flex items-center justify-end">
@@ -1348,7 +1349,7 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
               <div className="flex gap-3 text-xs"><span className="text-gray-500 dark:text-gray-400 w-20 shrink-0">{i18nService.t('mvFrequency')}</span><span className="text-gray-800 dark:text-gray-200">{freqLabel(selectedTask.frequency)}{selectedTask.frequency !== 'once' && selectedTask.enabled ? i18nService.t('mvNextRunSuffix').replace('{time}', fmtTime(selectedTask.nextPlannedRunAt)) : ''}</span></div>
               {selectedIsReply
                 ? <>
-                    <div className="flex gap-3 text-xs"><span className="text-gray-500 dark:text-gray-400 w-20 shrink-0">{i18nService.t('mvFunnelPhrase')}</span><span className="text-gray-800 dark:text-gray-200 break-all">{selectedTask.funnel?.funnel_phrase ? `"${selectedTask.funnel.funnel_phrase.slice(0, 40)}${selectedTask.funnel.funnel_phrase.length > 40 ? '...' : ''}" · ${selectedTask.funnel.funnel_probability || 0}%` : i18nService.t('mvFunnelEmpty')}</span></div>
+                    <div className="flex gap-3 text-xs"><span className="text-gray-500 dark:text-gray-400 w-20 shrink-0">{i18nService.t('mvFunnelPhrase')}</span><span className="text-gray-800 dark:text-gray-200 break-all">{selectedTask.funnel?.funnel_phrase ? `"${selectedTask.funnel.funnel_phrase.slice(0, 40)}${selectedTask.funnel.funnel_phrase.length > 40 ? '...' : ''}" · ${selectedTask.funnel.funnel_probability || 0}%${selectedTask.funnel.funnel_rewrite === false ? ` · ${i18nService.t('wzFunnelRewriteOffTag')}` : ''}` : i18nService.t('mvFunnelEmpty')}{selectedTask.ai_comment === false ? ` · ${i18nService.t('wzFunnelAiOffTag')}` : ''}</span></div>
                     <div className="flex gap-3 text-xs"><span className="text-gray-500 dark:text-gray-400 w-20 shrink-0">{i18nService.t('mvReplyScope')}</span><span className="text-gray-800 dark:text-gray-200">{i18nService.t('mvReplyScopeVal').replace('{n}', String(selectedTask.concurrency || 3))}</span></div>
                   </>
                 : <div className="flex gap-3 text-xs"><span className="text-gray-500 dark:text-gray-400 w-20 shrink-0">{i18nService.t('mvQuotaPerRun')}</span><span className="text-gray-800 dark:text-gray-200">{engageQuotaSummary(selectedTask.quota, i18nService.currentLanguage === 'zh')} · {i18nService.t('mvConcurrencyLabel').replace('{n}', String(selectedTask.concurrency || 3))}</span></div>}

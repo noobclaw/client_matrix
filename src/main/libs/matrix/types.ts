@@ -109,6 +109,7 @@ export interface EngageQuota {
 export interface ReplyFanConfig {
   funnel_phrase?: string;        // 引流文案(选填,空则纯 AI 回复不带尾巴)
   funnel_probability?: number;   // 引流尾巴出现概率 1-100(引流语为空时失效)
+  funnel_rewrite?: boolean;      // AI改写引流语:缺省/true = AI 改写(老行为);false = 原样发布
 }
 
 /**
@@ -387,6 +388,8 @@ export interface MatrixTask {
   // 各账号独立引流语(可选):有值 = 「各账号各自」模式,未配的账号视为不带引流;
   // 为空/undefined = 沿用 funnel(所有账号共用,老行为)。key=accountId。
   funnelByAccount?: Record<string, ReplyFanConfig>;
+  // AI自主评论(engage / reply_fan / lead_engage):缺省 = 开(老行为);false = AI 只发引流语(概率固定 100)。
+  ai_comment?: boolean;
   // 单个用户评论最大回复数(1~5,仅抖音回复粉丝)。没配 = 1 = 老行为「回过就不再回」。
   maxReplyPerComment?: number;
   // 每号本次运行最多回复几条(1~300,仅抖音回复粉丝)。没配 = 剧本按 100 兜底(抖音单账号一天评论条数有限,到数就收工,防风控)。

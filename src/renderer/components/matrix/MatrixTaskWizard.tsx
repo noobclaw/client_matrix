@@ -9,7 +9,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { i18nService } from '../../services/i18n';
 import { platformSupportsFavorite } from '../../services/engageActions';
-import MatrixFunnelConfig, { FunnelUnsetConfirm, countUnconfigured, FUNNEL_PROB_DEFAULT as FPD } from './MatrixFunnelConfig';
+import MatrixFunnelConfig, { FunnelUnsetConfirm, countUnconfigured, funnelAiOffError, effFunnelProb, rewriteField, FUNNEL_PROB_DEFAULT as FPD } from './MatrixFunnelConfig';
 import { NumMinMax, NumRow } from './NumberStepper';
 import { AccountKeywordTabs, effectiveKw } from './MatrixAccountKeywords';
 import { presetAccountIds, usePresetUsed, usePresetPrune } from '../../uiEdition';
@@ -53,7 +53,7 @@ interface Props {
   accountsLoading?: boolean;               // 账号异步加载中(弹窗先开、账号后填);加载中显「加载中」而非「无账号」
   initialTask?: any | null;                // 编辑时传入矩阵任务
   onCancel: () => void;
-  onSave: (input: { name: string; accountIds: string[]; concurrency: number; frequency: string; quota: any; funnel: { funnel_phrase: string; funnel_probability: number }; funnelByAccount: Record<string, { funnel_phrase: string; funnel_probability: number }> | null }) => Promise<void> | void;
+  onSave: (input: { name: string; accountIds: string[]; concurrency: number; frequency: string; quota: any; funnel: { funnel_phrase: string; funnel_probability: number }; funnelByAccount: Record<string, { funnel_phrase: string; funnel_probability: number }> | null; aiComment: boolean }) => Promise<void> | void;
 }
 
 const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, platform, accounts, accountsLoading, initialTask, onCancel, onSave }) => {
@@ -163,14 +163,18 @@ const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, platform, accounts, 
   // 用 length 判会误回共用(用户实测 bug)。兼容 camel(矩阵原始)与 snake(scenario 映射)两种形状。
   const initFba = (initialTask as any)?.funnelByAccount ?? (initialTask as any)?.funnel_by_account;
   const [funnelPerMode, setFunnelPerMode] = useState<boolean>(initFba !== undefined && initFba !== null && typeof initFba === 'object');
-  const [funnelPerMap, setFunnelPerMap] = useState<Record<string, { funnel_phrase: string; funnel_probability: number }>>(() => {
+  const [funnelPerMap, setFunnelPerMap] = useState<Record<string, { funnel_phrase: string; funnel_probability: number; funnel_rewrite?: boolean }>>(() => {
     const src = initFba || {};
-    const out: Record<string, { funnel_phrase: string; funnel_probability: number }> = {};
-    for (const [id, v] of Object.entries(src) as any) out[id] = { funnel_phrase: String(v?.funnel_phrase || ''), funnel_probability: typeof v?.funnel_probability === 'number' && v.funnel_probability >= FUNNEL_PROB_MIN ? Math.min(FUNNEL_PROB_MAX, v.funnel_probability) : FPD };
+    const out: Record<string, { funnel_phrase: string; funnel_probability: number; funnel_rewrite?: boolean }> = {};
+    for (const [id, v] of Object.entries(src) as any) out[id] = { funnel_phrase: String(v?.funnel_phrase || ''), funnel_probability: typeof v?.funnel_probability === 'number' && v.funnel_probability >= FUNNEL_PROB_MIN ? Math.min(FUNNEL_PROB_MAX, v.funnel_probability) : FPD, ...rewriteField(v) };
     return out;
   });
   // 「不管了,下一步」确认弹层(各账号模式下有账号未配引流时,新建/编辑都拦一道)
   const [funnelUnsetConfirm, setFunnelUnsetConfirm] = useState<number | null>(null);
+  // AI改写引流语(共用模式那份;各账号模式存在各自 FunnelValue.funnel_rewrite):缺省 = 开。
+  const [funnelRewrite, setFunnelRewrite] = useState<boolean>(initialTask?.funnel?.funnel_rewrite !== false);
+  // AI自主评论(任务级 ai_comment):老任务没这个字段 = 开(老行为);只有显式存了 false 才是关。
+  const [aiComment, setAiComment] = useState<boolean>((initialTask as any)?.ai_comment !== false);
 
   const [runInterval, setRunInterval] = useState<string>(initialTask?.frequency || 'daily_random');
   // 评论语言:auto(跟帖子语言)+ 9 种 UI 语言;强制模式。默认 auto。
@@ -192,7 +196,7 @@ const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, platform, accounts, 
   const cur = stepNames[Math.min(step, TOTAL_STEPS) - 1];
   // 已选账号(引流步的卡片列表用;标题/赛道与 Step1 行一致)
   const selectedAccounts = accounts.filter((a) => selected.has(a.id)).map((a) => ({ id: a.id, title: a.nickname || a.displayName, group: a.group, platformName: PLATFORM_NAME[a.platform || ''] || a.platform, avatar: a.avatar }));
-  useEffect(() => { if (saveError) setSaveError(null); /* eslint-disable-next-line */ }, [selected, likeMin, likeMax, folMin, folMax, cmtMin, cmtMax, favMin, favMax, maxCmtPerWork, preciseText, pLike, pFav, pFollow, pComment, funnelPhrase, funnelProb, runInterval, kwOverride, kwEditingId]);
+  useEffect(() => { if (saveError) setSaveError(null); /* eslint-disable-next-line */ }, [selected, likeMin, likeMax, folMin, folMax, cmtMin, cmtMax, favMin, favMax, maxCmtPerWork, preciseText, pLike, pFav, pFollow, pComment, funnelPhrase, funnelProb, runInterval, kwOverride, kwEditingId, aiComment, funnelPerMode, funnelPerMap]);
 
   const KL = (zh: string, tw: string, en: string) => (i18nService.currentLanguage === 'zh' ? zh : i18nService.currentLanguage === 'zh-TW' ? tw : en);
   const kwMissingIds = accounts.filter((a) => selected.has(a.id) && effectiveKw(a, kwOverride).length === 0).map((a) => a.id);
@@ -212,17 +216,18 @@ const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, platform, accounts, 
         ? { ok: false, reason: i18nService.currentLanguage === 'zh' ? '点赞 / 收藏 / 关注 / 评论至少要开一项,否则打开链接后什么也不会做' : 'Enable at least one action, otherwise nothing happens after opening the links' }
         : { ok: true },
     comment: totalMaxActions === 0 ? { ok: false, reason: i18nService.t('wzEngageErrConfigAction') } : { ok: true },
-    funnel: { ok: true }, // 未配置账号的拦截走确认弹层(下一步按钮里),不在这硬卡
+    // 未配置账号的拦截走确认弹层(下一步按钮里);但关了 AI自主评论 时引流语必填,这里硬卡(不给「不管了」)。
+    funnel: (() => { const e = funnelAiOffError(aiComment, funnelPerMode, selectedAccounts, { funnel_phrase: funnelPhrase, funnel_probability: funnelProb }, funnelPerMap); return e ? { ok: false, reason: e } : { ok: true }; })(),
     final: { ok: allTermsAccepted, reason: i18nService.t('wzEngageErrAcceptTerms') },
   };
 
   // 各账号模式:保存/透传用的净化 map(只留有引流语的账号,且只留已勾选账号)
   const cleanPerMap = () => {
-    const out: Record<string, { funnel_phrase: string; funnel_probability: number }> = {};
+    const out: Record<string, { funnel_phrase: string; funnel_probability: number; funnel_rewrite?: false }> = {};
     for (const id of selected) {
       const v = funnelPerMap[id];
       const ph = (v?.funnel_phrase || '').trim();
-      if (ph) out[id] = { funnel_phrase: ph, funnel_probability: v.funnel_probability };
+      if (ph) out[id] = { funnel_phrase: ph, funnel_probability: effFunnelProb(aiComment, v.funnel_probability), ...rewriteField(v) };
     }
     return out;
   };
@@ -234,6 +239,7 @@ const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, platform, accounts, 
     //   新建时靠默认值 8/2/3 蒙混过关,一旦编辑已存的精准任务就回填全 0 → 明明配了动作却报「至少配一个」。
     const gate = preciseMode ? canAdvance.precise : canAdvance.comment;
     if (!gate.ok) { setSaveError(gate.reason || ''); return; }
+    if (showFunnel && !canAdvance.funnel.ok) { setSaveError(canAdvance.funnel.reason || ''); return; }
     setSaving(true);
     try {
       await onSave({
@@ -267,8 +273,10 @@ const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, platform, accounts, 
           },
         // 引流:评论时按概率把引流文案融进 AI 评论。留空/平台不支持 → funnel_probability=0 → 视作未配,纯 AI 评论。
         // 各账号模式:任务级 funnel 置空,逐账号配置走 funnelByAccount;共用模式显式传 null 清掉旧的逐账号配置。
-        funnel: (funnelSupported && !funnelPerMode && hasFunnel) ? { funnel_phrase: funnelPhrase.trim(), funnel_probability: funnelProb } : { funnel_phrase: '', funnel_probability: 0 },
+        funnel: (funnelSupported && !funnelPerMode && hasFunnel) ? { funnel_phrase: funnelPhrase.trim(), funnel_probability: effFunnelProb(aiComment, funnelProb), ...rewriteField({ funnel_rewrite: funnelRewrite }) } : { funnel_phrase: '', funnel_probability: 0 },
         funnelByAccount: (funnelSupported && funnelPerMode) ? cleanPerMap() : null,
+        // AI自主评论:只在引流步可见(会评论 + 平台支持)时才可能是关;否则按开存(= 老行为)。
+        aiComment: showFunnel ? aiComment : true,
       });
     } catch (err) {
       setSaveError(String(err instanceof Error ? err.message : err) || i18nService.t('wzEngageErrSaveFailed'));
@@ -575,10 +583,12 @@ const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, platform, accounts, 
             accent="violet"
             perMode={funnelPerMode}
             setPerMode={setFunnelPerMode}
-            shared={{ funnel_phrase: funnelPhrase, funnel_probability: funnelProb }}
-            setShared={(v) => { setFunnelPhrase(v.funnel_phrase.slice(0, FUNNEL_PHRASE_MAX)); setFunnelProb(v.funnel_probability); }}
+            shared={{ funnel_phrase: funnelPhrase, funnel_probability: funnelProb, funnel_rewrite: funnelRewrite }}
+            setShared={(v) => { setFunnelPhrase(v.funnel_phrase.slice(0, FUNNEL_PHRASE_MAX)); setFunnelProb(v.funnel_probability); setFunnelRewrite(v.funnel_rewrite !== false); }}
             perMap={funnelPerMap}
             setPerMap={setFunnelPerMap}
+            aiComment={aiComment}
+            setAiComment={setAiComment}
             disabled={saving}
           />
         )}
@@ -618,9 +628,9 @@ const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, platform, accounts, 
               {!preciseMode && (
                 <SummaryRow label={i18nService.t('wzEngageSummaryComments')} value={i18nService.t('wzEngageSummaryPerRunValue').replace('{min}', String(cmtMin)).replace('{max}', String(cmtMax))} />
               )}
-              {showFunnel && <SummaryRow label={i18nService.t('wzEngageSummaryFunnel')} value={funnelPerMode
+              {showFunnel && <SummaryRow label={i18nService.t('wzEngageSummaryFunnel')} value={(funnelPerMode
                 ? i18nService.t('wzFunnelSummaryPer').replace('{done}', String(selectedAccounts.length - countUnconfigured(selectedAccounts, funnelPerMap))).replace('{total}', String(selectedAccounts.length))
-                : (hasFunnel ? `"${funnelPhrase.trim().slice(0, 40)}${funnelPhrase.trim().length > 40 ? '...' : ''}" · ${funnelProb}%` : i18nService.t('wzEngageSummaryFunnelEmpty'))} />}
+                : (hasFunnel ? `"${funnelPhrase.trim().slice(0, 40)}${funnelPhrase.trim().length > 40 ? '...' : ''}" · ${effFunnelProb(aiComment, funnelProb)}%${funnelRewrite ? '' : ` · ${i18nService.t('wzFunnelRewriteOffTag')}`}` : i18nService.t('wzEngageSummaryFunnelEmpty'))) + (aiComment ? '' : ` · ${i18nService.t('wzFunnelAiOffTag')}`)} />}
               <SummaryRow label={i18nService.t('wzEngageSummaryConcurrency')} value={i18nService.t('wzEngageSummaryConcurrencyValue').replace('{n}', String(selected.size))} />
               <SummaryRow label={i18nService.t('wzEngageSummaryFrequency')} value={intervalLabel} />
             </div>

@@ -80,6 +80,8 @@ export interface SaveTaskInput {
   funnel?: ReplyFanConfig;         // reply_fan 用:引流尾巴配置
   // 各账号独立引流语:对象=各账号模式;null=显式清掉(切回共用);undefined=更新时保留旧值。
   funnelByAccount?: Record<string, ReplyFanConfig> | null;
+  // AI自主评论:false = 关;true = 开(落库时清掉字段,缺省即开);undefined = 更新时保留旧值。
+  ai_comment?: boolean;
   maxReplyPerComment?: number;
   maxRepliesPerRun?: number;          // reply_fan(抖音)用:每号本次运行最多回复几条
   imageText?: ImageTextConfig;     // image_text 用:图文创作配置
@@ -272,6 +274,7 @@ export function saveTask(input: SaveTaskInput): SaveTaskResult {
       funnel: input.funnel ?? tasks[i].funnel,
       // null=显式清掉(向导切回共用模式);undefined=没动这块(如 updateTask 兜底),保留旧值。
       funnelByAccount: input.funnelByAccount === undefined ? tasks[i].funnelByAccount : (input.funnelByAccount || undefined),
+      ai_comment: input.ai_comment === undefined ? tasks[i].ai_comment : (input.ai_comment === false ? false : undefined),
       // undefined = 本次没传(保留原值);传了就覆盖 —— 与 funnelByAccount 同一口径,
       //   否则编辑任务时只改频率也会把它抹掉。
       maxReplyPerComment: input.maxReplyPerComment === undefined ? tasks[i].maxReplyPerComment : input.maxReplyPerComment,
@@ -321,6 +324,7 @@ export function saveTask(input: SaveTaskInput): SaveTaskResult {
     quota: input.quota || {},
     funnel: input.funnel,
     funnelByAccount: input.funnelByAccount || undefined,
+    ai_comment: input.ai_comment === false ? false : undefined,
     maxReplyPerComment: input.maxReplyPerComment,
     maxRepliesPerRun: input.maxRepliesPerRun,
     imageText: input.imageText,

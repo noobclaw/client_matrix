@@ -7,6 +7,11 @@
  *            向导下一步时由 unConfiguredCount 提示确认)。
  *
  * 数据约定:perMap 里 phrase 为空 = 未配置;保存时由向导过滤空项。
+ *
+ * 「AI自主评论」开关(任务级 ai_comment,默认开 = 老行为):关闭后 AI 只发引流语(改写后),
+ *   此时引流语必填(共用=非空;各账号=每个已选账号都要配,不允许「不管了下一步」),概率固定 100%。
+ *   向导用 funnelAiOffError() 卡下一步/保存,用 effFunnelProb() 算保存的概率。
+ * 「AI改写引流语」开关(每份引流语一个 funnel_rewrite,默认开):关闭需确认,关后原样发布。
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { i18nService } from '../../services/i18n';
@@ -18,7 +23,9 @@ export const FUNNEL_PROB_MIN = 1;
 export const FUNNEL_PROB_MAX = 100;
 export const FUNNEL_PROB_DEFAULT = 100;   // 2026-10-28:有引流语时默认 100%(原 50%);没填引流语时概率不生效
 
-export interface FunnelValue { funnel_phrase: string; funnel_probability: number }
+// funnel_rewrite:「AI改写引流语」,缺省/true = AI 改写(老行为);false = 原样发布。跟着这份引流语走
+//   (共用模式 = 任务级 funnel 里;各账号模式 = 该账号那份 FunnelValue 里)。
+export interface FunnelValue { funnel_phrase: string; funnel_probability: number; funnel_rewrite?: boolean }
 export interface FunnelAccount { id: string; title: string; group?: string; platformName?: string; avatar?: string }
 
 interface Props {
@@ -29,6 +36,7 @@ interface Props {
   perMap: Record<string, FunnelValue>;
   setPerMap: (updater: (prev: Record<string, FunnelValue>) => Record<string, FunnelValue>) => void;
   disabled?: boolean;
+  aiComment?: boolean; setAiComment?: (b: boolean) => void;   // 不传 setAiComment = 不显示开关(恒开)
 }
 
 /** 未配置引流语的账号数(仅各账号模式有意义;向导「下一步」用它决定要不要弹确认)。 */
@@ -36,7 +44,59 @@ export function countUnconfigured(accounts: FunnelAccount[], perMap: Record<stri
   return accounts.filter((a) => !(perMap[a.id]?.funnel_phrase || '').trim()).length;
 }
 
-const MatrixFunnelConfig: React.FC<Props> = ({ accounts, accent, perMode, setPerMode, shared, setShared, perMap, setPerMap, disabled }) => {
+/** 关闭「AI自主评论」时保存的概率固定 100;开着则原样。 */
+export function effFunnelProb(aiComment: boolean, prob: number): number {
+  return aiComment ? prob : FUNNEL_PROB_MAX;
+}
+
+/** 关闭「AI自主评论」时引流语必填:返回错误文案(null = 通过)。开着恒 null(老行为)。 */
+export function funnelAiOffError(aiComment: boolean, perMode: boolean, accounts: FunnelAccount[], shared: FunnelValue, perMap: Record<string, FunnelValue>): string | null {
+  if (aiComment) return null;
+  if (!perMode) return (shared.funnel_phrase || '').trim() ? null : i18nService.t('wzFunnelAiOffErrShared');
+  const n = countUnconfigured(accounts, perMap);
+  return n > 0 ? i18nService.t('wzFunnelAiOffErrPer').replace('{n}', String(n)) : null;
+}
+
+/** 落库用:funnel_rewrite 只在关闭时写 false,开着不写(缺省 = 开 = 老行为)。 */
+export function rewriteField(v: { funnel_rewrite?: boolean } | undefined): { funnel_rewrite?: false } {
+  return v?.funnel_rewrite === false ? { funnel_rewrite: false } : {};
+}
+
+/** 向导内嵌确认弹层(不用系统 confirm):标题 + 可选说明 + 返回 / 确认。 */
+export const FunnelConfirmDialog: React.FC<{ accent: 'violet' | 'fuchsia'; title: string; desc?: string; backLabel: string; okLabel: string; onBack: () => void; onOk: () => void }> = ({ accent, title, desc, backLabel, okLabel, onBack, onOk }) => (
+  <div className="fixed inset-0 z-[120] bg-black/50 flex items-center justify-center p-6" role="alertdialog" aria-modal="true">
+    <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-xl p-5 space-y-3">
+      <div className="text-sm font-semibold dark:text-white leading-relaxed">{title}</div>
+      {desc && <div className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">{desc}</div>}
+      <div className="flex justify-end gap-2 pt-1">
+        <button type="button" onClick={onBack} className="px-3.5 py-2 rounded-lg text-xs font-medium border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800">{backLabel}</button>
+        <button type="button" onClick={onOk} className={`px-3.5 py-2 rounded-lg text-xs font-semibold text-white ${accent === 'violet' ? 'bg-violet-500 hover:bg-violet-600' : 'bg-fuchsia-500 hover:bg-fuchsia-600'}`}>{okLabel}</button>
+      </div>
+    </div>
+  </div>
+);
+
+/** 卡片式开关(「共用引流语」「AI自主评论」同款)。 */
+export const SwitchCard: React.FC<{ accent: 'violet' | 'fuchsia'; label: string; desc: string; on: boolean; onToggle: () => void; disabled?: boolean; ring: string }> = ({ accent, label, desc, on, onToggle, disabled, ring }) => (
+  <div className={`rounded-xl border px-4 py-3 space-y-1 ${on ? ring : 'border-gray-200 dark:border-gray-700'}`}>
+    <label className="flex items-center justify-between gap-2 cursor-pointer">
+      <span className="text-sm font-medium dark:text-gray-200">{label}</span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        disabled={disabled}
+        onClick={onToggle}
+        className={`relative w-10 h-[22px] rounded-full transition-colors shrink-0 ${on ? (accent === 'violet' ? 'bg-violet-500' : 'bg-fuchsia-500') : 'bg-gray-300 dark:bg-gray-600'}`}
+      >
+        <span className={`absolute top-[2px] w-[18px] h-[18px] rounded-full bg-white transition-all ${on ? 'left-[20px]' : 'left-[2px]'}`} />
+      </button>
+    </label>
+    <div className="text-[11px] text-gray-400 leading-relaxed">{desc}</div>
+  </div>
+);
+
+const MatrixFunnelConfig: React.FC<Props> = ({ accounts, accent, perMode, setPerMode, shared, setShared, perMap, setPerMap, disabled, aiComment = true, setAiComment }) => {
   const [activeId, setActiveId] = useState<string>(accounts[0]?.id || '');
   const active = accounts.find((a) => a.id === activeId) || accounts[0];
 
@@ -80,35 +140,41 @@ const MatrixFunnelConfig: React.FC<Props> = ({ accounts, accent, perMode, setPer
     else setShared(v);
   };
   const hasPhrase = editorValue.funnel_phrase.trim().length > 0;
+  const rewriteOn = editorValue.funnel_rewrite !== false;
+  const [rewriteConfirm, setRewriteConfirm] = useState(false);
+  const aiOffErr = funnelAiOffError(aiComment, perMode, accounts, shared, perMap);
+  const cardRing = `${ac.border} ${ac.bg} ring-1 ${ac.ring}`;
 
   return (
     <div className="space-y-4">
-      {/* 模式开关:默认共用 */}
-      <div className={`rounded-xl border px-4 py-3 space-y-1 ${perMode ? 'border-gray-200 dark:border-gray-700' : `${ac.border} ${ac.bg} ring-1 ${ac.ring}`}`}>
-        <label className="flex items-center justify-between cursor-pointer">
-          <span className="text-sm font-medium dark:text-gray-200">{i18nService.t('wzFunnelModeShared')}</span>
-          {/* 简易 switch */}
-          <button
-            type="button"
-            role="switch"
-            aria-checked={!perMode}
+      {/* 模式开关(默认共用) + AI自主评论开关(默认开):左右两列,窄屏堆叠 */}
+      <div className={`grid gap-3 ${setAiComment ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
+        <SwitchCard
+          accent={accent}
+          ring={cardRing}
+          label={i18nService.t('wzFunnelModeShared')}
+          desc={perMode ? i18nService.t('wzFunnelModePerDesc') : i18nService.t('wzFunnelModeSharedDesc')}
+          on={!perMode}
+          onToggle={() => setPerMode(!perMode)}
+          disabled={disabled}
+        />
+        {setAiComment && (
+          <SwitchCard
+            accent={accent}
+            ring={cardRing}
+            label={i18nService.t('wzFunnelAiComment')}
+            desc={i18nService.t('wzFunnelAiCommentDesc')}
+            on={aiComment}
+            onToggle={() => setAiComment(!aiComment)}
             disabled={disabled}
-            onClick={() => setPerMode(!perMode)}
-            className={`relative w-10 h-[22px] rounded-full transition-colors shrink-0 ${!perMode ? (accent === 'violet' ? 'bg-violet-500' : 'bg-fuchsia-500') : 'bg-gray-300 dark:bg-gray-600'}`}
-          >
-            <span className={`absolute top-[2px] w-[18px] h-[18px] rounded-full bg-white transition-all ${!perMode ? 'left-[20px]' : 'left-[2px]'}`} />
-          </button>
-        </label>
-        <div className="text-[11px] text-gray-400 leading-relaxed">
-          {perMode ? i18nService.t('wzFunnelModePerDesc') : i18nService.t('wzFunnelModeSharedDesc')}
-        </div>
+          />
+        )}
       </div>
 
       {/* 账号 + 赛道列表:共用模式只展示;各账号模式可点选逐号配置 */}
       <div>
         <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
           {i18nService.t('wzFunnelAccountsLabel').replace('{n}', String(accounts.length))}
-          {perMode && <span className="ml-1 font-normal">{i18nService.t('wzFunnelPerHint')}</span>}
         </div>
         <div className="relative">
           <div
@@ -162,15 +228,28 @@ const MatrixFunnelConfig: React.FC<Props> = ({ accounts, accent, perMode, setPer
 
       {/* 编辑区:共用=一份;各账号=当前选中账号那份 */}
       <div className={`rounded-xl border px-4 py-3 space-y-3 ${accent === 'violet' ? 'border-fuchsia-500/25 bg-fuchsia-500/5' : 'border-fuchsia-500/25 bg-fuchsia-500/5'}`}>
-        {perMode && active && (
-          <div className="text-xs dark:text-gray-300 text-gray-600">
-            {i18nService.t('wzFunnelEditingFor').replace('{name}', active.title)}{active.group ? ` · ${active.group}` : ''}
-          </div>
-        )}
         <div>
-          <label className="text-sm font-medium dark:text-gray-200 mb-1.5 block">
-            🎣 {i18nService.t('wzEngageFunnelPhraseLabel')}<span className="text-xs text-gray-400 font-normal ml-1">{i18nService.t('wzEngageFunnelPhraseHint')}</span>
-          </label>
+          <div className="flex items-start justify-between gap-3 mb-1.5">
+            <label className="text-sm font-medium dark:text-gray-200 block">
+              {/* i18n 文案自带 🎣,JSX 不再前置(原来显示成「🎣 🎣」) */}
+              {i18nService.t(aiComment ? 'wzEngageFunnelPhraseLabel' : 'wzEngageFunnelPhraseLabelReq')}<span className="text-xs text-gray-400 font-normal ml-1">{i18nService.t(rewriteOn ? 'wzEngageFunnelPhraseHintRewrite' : 'wzEngageFunnelPhraseHintRaw')}</span>
+            </label>
+            {/* AI改写引流语:跟着当前编辑的这份引流语(共用 = 全部账号;各账号 = 当前账号)。关闭要确认,打开不用。 */}
+            <span className="inline-flex items-center gap-1.5 shrink-0 text-xs text-gray-500 dark:text-gray-400">
+              {i18nService.t('wzFunnelRewrite')}
+              <button
+                type="button"
+                role="switch"
+                aria-checked={rewriteOn}
+                aria-label={i18nService.t('wzFunnelRewrite')}
+                disabled={disabled}
+                onClick={() => { if (rewriteOn) setRewriteConfirm(true); else setEditorValue({ ...editorValue, funnel_rewrite: true }); }}
+                className={`relative w-8 h-[18px] rounded-full transition-colors shrink-0 ${rewriteOn ? (accent === 'violet' ? 'bg-violet-500' : 'bg-fuchsia-500') : 'bg-gray-300 dark:bg-gray-600'}`}
+              >
+                <span className={`absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white transition-all ${rewriteOn ? 'left-[16px]' : 'left-[2px]'}`} />
+              </button>
+            </span>
+          </div>
           <textarea
             value={editorValue.funnel_phrase}
             onChange={(e) => {
@@ -188,39 +267,53 @@ const MatrixFunnelConfig: React.FC<Props> = ({ accounts, accent, perMode, setPer
         </div>
         <div>
           <label className="text-sm font-medium dark:text-gray-200 mb-1.5 block">
-            🎲 {i18nService.t('wzEngageFunnelProbLabel').replace('{n}', String(hasPhrase ? editorValue.funnel_probability : 0))}
+            {i18nService.t('wzEngageFunnelProbLabel').replace('{n}', String(!aiComment ? FUNNEL_PROB_MAX : hasPhrase ? editorValue.funnel_probability : 0))}
             <span className="text-xs text-gray-400 font-normal ml-1">
-              {hasPhrase ? i18nService.t('wzEngageFunnelProbHintOn') : i18nService.t('wzEngageFunnelProbHintOff')}
+              {!aiComment ? i18nService.t('wzEngageFunnelProbHintFixed') : hasPhrase ? '' : i18nService.t('wzEngageFunnelProbHintOff')}
             </span>
           </label>
           <NumBox
-            value={editorValue.funnel_probability}
+            value={aiComment ? editorValue.funnel_probability : FUNNEL_PROB_MAX}
             onChange={(n) => setEditorValue({ ...editorValue, funnel_probability: n })}
             min={FUNNEL_PROB_MIN}
             max={FUNNEL_PROB_MAX}
             step={5}
-            disabled={disabled || !hasPhrase}
+            disabled={disabled || !hasPhrase || !aiComment}
             accent="fuchsia"
             suffix="%"
           />
         </div>
+        {aiOffErr && (
+          <div className="rounded-lg border px-3 py-2 text-xs leading-relaxed border-red-500/30 bg-red-500/5 text-red-600 dark:text-red-400">
+            ❌ {aiOffErr}
+          </div>
+        )}
       </div>
+      {rewriteConfirm && (
+        <FunnelConfirmDialog
+          accent={accent}
+          title={`⚠️ ${i18nService.t('wzFunnelRewriteOffConfirm')}`}
+          backLabel={i18nService.t('wzFunnelRewriteOffCancel')}
+          okLabel={i18nService.t('wzFunnelRewriteOffOk')}
+          onBack={() => setRewriteConfirm(false)}
+          onOk={() => { setRewriteConfirm(false); setEditorValue({ ...editorValue, funnel_rewrite: false }); }}
+        />
+      )}
     </div>
   );
 };
 
 /** 未配置确认弹层(向导内嵌,不用系统 confirm):还有 n 个账号没配 → 返回配置 / 不管了下一步。 */
 export const FunnelUnsetConfirm: React.FC<{ count: number; accent: 'violet' | 'fuchsia'; onBack: () => void; onContinue: () => void }> = ({ count, accent, onBack, onContinue }) => (
-  <div className="fixed inset-0 z-[120] bg-black/50 flex items-center justify-center p-6" role="alertdialog" aria-modal="true">
-    <div className="w-full max-w-sm rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-xl p-5 space-y-3">
-      <div className="text-sm font-semibold dark:text-white">⚠️ {i18nService.t('wzFunnelUnsetWarnTitle').replace('{n}', String(count))}</div>
-      <div className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">{i18nService.t('wzFunnelUnsetWarnDesc')}</div>
-      <div className="flex justify-end gap-2 pt-1">
-        <button type="button" onClick={onBack} className="px-3.5 py-2 rounded-lg text-xs font-medium border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800">{i18nService.t('wzFunnelWarnBack')}</button>
-        <button type="button" onClick={onContinue} className={`px-3.5 py-2 rounded-lg text-xs font-semibold text-white ${accent === 'violet' ? 'bg-violet-500 hover:bg-violet-600' : 'bg-fuchsia-500 hover:bg-fuchsia-600'}`}>{i18nService.t('wzFunnelWarnContinue')}</button>
-      </div>
-    </div>
-  </div>
+  <FunnelConfirmDialog
+    accent={accent}
+    title={`⚠️ ${i18nService.t('wzFunnelUnsetWarnTitle').replace('{n}', String(count))}`}
+    desc={i18nService.t('wzFunnelUnsetWarnDesc')}
+    backLabel={i18nService.t('wzFunnelWarnBack')}
+    okLabel={i18nService.t('wzFunnelWarnContinue')}
+    onBack={onBack}
+    onOk={onContinue}
+  />
 );
 
 export default MatrixFunnelConfig;

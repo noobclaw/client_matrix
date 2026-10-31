@@ -13,7 +13,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { i18nService } from '../../services/i18n';
-import MatrixFunnelConfig, { FunnelUnsetConfirm, countUnconfigured, FUNNEL_PROB_DEFAULT as FPD } from './MatrixFunnelConfig';
+import MatrixFunnelConfig, { FunnelUnsetConfirm, countUnconfigured, funnelAiOffError, effFunnelProb, rewriteField, FUNNEL_PROB_DEFAULT as FPD } from './MatrixFunnelConfig';
 import { presetAccountIds, usePresetUsed, usePresetPrune } from '../../uiEdition';
 
 type WizardStep = number;   // 1..totalSteps(抖音 4 步:账号 / 数量 / 引流语 / 频率;其它平台 3 步,无「数量」)
@@ -35,7 +35,7 @@ interface Props {
   accountsLoading?: boolean;
   initialTask?: any | null;                // 编辑时传入矩阵任务
   onCancel: () => void;
-  onSave: (input: { name: string; accountIds: string[]; concurrency: number; frequency: string; funnel: { funnel_phrase: string; funnel_probability: number }; funnelByAccount: Record<string, { funnel_phrase: string; funnel_probability: number }> | null; maxReplyPerComment?: number; maxRepliesPerRun?: number }) => Promise<void> | void;
+  onSave: (input: { name: string; accountIds: string[]; concurrency: number; frequency: string; funnel: { funnel_phrase: string; funnel_probability: number }; funnelByAccount: Record<string, { funnel_phrase: string; funnel_probability: number }> | null; aiComment: boolean; maxReplyPerComment?: number; maxRepliesPerRun?: number }) => Promise<void> | void;
 }
 
 const MatrixReplyFansWizard: React.FC<Props> = ({ platformLabel, platform, accounts, accountsLoading, initialTask, onCancel, onSave }) => {
@@ -93,13 +93,17 @@ const MatrixReplyFansWizard: React.FC<Props> = ({ platformLabel, platform, accou
   // 用 length 判会误回共用(用户实测 bug)。兼容 camel(矩阵原始)与 snake(scenario 映射)两种形状。
   const initFba = (initialTask as any)?.funnelByAccount ?? (initialTask as any)?.funnel_by_account;
   const [funnelPerMode, setFunnelPerMode] = useState<boolean>(initFba !== undefined && initFba !== null && typeof initFba === 'object');
-  const [funnelPerMap, setFunnelPerMap] = useState<Record<string, { funnel_phrase: string; funnel_probability: number }>>(() => {
+  const [funnelPerMap, setFunnelPerMap] = useState<Record<string, { funnel_phrase: string; funnel_probability: number; funnel_rewrite?: boolean }>>(() => {
     const src = initFba || {};
-    const out: Record<string, { funnel_phrase: string; funnel_probability: number }> = {};
-    for (const [id, v] of Object.entries(src) as any) out[id] = { funnel_phrase: String(v?.funnel_phrase || ''), funnel_probability: typeof v?.funnel_probability === 'number' && v.funnel_probability >= FUNNEL_PROB_MIN ? Math.min(FUNNEL_PROB_MAX, v.funnel_probability) : FPD };
+    const out: Record<string, { funnel_phrase: string; funnel_probability: number; funnel_rewrite?: boolean }> = {};
+    for (const [id, v] of Object.entries(src) as any) out[id] = { funnel_phrase: String(v?.funnel_phrase || ''), funnel_probability: typeof v?.funnel_probability === 'number' && v.funnel_probability >= FUNNEL_PROB_MIN ? Math.min(FUNNEL_PROB_MAX, v.funnel_probability) : FPD, ...rewriteField(v) };
     return out;
   });
   const [funnelUnsetConfirm, setFunnelUnsetConfirm] = useState<number | null>(null);
+  // AI改写引流语(共用模式那份;各账号模式存在各自 FunnelValue.funnel_rewrite):缺省 = 开。
+  const [funnelRewrite, setFunnelRewrite] = useState<boolean>(initialTask?.funnel?.funnel_rewrite !== false);
+  // AI自主评论(任务级 ai_comment):老任务没这个字段 = 开(老行为);只有显式存了 false 才是关。
+  const [aiComment, setAiComment] = useState<boolean>((initialTask as any)?.ai_comment !== false);
   const selectedAccounts = accounts.filter((a) => selected.has(a.id)).map((a) => ({ id: a.id, title: a.nickname || a.displayName, group: a.group, platformName: PLATFORM_NAME[a.platform || ''] || a.platform, avatar: a.avatar }));
 
   // ── 调度(对齐矩阵 MatrixTaskFrequency:回复评论用 once/3h/6h/每日随机) ──
@@ -111,19 +115,21 @@ const MatrixReplyFansWizard: React.FC<Props> = ({ platformLabel, platform, accou
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  useEffect(() => { if (saveError) setSaveError(null); /* eslint-disable-next-line */ }, [selected, funnelPhrase, funnelProb, runInterval]);
+  useEffect(() => { if (saveError) setSaveError(null); /* eslint-disable-next-line */ }, [selected, funnelPhrase, funnelProb, runInterval, aiComment, funnelPerMode, funnelPerMap]);
 
   const stepKey = stepKeys[Math.min(Math.max(step, 1), totalSteps) - 1];
   const canAdvance: Record<'accounts' | 'counts' | 'funnel' | 'terms', { ok: boolean; reason?: string }> = {
     accounts: { ok: selected.size >= 1, reason: i18nService.t('wzReplyErrSelectAccount') },
     counts: { ok: true },
-    funnel: { ok: true },
+    // 关了 AI自主评论 → 引流语必填,硬卡(不走「不管了,下一步」确认)。
+    funnel: (() => { const e = funnelAiOffError(aiComment, funnelPerMode, selectedAccounts, { funnel_phrase: funnelPhrase, funnel_probability: funnelProb }, funnelPerMap); return e ? { ok: false, reason: e } : { ok: true }; })(),
     terms: { ok: allTermsAccepted, reason: i18nService.t('wzReplyErrAcceptTerms') },
   };
 
   const handleSave = async () => {
     if (saving) return;
     if (!canAdvance.terms.ok) { setSaveError(canAdvance.terms.reason || ''); return; }
+    if (!canAdvance.funnel.ok) { setSaveError(canAdvance.funnel.reason || ''); return; }
     setSaving(true);
     try {
       await onSave({
@@ -132,12 +138,13 @@ const MatrixReplyFansWizard: React.FC<Props> = ({ platformLabel, platform, accou
         concurrency: selected.size,
         frequency: runInterval,
         // 各账号模式:任务级 funnel 置空、逐账号走 funnelByAccount;共用模式显式传 null 清掉旧的逐账号配置。
-        funnel: !funnelPerMode ? { funnel_phrase: funnelPhrase.trim(), funnel_probability: hasFunnel ? funnelProb : 0 } : { funnel_phrase: '', funnel_probability: 0 },
+        funnel: !funnelPerMode ? { funnel_phrase: funnelPhrase.trim(), funnel_probability: hasFunnel ? effFunnelProb(aiComment, funnelProb) : 0, ...(hasFunnel ? rewriteField({ funnel_rewrite: funnelRewrite }) : {}) } : { funnel_phrase: '', funnel_probability: 0 },
         funnelByAccount: funnelPerMode ? (() => {
-          const out: Record<string, { funnel_phrase: string; funnel_probability: number }> = {};
-          for (const id of selected) { const v = funnelPerMap[id]; const ph = (v?.funnel_phrase || '').trim(); if (ph) out[id] = { funnel_phrase: ph, funnel_probability: v.funnel_probability }; }
+          const out: Record<string, { funnel_phrase: string; funnel_probability: number; funnel_rewrite?: false }> = {};
+          for (const id of selected) { const v = funnelPerMap[id]; const ph = (v?.funnel_phrase || '').trim(); if (ph) out[id] = { funnel_phrase: ph, funnel_probability: effFunnelProb(aiComment, v.funnel_probability), ...rewriteField(v) }; }
           return out;
         })() : null,
+        aiComment,
         // 只有抖音会用到;其余平台不传 → 剧本回落 1 = 老行为。
         maxReplyPerComment: showMaxReply ? maxReplyPerComment : undefined,
         maxRepliesPerRun: showMaxReply ? maxRepliesPerRun : undefined,
@@ -274,10 +281,12 @@ const MatrixReplyFansWizard: React.FC<Props> = ({ platformLabel, platform, accou
               accent="fuchsia"
               perMode={funnelPerMode}
               setPerMode={setFunnelPerMode}
-              shared={{ funnel_phrase: funnelPhrase, funnel_probability: funnelProb }}
-              setShared={(v) => { setFunnelPhrase(v.funnel_phrase.slice(0, FUNNEL_PHRASE_MAX)); setFunnelProb(v.funnel_probability); }}
+              shared={{ funnel_phrase: funnelPhrase, funnel_probability: funnelProb, funnel_rewrite: funnelRewrite }}
+              setShared={(v) => { setFunnelPhrase(v.funnel_phrase.slice(0, FUNNEL_PHRASE_MAX)); setFunnelProb(v.funnel_probability); setFunnelRewrite(v.funnel_rewrite !== false); }}
               perMap={funnelPerMap}
               setPerMap={setFunnelPerMap}
+              aiComment={aiComment}
+              setAiComment={setAiComment}
               disabled={saving}
             />
             <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs text-amber-700 dark:text-amber-300 leading-relaxed space-y-1">
@@ -304,9 +313,9 @@ const MatrixReplyFansWizard: React.FC<Props> = ({ platformLabel, platform, accou
             <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 px-4 py-3 text-sm space-y-1.5">
               <div className="font-semibold dark:text-gray-200 mb-1">📋 {i18nService.t('wzReplySummaryTitle')}</div>
               <SummaryRow label={i18nService.t('wzReplySumAccountsLabel')} value={i18nService.t('wzReplySumAccountsValue').replace('{n}', String(selected.size)).replace('{item}', itemZh)} />
-              <SummaryRow label={i18nService.t('wzReplySumFunnelLabel')} value={funnelPerMode
+              <SummaryRow label={i18nService.t('wzReplySumFunnelLabel')} value={(funnelPerMode
                 ? i18nService.t('wzFunnelSummaryPer').replace('{done}', String(selectedAccounts.length - countUnconfigured(selectedAccounts, funnelPerMap))).replace('{total}', String(selectedAccounts.length))
-                : (hasFunnel ? `"${funnelPhrase.trim().slice(0, 40)}${funnelPhrase.trim().length > 40 ? '...' : ''}" · ${funnelProb}%` : i18nService.t('wzReplySumFunnelEmpty'))} />
+                : (hasFunnel ? `"${funnelPhrase.trim().slice(0, 40)}${funnelPhrase.trim().length > 40 ? '...' : ''}" · ${effFunnelProb(aiComment, funnelProb)}%${funnelRewrite ? '' : ` · ${i18nService.t('wzFunnelRewriteOffTag')}`}` : i18nService.t('wzReplySumFunnelEmpty'))) + (aiComment ? '' : ` · ${i18nService.t('wzFunnelAiOffTag')}`)} />
               <SummaryRow label={i18nService.t('wzReplySumScopeLabel')} value={i18nService.t('wzReplySumScopeValue').replace('{item}', isXhs ? i18nService.t('wzReplyScopeUnitXhs') : i18nService.t('wzReplyScopeUnitOther'))} />
               <SummaryRow label={i18nService.t('wzReplySumConcurrencyLabel')} value={i18nService.t('wzReplySumConcurrencyValue').replace('{n}', String(selected.size))} />
               <SummaryRow label={i18nService.t('wzReplySumFrequencyLabel')} value={intervalLabel} />

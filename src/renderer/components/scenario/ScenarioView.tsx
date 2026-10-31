@@ -529,7 +529,9 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
         precise_comment: (task as any).precise_comment,
       },
       // 评论引流回填(老任务无此字段 → 空 → 向导显示未填)。
-      funnel: { funnel_phrase: (task as any).funnel_phrase || '', funnel_probability: (task as any).funnel_probability ?? 0 },
+      funnel: { funnel_phrase: (task as any).funnel_phrase || '', funnel_probability: (task as any).funnel_probability ?? 0, ...((task as any).funnel_rewrite === false ? { funnel_rewrite: false } : {}) },
+      // AI自主评论回填(缺省 = 开;mxTaskToScenario 只在关时带 false)。
+      ai_comment: (task as any).ai_comment === false ? false : undefined,
       // 各账号独立引流语回填(mxTaskToScenario 拍平为 funnel_by_account;漏带会让编辑永远显示共用模式 —— 用户实测 bug)。
       funnelByAccount: (task as any).funnel_by_account || undefined,
       frequency: task.run_interval,
@@ -548,7 +550,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     const m = (window as any).electron?.matrix;
     // 带 id = 更新现有任务(saveTask 是整体 upsert);无 id = 新建。
     // funnel:互动评论引流(选填),留空 → funnel_probability=0 → 评论纯 AI(向后兼容)。
-    const r = await m?.saveTask?.({ id: matrixWizardTask?.id, platform: matrixWizardPlatform, type: 'engage', name: input.name, accountIds: input.accountIds, quota: input.quota, funnel: input.funnel, funnelByAccount: (input as any).funnelByAccount, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
+    const r = await m?.saveTask?.({ id: matrixWizardTask?.id, platform: matrixWizardPlatform, type: 'engage', name: input.name, accountIds: input.accountIds, quota: input.quota, funnel: input.funnel, funnelByAccount: (input as any).funnelByAccount, ai_comment: (input as any).aiComment !== false, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
     if (!r?.ok) {
       if (r?.error === 'duplicate_type') { const dp = matrixWizardPlatform; setMatrixWizardPlatform(null); setMatrixWizardTask(null); setDupNotice({ platform: dp as string, label: '互动' }); return; }
       throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限' } as any)[r?.error] || r?.error || '保存失败');
@@ -600,7 +602,9 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       id: task.id,
       name: task.name,
       accountIds: task.account_ids || [],
-      funnel: { funnel_phrase: (task as any).funnel_phrase || '', funnel_probability: (task as any).funnel_probability ?? 0 },
+      funnel: { funnel_phrase: (task as any).funnel_phrase || '', funnel_probability: (task as any).funnel_probability ?? 0, ...((task as any).funnel_rewrite === false ? { funnel_rewrite: false } : {}) },
+      // AI自主评论回填(缺省 = 开;mxTaskToScenario 只在关时带 false)。
+      ai_comment: (task as any).ai_comment === false ? false : undefined,
       funnelByAccount: (task as any).funnel_by_account || undefined,
       // 回填：漏了编辑时永远显示默认 1，保存回去就把用户设的值洗掉了。
       maxReplyPerComment: (task as any).max_reply_per_comment,
@@ -619,7 +623,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     if (!noobClawAuth.getState().isAuthenticated) { noobClawAuth.requireLoginUI(); throw new Error('请先登录 NoobClaw 账号'); }
     const m = (window as any).electron?.matrix;
     // type='reply_fan' + funnel(无配额)。与同平台互动任务是不同 type,可并存。
-    const r = await m?.saveTask?.({ id: matrixReplyTask?.id, platform: matrixReplyPlatform, type: 'reply_fan', name: input.name, accountIds: input.accountIds, funnel: input.funnel, funnelByAccount: (input as any).funnelByAccount,
+    const r = await m?.saveTask?.({ id: matrixReplyTask?.id, platform: matrixReplyPlatform, type: 'reply_fan', name: input.name, accountIds: input.accountIds, funnel: input.funnel, funnelByAccount: (input as any).funnelByAccount, ai_comment: (input as any).aiComment !== false,
       // 单个用户评论最大回复数（仅抖音）。❗ 本向导有三个挂载点，MatrixView 两个、这里一个；
       //   漏了这一处的话，从场景页进去的编辑弹窗选什么都存不下（用户 2026-08-26 实测）。
       maxReplyPerComment: input.maxReplyPerComment, maxRepliesPerRun: input.maxRepliesPerRun, quota: {}, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
@@ -664,7 +668,9 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
       accountIds: task.account_ids || [],
       leadEngage: (task as any).lead_engage || undefined,
       // 引流语回填(共用 + 各账号);漏带会让编辑时显示成未配置,保存后把已配的洗掉。
-      funnel: { funnel_phrase: (task as any).funnel_phrase || '', funnel_probability: (task as any).funnel_probability ?? 0 },
+      funnel: { funnel_phrase: (task as any).funnel_phrase || '', funnel_probability: (task as any).funnel_probability ?? 0, ...((task as any).funnel_rewrite === false ? { funnel_rewrite: false } : {}) },
+      // AI自主评论回填(缺省 = 开;mxTaskToScenario 只在关时带 false)。
+      ai_comment: (task as any).ai_comment === false ? false : undefined,
       funnelByAccount: (task as any).funnel_by_account || undefined,
       frequency: task.run_interval,
     });
@@ -681,7 +687,7 @@ export const ScenarioView: React.FC<ScenarioViewProps> = ({
     const m = (window as any).electron?.matrix;
     // 引流语走既有的 funnel / funnelByAccount 通道 —— engageRunner 的 makeAiCall 会按概率
     //   把它融进 comment_composer 出来的评论,与互动涨粉同一条链路,无需后端改动。
-    const r = await m?.saveTask?.({ id: matrixLeadTask?.id, platform: matrixLeadPlatform, type: 'lead_engage', name: input.name, accountIds: input.accountIds, leadEngage: input.leadEngage, funnel: input.funnel, funnelByAccount: input.funnelByAccount, quota: {}, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
+    const r = await m?.saveTask?.({ id: matrixLeadTask?.id, platform: matrixLeadPlatform, type: 'lead_engage', name: input.name, accountIds: input.accountIds, leadEngage: input.leadEngage, funnel: input.funnel, funnelByAccount: input.funnelByAccount, ai_comment: (input as any).aiComment !== false, quota: {}, concurrency: input.concurrency, frequency: input.frequency, enabled: true });
     if (!r?.ok) {
       if (r?.error === 'duplicate_type') { const dp = matrixLeadPlatform; setMatrixLeadPlatform(null); setMatrixLeadTask(null); setDupNotice({ platform: dp as string, label: '定向获客' }); return; }
       throw new Error(({ platform_task_limit: '该平台任务已达 5 个上限' } as any)[r?.error] || r?.error || '保存失败');
