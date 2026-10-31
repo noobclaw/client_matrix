@@ -15,7 +15,6 @@ import * as riskGuard from './riskGuard';
 import * as taskStore from './taskStore';
 import * as viralPoolClient from './viralPoolClient';
 import { runOrchestrator } from './phaseRunner';
-import { sendBrowserCommand } from '../browserBridge';
 import {
   isKnownSubPlatform,
   subPlatformLabel,
@@ -65,21 +64,6 @@ function releaseKeepAwake(): void {
     }
     _powerBlockerId = null;
   }
-}
-
-// DOM-failure incident report (v6.x+): only fire for failures that smell
-// like a DOM/selector breakage so engineers see actionable signal in
-// Lark. Network, abort, balance, AI-quota, and browser-disconnect
-// failures are exempt — they have nothing to do with website DOM
-// changes. v5.x used the same gate to decide whether to burn LLM tokens
-// auto-fixing the orchestrator; v6.x uses it to decide whether to send
-// an incident report (cheap, but still avoid noise).
-function shouldReportIncident(reason?: string): boolean {
-  if (!reason) return false;
-  if (/user_stopped|aborted|scenario_pack_not_found|no_local_images|insufficient_balance|quota|rate_limit|ECONN|fetch_failed|AI_PARSE_FAIL|AI_EMPTY|BROWSER_NOT_CONNECTED/i.test(reason)) {
-    return false;
-  }
-  return /selector|element|not[\s_-]?found|not[\s_-]?visible|TIMEOUT|missing|click.*fail|type.*fail|fill.*fail/i.test(reason);
 }
 
 const packCache = new Map<string, ScenarioPack>();
@@ -1198,8 +1182,7 @@ async function _runTaskInner(task: ScenarioTask, manual?: boolean, prefetchedPac
     // runs don't bleed into each other's progress map.
     const tid = task.id;
 
-    // Hoist callbacks so the rescue retry can reuse the SAME closures
-    // (single tid, single tokens accumulator, no double-counting).
+    // Callbacks share a single tid + tokens accumulator (no double-counting).
     const callbacks = {
       stepStart: (step: number) => stepStart(tid, step),
       stepLog: (step: number, status: 'done' | 'running' | 'error', message: string) =>
@@ -1229,74 +1212,9 @@ async function _runTaskInner(task: ScenarioTask, manual?: boolean, prefetchedPac
       bumpActionProgress: (type: string, n: number) => bumpActionProgress(tid, type, n),
     };
 
-    let result = await runOrchestrator(pack, task, seen, callbacks, {
+    const result = await runOrchestrator(pack, task, seen, callbacks, {
       appLocale: readAppLocale(),
     });
-
-    // ── DOM-failure incident report (v6.x+) ────────────────────────────
-    // If the failure looks like a DOM/selector breakage, fire off a
-    // single fire-and-forget POST to /rescue/report with the current DOM
-    // snapshot. NO retry, NO script override, NO token charge — the
-    // engineer fixes selectors manually after a Lark threshold alert
-    // (3 events / 3 days for same scenario + selector).
-    //
-    // v5.x used to ship a LLM-generated candidate orchestrator and
-    // retry once. That was removed because:
-    //   (a) it burned user tokens on fixes that often didn't work,
-    //   (b) auto-retrying with a bad candidate masked the original
-    //       error and confused users.
-    if (result.status === 'failed' && shouldReportIncident(result.reason)) {
-      try {
-        const tabPattern = pack.manifest?.tab_url_pattern;
-        const dom = await sendBrowserCommand(
-          'read_page',
-          { filter: 'interactive' },
-          15_000,
-          tabPattern ? { tabPattern } : {},
-        ).catch(() => null);
-        const urlInfo = await sendBrowserCommand(
-          'get_url',
-          {},
-          5_000,
-          tabPattern ? { tabPattern } : {},
-        ).catch(() => null);
-
-        // Serialize DOM elements to a single JSON string for the
-        // dom_snapshot TEXT column. Backend caps at 100 KB anyway, but
-        // pre-truncate so we don't waste bandwidth.
-        let domSnapshot: string | undefined;
-        if (dom && Array.isArray((dom as any).elements)) {
-          try {
-            domSnapshot = JSON.stringify((dom as any).elements).slice(0, 100 * 1024);
-          } catch {
-            // pathological circular structure — skip snapshot, still
-            // log the incident
-          }
-        }
-
-        coworkLog('INFO', 'scenarioManager',
-          `[rescue] reporting DOM incident for ${task.scenario_id} (reason: ${result.reason})`);
-        // Fire-and-forget — don't await, don't retry, never let failure
-        // bubble up. console.warn on failure already happens inside
-        // reportIncident().
-        void viralPoolClient.reportIncident({
-          scenarioId: task.scenario_id,
-          taskId: task.id,
-          failedStep: result.reason,
-          // Same value as failedStep until orchestrators learn to surface
-          // a separate concrete selector. Server uses normalizeSelector()
-          // to strip dynamic substrings before bucketing for thresholds.
-          failedSelector: result.reason,
-          domSnapshot,
-          url: urlInfo ? (urlInfo as any).url : undefined,
-          errorMsg: result.reason,
-        });
-      } catch (err) {
-        // Incident report is best-effort telemetry; never let it
-        // escalate. Original result stands as final outcome.
-        coworkLog('WARN', 'scenarioManager', '[rescue] report threw, ignoring', { err: String(err) });
-      }
-    }
 
     const cur = progressByTaskId.get(tid);
     if (result.status === 'ok') {
