@@ -273,7 +273,6 @@ const Sidebar: React.FC<SidebarProps> = ({
               ['matrixTasks', (simple ? '📋 ' : '') + (simple ? (zh ? '我的任务' : tw ? '我的任務' : 'My Tasks') : i18nService.t('matrixMyFanTasks')), onShowMatrixTasks],
               ['matrixRuns', (simple ? '📊 ' : '') + i18nService.t('matrixRunHistory'), onShowMatrixRuns],
             ] as const).filter(([key]) => !simple || key === 'matrix' || key === 'matrixTasks');
-            const browserKeys = browserItems.map(([key]) => key as string);
             const navBtn = (key: string, label: string, handler: (() => void) | undefined) => (
               <button
                 key={key}
@@ -293,17 +292,12 @@ const Sidebar: React.FC<SidebarProps> = ({
               </button>
             );
             if (simple) return <div className="space-y-1">{browserItems.map(([k, l, h]) => navBtn(k, l, h))}</div>;
-            const childActive = browserKeys.includes(activeView);
             return (
               <div className="space-y-1">
                 <button
                   type="button"
                   onClick={() => setBrowserOpen(o => !o)}
-                  className={`relative w-full inline-flex items-center justify-between rounded-lg px-2.5 py-2 text-sm font-medium transition-colors ${
-                    childActive && !browserOpen
-                      ? 'bg-claude-accent/10 text-claude-accent hover:bg-claude-accent/20'
-                      : 'dark:text-claude-darkTextSecondary text-claude-textSecondary hover:text-claude-text dark:hover:text-claude-darkText hover:bg-claude-surfaceHover dark:hover:bg-claude-darkSurfaceHover'
-                  }`}
+                  className={`relative w-full inline-flex items-center justify-between rounded-lg px-2.5 py-2 text-sm font-medium transition-colors ${/* 有二级子菜单的一级菜单不选中、不高亮 */ 'dark:text-claude-darkTextSecondary text-claude-textSecondary hover:text-claude-text dark:hover:text-claude-darkText hover:bg-claude-surfaceHover dark:hover:bg-claude-darkSurfaceHover'}`}
                 >
                   <span className="inline-flex items-center gap-2">
                     <span className="text-sm">{'🌐'}</span>
@@ -321,11 +315,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                   <button
                     type="button"
                     onClick={() => setPhoneOpen(o => !o)}
-                    className={`w-full inline-flex items-center justify-between rounded-lg px-2.5 py-2 text-sm font-medium transition-colors ${
-                      activeView === 'cloudPhone' && !phoneOpen
-                        ? 'bg-claude-accent/10 text-claude-accent hover:bg-claude-accent/20'
-                        : 'dark:text-claude-darkTextSecondary text-claude-textSecondary hover:text-claude-text dark:hover:text-claude-darkText hover:bg-claude-surfaceHover dark:hover:bg-claude-darkSurfaceHover'
-                    }`}
+                    className={`w-full inline-flex items-center justify-between rounded-lg px-2.5 py-2 text-sm font-medium transition-colors ${/* 有二级子菜单的一级菜单不选中、不高亮 */ 'dark:text-claude-darkTextSecondary text-claude-textSecondary hover:text-claude-text dark:hover:text-claude-darkText hover:bg-claude-surfaceHover dark:hover:bg-claude-darkSurfaceHover'}`}
                   >
                     <span className="inline-flex items-center gap-2">
                       <span className="text-sm">{'📱'}</span>
@@ -360,11 +350,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           <button
             type="button"
             onClick={() => setAiChatOpen(o => !o)}
-            className={`w-full inline-flex items-center justify-between rounded-lg px-2.5 py-2 text-sm font-medium transition-colors ${
-              aiChildActive && !aiChatOpen
-                ? 'bg-claude-accent/10 text-claude-accent hover:bg-claude-accent/20'
-                : 'dark:text-claude-darkTextSecondary text-claude-textSecondary hover:text-claude-text dark:hover:text-claude-darkText hover:bg-claude-surfaceHover dark:hover:bg-claude-darkSurfaceHover'
-            }`}
+            className={`w-full inline-flex items-center justify-between rounded-lg px-2.5 py-2 text-sm font-medium transition-colors ${/* 有二级子菜单的一级菜单不选中、不高亮 */ 'dark:text-claude-darkTextSecondary text-claude-textSecondary hover:text-claude-text dark:hover:text-claude-darkText hover:bg-claude-surfaceHover dark:hover:bg-claude-darkSurfaceHover'}`}
           >
             <span className="inline-flex items-center gap-2">
               <span className="text-sm">{'💬'}</span>
