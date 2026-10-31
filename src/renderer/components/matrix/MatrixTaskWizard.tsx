@@ -24,10 +24,9 @@ const FUNNEL_PROB_MIN = 1;
 const FUNNEL_PROB_MAX = 100;
 const FUNNEL_PROB_DEFAULT = 100;   // 2026-10-28:有引流语时默认 100%(原 50%);没填引流语时概率不生效
 // 评论引流生效面(全平台统一,用户要求):
-//   抖音/快手/B站/TikTok/YouTube/Facebook/Instagram/Reddit —— 评论走 comment_composer 单串出口,
-//     客户端 makeAiCall 在该出口按概率把(AI 改写后的)引流语接在评论末尾(engageRunner.maybeAppendTail);
-//   币安广场/X/小红书 —— 评论走 __raw__ 出口,由各自剧本读 task.funnel_phrase/probability 自己接引流尾巴
-//     (币安融合结果仍过禁词质检),后端热下发即生效。
+//   所有平台的引流语(接评论尾巴 / AI自主评论关时只发引流语 / AI改写或原样)都由后端剧本处理:
+//     客户端 engageRunner 只把 task.funnel_phrase / funnel_probability / ai_comment / funnel_rewrite 下发给剧本
+//     (币安引流结果仍过禁词质检),后端热下发即生效。
 const FUNNEL_SUPPORTED_PLATFORMS = new Set(['douyin', 'kuaishou', 'bilibili', 'tiktok', 'youtube', 'binance', 'facebook', 'instagram', 'reddit', 'x', 'xhs', 'gate', 'bitget', 'bybit', 'okx']);
 
 type WizardStep = number;
