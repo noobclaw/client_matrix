@@ -85,7 +85,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   // v6.x:「AI对话」二级折叠组(新建对话 / web3连接 / 行业热点)。默认收起;
   //   当组内某子项激活时强制展开,避免高亮项被折叠藏起来。
   const [aiChatOpen, setAiChatOpen] = useState(false);
-  // 「浏览器」二级组(我的矩阵账号 / 新建任务 / 我的任务 / 任务运行记录),默认展开(2026-10-31)。仅专业版。
+  // 「浏览器窗口」二级组(我的矩阵账号 / 新建任务 / 我的任务 / 任务运行记录),默认展开(2026-10-31)。仅专业版。
   const [browserOpen, setBrowserOpen] = useState(true);
   const aiChildActive = activeView === 'cowork' || activeView === 'coworkHistory' || activeView === 'mcp' || activeView === 'web3news' || activeView === 'scheduledTasks' || activeView === 'skills';
   useEffect(() => { if (aiChildActive) setAiChatOpen(true); }, [aiChildActive]);
@@ -304,7 +304,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 >
                   <span className="inline-flex items-center gap-2">
                     <span className="text-sm">{'🌐'}</span>
-                    {zh ? '浏览器' : tw ? '瀏覽器' : 'Browser'}
+                    {zh ? '浏览器窗口' : tw ? '瀏覽器窗口' : 'Browser Windows'}
                   </span>
                   <span className={`text-xs transition-transform ${browserOpen ? 'rotate-90' : ''}`}>{'▸'}</span>
                   {/* 收起时把「过期账号」角标挂到组头上,别藏起来 */}
