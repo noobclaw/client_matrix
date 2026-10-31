@@ -9,7 +9,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { i18nService } from '../../services/i18n';
 import { platformSupportsFavorite } from '../../services/engageActions';
-import MatrixFunnelConfig, { FunnelUnsetConfirm, countUnconfigured, funnelAiOffError, effFunnelProb, rewriteField, FUNNEL_PROB_DEFAULT as FPD } from './MatrixFunnelConfig';
+import MatrixFunnelConfig, { FunnelUnsetConfirm, countUnconfigured, funnelAiOffError, effFunnelProb, rewriteField, anyPerAccountRaw, FUNNEL_PROB_DEFAULT as FPD } from './MatrixFunnelConfig';
 import { NumMinMax, NumRow } from './NumberStepper';
 import { AccountKeywordTabs, effectiveKw } from './MatrixAccountKeywords';
 import { presetAccountIds, usePresetUsed, usePresetPrune } from '../../uiEdition';
@@ -18,15 +18,15 @@ const LIKE_HARDCAP = 500;
 const FOLLOW_HARDCAP = 100;
 const COMMENT_HARDCAP = 100;
 
-// 引流(评论时按概率把引流文案融进 AI 评论)。与 MatrixReplyFansWizard 同一套口径。
+// 引流(评论时按概率把引流语接在 AI 评论末尾)。与 MatrixReplyFansWizard 同一套口径。
 const FUNNEL_PHRASE_MAX = 1000;
 const FUNNEL_PROB_MIN = 1;
 const FUNNEL_PROB_MAX = 100;
 const FUNNEL_PROB_DEFAULT = 100;   // 2026-10-28:有引流语时默认 100%(原 50%);没填引流语时概率不生效
 // 评论引流生效面(全平台统一,用户要求):
 //   抖音/快手/B站/TikTok/YouTube/Facebook/Instagram/Reddit —— 评论走 comment_composer 单串出口,
-//     客户端 makeAiCall 在该出口融入(engageRunner.maybeWeaveFunnel);
-//   币安广场/X/小红书 —— 评论走 __raw__ 出口,由各自剧本读 task.funnel_phrase/probability 做 AI 融合
+//     客户端 makeAiCall 在该出口按概率把(AI 改写后的)引流语接在评论末尾(engageRunner.maybeAppendTail);
+//   币安广场/X/小红书 —— 评论走 __raw__ 出口,由各自剧本读 task.funnel_phrase/probability 自己接引流尾巴
 //     (币安融合结果仍过禁词质检),后端热下发即生效。
 const FUNNEL_SUPPORTED_PLATFORMS = new Set(['douyin', 'kuaishou', 'bilibili', 'tiktok', 'youtube', 'binance', 'facebook', 'instagram', 'reddit', 'x', 'xhs', 'gate', 'bitget', 'bybit', 'okx']);
 
@@ -629,7 +629,7 @@ const MatrixTaskWizard: React.FC<Props> = ({ platformLabel, platform, accounts, 
                 <SummaryRow label={i18nService.t('wzEngageSummaryComments')} value={i18nService.t('wzEngageSummaryPerRunValue').replace('{min}', String(cmtMin)).replace('{max}', String(cmtMax))} />
               )}
               {showFunnel && <SummaryRow label={i18nService.t('wzEngageSummaryFunnel')} value={(funnelPerMode
-                ? i18nService.t('wzFunnelSummaryPer').replace('{done}', String(selectedAccounts.length - countUnconfigured(selectedAccounts, funnelPerMap))).replace('{total}', String(selectedAccounts.length))
+                ? i18nService.t('wzFunnelSummaryPer').replace('{done}', String(selectedAccounts.length - countUnconfigured(selectedAccounts, funnelPerMap))).replace('{total}', String(selectedAccounts.length)) + (anyPerAccountRaw(funnelPerMap, selectedAccounts.map((a) => a.id)) ? ` · ${i18nService.t('wzFunnelRewriteOffTag')}` : '')
                 : (hasFunnel ? `"${funnelPhrase.trim().slice(0, 40)}${funnelPhrase.trim().length > 40 ? '...' : ''}" · ${effFunnelProb(aiComment, funnelProb)}%${funnelRewrite ? '' : ` · ${i18nService.t('wzFunnelRewriteOffTag')}`}` : i18nService.t('wzEngageSummaryFunnelEmpty'))) + (aiComment ? '' : ` · ${i18nService.t('wzFunnelAiOffTag')}`)} />}
               <SummaryRow label={i18nService.t('wzEngageSummaryConcurrency')} value={i18nService.t('wzEngageSummaryConcurrencyValue').replace('{n}', String(selected.size))} />
               <SummaryRow label={i18nService.t('wzEngageSummaryFrequency')} value={intervalLabel} />

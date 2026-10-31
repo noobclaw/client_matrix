@@ -57,6 +57,12 @@ export function funnelAiOffError(aiComment: boolean, perMode: boolean, accounts:
   return n > 0 ? i18nService.t('wzFunnelAiOffErrPer').replace('{n}', String(n)) : null;
 }
 
+/** 各账号模式:是否有(已配引流语的)账号关了 AI改写 —— 摘要/卡片上标「原样」用。ids 不传 = 看全部。 */
+export function anyPerAccountRaw(perMap: Record<string, { funnel_phrase?: string; funnel_rewrite?: boolean }> | null | undefined, ids?: string[]): boolean {
+  if (!perMap || typeof perMap !== 'object') return false;
+  return (ids || Object.keys(perMap)).some((id) => perMap[id]?.funnel_rewrite === false && !!String(perMap[id]?.funnel_phrase || '').trim());
+}
+
 /** 落库用:funnel_rewrite 只在关闭时写 false,开着不写(缺省 = 开 = 老行为)。 */
 export function rewriteField(v: { funnel_rewrite?: boolean } | undefined): { funnel_rewrite?: false } {
   return v?.funnel_rewrite === false ? { funnel_rewrite: false } : {};

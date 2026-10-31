@@ -80,6 +80,17 @@ export const XhsReplyFansCommentWizard: React.FC<Props> = ({
   const [rewriteConfirm, setRewriteConfirm] = useState(false);
   // 关了 AI自主评论:引流语必填,概率固定 100%
   const effProb = aiComment ? funnelProb : FUNNEL_PROB_MAX;
+  // 关了 AI自主评论时引流语必填。本向导只编辑共用那份;任务若是「各账号」模式(在矩阵向导里配的,
+  //   保存时本向导不动 funnel_by_account),就按各账号的引流语判:每个执行账号都得有。
+  const perAccFunnel = (initialTask as any)?.funnel_by_account;
+  const aiOffError: string | null = aiComment ? null
+    : (perAccFunnel && typeof perAccFunnel === 'object')
+      ? (() => {
+        const ids: string[] = Array.isArray((initialTask as any)?.account_ids) ? (initialTask as any).account_ids : Object.keys(perAccFunnel);
+        const n = ids.filter((id) => !String(perAccFunnel[id]?.funnel_phrase || '').trim()).length;
+        return n > 0 ? i18nService.t('wzFunnelAiOffErrPer').replace('{n}', String(n)) : null;
+      })()
+      : (hasFunnel ? null : i18nService.t('wzFunnelAiOffErrShared'));
 
   // ── 调度 ──
   const dailyTime = useMemo(() => {
@@ -103,7 +114,7 @@ export const XhsReplyFansCommentWizard: React.FC<Props> = ({
   }, [funnelPhrase, funnelProb, runInterval, aiComment]);
 
   const canAdvance: Record<WizardStep, { ok: boolean; reason?: string }> = {
-    1: (!aiComment && !hasFunnel) ? { ok: false, reason: i18nService.t('wzFunnelAiOffErrShared') } : { ok: true },
+    1: aiOffError ? { ok: false, reason: aiOffError } : { ok: true },
     2: { ok: allTermsAccepted, reason: isZh ? '请勾选使用条款' : 'Please accept the terms' },
   };
 
@@ -239,18 +250,9 @@ export const XhsReplyFansCommentWizard: React.FC<Props> = ({
                 </div>
               </div>
 
-              {/* 引流概率 */}
-              <div>
-                <label className="text-sm font-medium dark:text-gray-200 mb-2 block">
-                  {isZh
-                    ? `🎲 引流尾巴出现概率: ${!aiComment ? FUNNEL_PROB_MAX : hasFunnel ? funnelProb : 0}%`
-                    : `🎲 Funnel tail probability: ${!aiComment ? FUNNEL_PROB_MAX : hasFunnel ? funnelProb : 0}%`}
-                  <span className="text-xs text-gray-400 font-normal ml-1">
-                    {!aiComment ? i18nService.t('wzEngageFunnelProbHintFixed') : hasFunnel
-                      ? (isZh ? '· AI 会按概率把引流语自然衔接到回复尾部' : '· AI weaves funnel into reply tail by probability')
-                      : (isZh ? '· 引流语未填,概率失效' : '· Funnel empty, probability disabled')}
-                  </span>
-                </label>
+              {/* 引流概率:标签与 −/值/%/+ 同一行(同 MatrixFunnelConfig);只在关了 AI自主评论 时跟一句固定 100% */}
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="text-sm font-medium dark:text-gray-200">{i18nService.t('wzEngageFunnelProbLabel')}</span>
                 <NumBox
                   value={effProb}
                   onChange={setFunnelProb}
@@ -261,6 +263,7 @@ export const XhsReplyFansCommentWizard: React.FC<Props> = ({
                   accent="fuchsia"
                   suffix="%"
                 />
+                {!aiComment && <span className="text-xs text-gray-400">{i18nService.t('wzEngageFunnelProbHintFixed')}</span>}
               </div>
               {rewriteConfirm && (
                 <FunnelConfirmDialog

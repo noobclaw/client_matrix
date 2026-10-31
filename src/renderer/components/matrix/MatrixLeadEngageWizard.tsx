@@ -17,7 +17,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { i18nService } from '../../services/i18n';
 import MatrixFunnelConfig, {
-  FunnelUnsetConfirm, countUnconfigured, funnelAiOffError, effFunnelProb, rewriteField, FUNNEL_PHRASE_MAX, FUNNEL_PROB_DEFAULT,
+  FunnelUnsetConfirm, countUnconfigured, funnelAiOffError, effFunnelProb, rewriteField, anyPerAccountRaw, FUNNEL_PHRASE_MAX, FUNNEL_PROB_DEFAULT,
   type FunnelValue,
 } from './MatrixFunnelConfig';
 import { NumRow } from './NumberStepper';
@@ -687,7 +687,7 @@ const MatrixLeadEngageWizard: React.FC<Props> = ({ platformLabel, platform, acco
                 clampInt(maxFollows,0,100) > 0 ? `➕${clampInt(maxFollows,0,100)}` : null,
               ].filter(Boolean).join(' · ') || '—'}</span></div>
               <div className="flex justify-between"><span className="text-gray-500">{t('每个潜客', 'Per lead')}</span><span>{t('只做 1 个动作', 'one action')}</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">{i18nService.t('wzEngageSummaryFunnel')}</span><span>{funnelPerMode ? t(`各账号各自(${funnelAccounts.length - countUnconfigured(funnelAccounts, funnelPerMap)}/${funnelAccounts.length} 已配)`, `per account`) : (funnelPhrase.trim() ? t(`共用 · ${effFunnelProb(aiComment, funnelProb)}%`, `shared · ${effFunnelProb(aiComment, funnelProb)}%`) + (funnelRewrite ? '' : ` · ${i18nService.t('wzFunnelRewriteOffTag')}`) : t('未配置', 'none'))}{aiComment ? '' : ` · ${i18nService.t('wzFunnelAiOffTag')}`}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">{i18nService.t('wzEngageSummaryFunnel')}</span><span>{funnelPerMode ? t(`各账号各自(${funnelAccounts.length - countUnconfigured(funnelAccounts, funnelPerMap)}/${funnelAccounts.length} 已配)`, `per account`) + (anyPerAccountRaw(funnelPerMap, funnelAccounts.map((a) => a.id)) ? ` · ${i18nService.t('wzFunnelRewriteOffTag')}` : '') : (funnelPhrase.trim() ? t(`共用 · ${effFunnelProb(aiComment, funnelProb)}%`, `shared · ${effFunnelProb(aiComment, funnelProb)}%`) + (funnelRewrite ? '' : ` · ${i18nService.t('wzFunnelRewriteOffTag')}`) : t('未配置', 'none'))}{aiComment ? '' : ` · ${i18nService.t('wzFunnelAiOffTag')}`}</span></div>
               <div className="flex justify-between"><span className="text-gray-500">{t('频率', 'Frequency')}</span><span>{intervalLabel}</span></div>
             </div>
             <label className="flex items-start gap-2 text-xs text-gray-500 dark:text-gray-400 cursor-pointer">

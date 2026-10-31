@@ -13,7 +13,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { i18nService } from '../../services/i18n';
-import MatrixFunnelConfig, { FunnelUnsetConfirm, countUnconfigured, funnelAiOffError, effFunnelProb, rewriteField, FUNNEL_PROB_DEFAULT as FPD } from './MatrixFunnelConfig';
+import MatrixFunnelConfig, { FunnelUnsetConfirm, countUnconfigured, funnelAiOffError, effFunnelProb, rewriteField, anyPerAccountRaw, FUNNEL_PROB_DEFAULT as FPD } from './MatrixFunnelConfig';
 import { presetAccountIds, usePresetUsed, usePresetPrune } from '../../uiEdition';
 
 type WizardStep = number;   // 1..totalSteps(抖音 4 步:账号 / 数量 / 引流语 / 频率;其它平台 3 步,无「数量」)
@@ -314,7 +314,7 @@ const MatrixReplyFansWizard: React.FC<Props> = ({ platformLabel, platform, accou
               <div className="font-semibold dark:text-gray-200 mb-1">📋 {i18nService.t('wzReplySummaryTitle')}</div>
               <SummaryRow label={i18nService.t('wzReplySumAccountsLabel')} value={i18nService.t('wzReplySumAccountsValue').replace('{n}', String(selected.size)).replace('{item}', itemZh)} />
               <SummaryRow label={i18nService.t('wzReplySumFunnelLabel')} value={(funnelPerMode
-                ? i18nService.t('wzFunnelSummaryPer').replace('{done}', String(selectedAccounts.length - countUnconfigured(selectedAccounts, funnelPerMap))).replace('{total}', String(selectedAccounts.length))
+                ? i18nService.t('wzFunnelSummaryPer').replace('{done}', String(selectedAccounts.length - countUnconfigured(selectedAccounts, funnelPerMap))).replace('{total}', String(selectedAccounts.length)) + (anyPerAccountRaw(funnelPerMap, selectedAccounts.map((a) => a.id)) ? ` · ${i18nService.t('wzFunnelRewriteOffTag')}` : '')
                 : (hasFunnel ? `"${funnelPhrase.trim().slice(0, 40)}${funnelPhrase.trim().length > 40 ? '...' : ''}" · ${effFunnelProb(aiComment, funnelProb)}%${funnelRewrite ? '' : ` · ${i18nService.t('wzFunnelRewriteOffTag')}`}` : i18nService.t('wzReplySumFunnelEmpty'))) + (aiComment ? '' : ` · ${i18nService.t('wzFunnelAiOffTag')}`)} />
               <SummaryRow label={i18nService.t('wzReplySumScopeLabel')} value={i18nService.t('wzReplySumScopeValue').replace('{item}', isXhs ? i18nService.t('wzReplyScopeUnitXhs') : i18nService.t('wzReplyScopeUnitOther'))} />
               <SummaryRow label={i18nService.t('wzReplySumConcurrencyLabel')} value={i18nService.t('wzReplySumConcurrencyValue').replace('{n}', String(selected.size))} />

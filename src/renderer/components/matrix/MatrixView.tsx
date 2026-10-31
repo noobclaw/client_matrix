@@ -4,6 +4,7 @@ import { i18nService } from '../../services/i18n';
 import { shortId } from '../../utils/shortId';
 import MatrixTaskWizard from './MatrixTaskWizard';
 import MatrixReplyFansWizard from './MatrixReplyFansWizard';
+import { anyPerAccountRaw } from './MatrixFunnelConfig';
 import { WalletBadge } from '../common/WalletBadge';
 import SimpleSelect from '../common/SimpleSelect';
 import { noobClawAuth } from '../../services/noobclawAuth';
@@ -39,6 +40,7 @@ interface MatrixTask {
     daily_favorite_min?: number; daily_favorite_max?: number; max_comment_per_work?: number; engage_mode?: string;
     precise_urls?: string[]; precise_like?: number; precise_favorite?: number; precise_follow?: number; precise_comment?: number };
   funnel?: { funnel_phrase?: string; funnel_probability?: number; funnel_rewrite?: boolean };
+  funnelByAccount?: Record<string, { funnel_phrase?: string; funnel_probability?: number; funnel_rewrite?: boolean }>;
   ai_comment?: boolean;   // AI自主评论:缺省 = 开;false = AI 只发引流语
   concurrency?: number; frequency: string; nextPlannedRunAt?: number; lastRunAt?: number; createdAt: number;
 }
@@ -152,6 +154,11 @@ const STATUS_DOT: Record<AccountStatus, string> = { idle: 'bg-green-500', runnin
 // ⚠️ 必须【每次调用时】求值 i18nService.t —— 不能写成模块级 const 对象:那会在模块加载时(语言可能还没
 //   切到用户语言,默认中文)求值一次并永久冻结,导致切英文/小语种后状态/频率文案仍是中文(用户实测)。
 const statusLabel = (s: AccountStatus): string => (({ idle: i18nService.t('mvStIdle'), running: i18nService.t('mvStRunning'), login_required: i18nService.t('mvStNotConnected'), limited: i18nService.t('mvStLimited'), banned: i18nService.t('mvStBanned') } as Record<AccountStatus, string>)[s] || '');
+// 引流相关的关闭态标签(AI自主评论关 / 原样引流语),缺省 = 开,不显示。各账号模式看各账号那份。
+const funnelTagsOf = (t: { funnel?: { funnel_phrase?: string; funnel_rewrite?: boolean }; funnelByAccount?: Record<string, { funnel_phrase?: string; funnel_rewrite?: boolean }>; ai_comment?: boolean }): string => {
+  const raw = t.funnelByAccount ? anyPerAccountRaw(t.funnelByAccount) : (t.funnel?.funnel_rewrite === false && !!String(t.funnel?.funnel_phrase || '').trim());
+  return (raw ? ` · ${i18nService.t('wzFunnelRewriteOffTag')}` : '') + (t.ai_comment === false ? ` · ${i18nService.t('wzFunnelAiOffTag')}` : '');
+};
 const freqLabel = (f: string): string => (({ once: i18nService.t('mvFreqOnce'), '30min': i18nService.t('mvFreq30min'), '1h': i18nService.t('mvFreq1h'), '3h': i18nService.t('mvFreq3h'), '6h': i18nService.t('mvFreq6h'), daily_random: i18nService.t('mvFreqDailyRandom') } as Record<string, string>)[f] || f);
 
 // 赛道预设(下拉可选):选了自动填关键词 + 人设建议(用户仍可在下面微调)。
@@ -1312,8 +1319,8 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
                       </div>
                       <div className="text-xs text-gray-600 dark:text-gray-300 mb-1">👥 {i18nService.t('mvAccountCountLabel').replace('{n}', String(t.accountIds.length))} · {isReply ? i18nService.t('mvReplyOwnFans') : i18nService.t('mvUseOwnKeywords')}</div>
                       {isReply
-                        ? <div className="text-xs text-gray-500 dark:text-gray-400">⏰ {freqLabel(t.frequency)} · 🎣 {t.funnel?.funnel_phrase ? i18nService.t('mvFunnelTail').replace('{n}', String(t.funnel.funnel_probability || 0)) : i18nService.t('mvPureAiReply')}{t.ai_comment === false ? ` · ${i18nService.t('wzFunnelAiOffTag')}` : ''}</div>
-                        : <div className="text-xs text-gray-500 dark:text-gray-400">⏰ {freqLabel(t.frequency)} · {engageQuotaSummary(t.quota, i18nService.currentLanguage === 'zh')}{String(t.quota?.engage_mode || '') === 'precise' ? '' : ` / ${i18nService.t('mvPerRun')}`}</div>}
+                        ? <div className="text-xs text-gray-500 dark:text-gray-400">⏰ {freqLabel(t.frequency)} · 🎣 {t.funnel?.funnel_phrase ? i18nService.t('mvFunnelTail').replace('{n}', String(t.funnel.funnel_probability || 0)) : i18nService.t('mvPureAiReply')}{funnelTagsOf(t)}</div>
+                        : <div className="text-xs text-gray-500 dark:text-gray-400">⏰ {freqLabel(t.frequency)} · {engageQuotaSummary(t.quota, i18nService.currentLanguage === 'zh')}{String(t.quota?.engage_mode || '') === 'precise' ? '' : ` / ${i18nService.t('mvPerRun')}`}{funnelTagsOf(t)}</div>}
                       <div className="text-[11px] text-gray-400 mt-1">{t.lastRunAt ? i18nService.t('mvLastRun').replace('{time}', fmtTime(t.lastRunAt)) : i18nService.t('mvNotRunYet')}</div>
                       <div className="mt-2 pt-2 border-t border-gray-100 dark:border-gray-800 flex items-center justify-end">
                         {isRunning
@@ -1349,10 +1356,10 @@ const MatrixView: React.FC<Props> = ({ screen = 'accounts', initialPlatform, onN
               <div className="flex gap-3 text-xs"><span className="text-gray-500 dark:text-gray-400 w-20 shrink-0">{i18nService.t('mvFrequency')}</span><span className="text-gray-800 dark:text-gray-200">{freqLabel(selectedTask.frequency)}{selectedTask.frequency !== 'once' && selectedTask.enabled ? i18nService.t('mvNextRunSuffix').replace('{time}', fmtTime(selectedTask.nextPlannedRunAt)) : ''}</span></div>
               {selectedIsReply
                 ? <>
-                    <div className="flex gap-3 text-xs"><span className="text-gray-500 dark:text-gray-400 w-20 shrink-0">{i18nService.t('mvFunnelPhrase')}</span><span className="text-gray-800 dark:text-gray-200 break-all">{selectedTask.funnel?.funnel_phrase ? `"${selectedTask.funnel.funnel_phrase.slice(0, 40)}${selectedTask.funnel.funnel_phrase.length > 40 ? '...' : ''}" · ${selectedTask.funnel.funnel_probability || 0}%${selectedTask.funnel.funnel_rewrite === false ? ` · ${i18nService.t('wzFunnelRewriteOffTag')}` : ''}` : i18nService.t('mvFunnelEmpty')}{selectedTask.ai_comment === false ? ` · ${i18nService.t('wzFunnelAiOffTag')}` : ''}</span></div>
+                    <div className="flex gap-3 text-xs"><span className="text-gray-500 dark:text-gray-400 w-20 shrink-0">{i18nService.t('mvFunnelPhrase')}</span><span className="text-gray-800 dark:text-gray-200 break-all">{selectedTask.funnel?.funnel_phrase ? `"${selectedTask.funnel.funnel_phrase.slice(0, 40)}${selectedTask.funnel.funnel_phrase.length > 40 ? '...' : ''}" · ${selectedTask.funnel.funnel_probability || 0}%` : i18nService.t('mvFunnelEmpty')}{funnelTagsOf(selectedTask)}</span></div>
                     <div className="flex gap-3 text-xs"><span className="text-gray-500 dark:text-gray-400 w-20 shrink-0">{i18nService.t('mvReplyScope')}</span><span className="text-gray-800 dark:text-gray-200">{i18nService.t('mvReplyScopeVal').replace('{n}', String(selectedTask.concurrency || 3))}</span></div>
                   </>
-                : <div className="flex gap-3 text-xs"><span className="text-gray-500 dark:text-gray-400 w-20 shrink-0">{i18nService.t('mvQuotaPerRun')}</span><span className="text-gray-800 dark:text-gray-200">{engageQuotaSummary(selectedTask.quota, i18nService.currentLanguage === 'zh')} · {i18nService.t('mvConcurrencyLabel').replace('{n}', String(selectedTask.concurrency || 3))}</span></div>}
+                : <div className="flex gap-3 text-xs"><span className="text-gray-500 dark:text-gray-400 w-20 shrink-0">{i18nService.t('mvQuotaPerRun')}</span><span className="text-gray-800 dark:text-gray-200">{engageQuotaSummary(selectedTask.quota, i18nService.currentLanguage === 'zh')} · {i18nService.t('mvConcurrencyLabel').replace('{n}', String(selectedTask.concurrency || 3))}{funnelTagsOf(selectedTask)}</span></div>}
               <div className="flex gap-3 text-xs"><span className="text-gray-500 dark:text-gray-400 w-20 shrink-0">{i18nService.t('mvAccountsLabel').replace('{n}', String(selectedTask.accountIds.length))}</span><span className="text-gray-800 dark:text-gray-200 break-all">{selectedTask.accountIds.map((id) => accounts.find((a) => a.id === id)?.displayName || id).join('、')}</span></div>
             </div>
             {(() => {

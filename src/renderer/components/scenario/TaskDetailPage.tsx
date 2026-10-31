@@ -15,6 +15,7 @@ import { LoginRequiredModal } from './LoginRequiredModal';
 import { MATRIX_EDITION } from '../../matrixEdition';
 import { noobClawAuth } from '../../services/noobclawAuth';
 import { i18nService } from '../../services/i18n';
+import { anyPerAccountRaw } from '../matrix/MatrixFunnelConfig';
 import { friendlyRunError } from '../../services/runErrorMessage';
 import type { ScenarioRunProgress } from '../../types/scenario';
 import LuckyBag from '../cowork/LuckyBag';
@@ -1048,10 +1049,11 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
                     // AI自主评论关 / AI改写引流语关:在引流行尾巴上标出来(缺省 = 开,不显示)。
                     const aiOffTag = (task as any).ai_comment === false ? ` · ${i18nService.t('wzFunnelAiOffTag')}` : '';
                     const rwOffTag = (task as any).funnel_rewrite === false ? ` · ${i18nService.t('wzFunnelRewriteOffTag')}` : '';
+                    const rwPerTag = anyPerAccountRaw(fba) ? ` · ${i18nService.t('wzFunnelRewriteOffTag')}` : '';
                     if (fba && Object.keys(fba).length) {
                       return (
                         <div className='text-xs text-gray-500 dark:text-gray-400'>
-                          🎣 {i18nService.t('tdCommentFunnel')}: {i18nService.t('wzFunnelSummaryPer').replace('{done}', String(Object.keys(fba).length)).replace('{total}', String(((task as any).account_ids || []).length || Object.keys(fba).length))}{aiOffTag}
+                          🎣 {i18nService.t('tdCommentFunnel')}: {i18nService.t('wzFunnelSummaryPer').replace('{done}', String(Object.keys(fba).length)).replace('{total}', String(((task as any).account_ids || []).length || Object.keys(fba).length))}{rwPerTag}{aiOffTag}
                         </div>
                       );
                     }
@@ -1340,10 +1342,11 @@ export const TaskDetailPage: React.FC<Props> = ({ task, scenario, onBack, onEdit
                         const fba2 = (task as any).funnel_by_account as Record<string, any> | undefined;
                         const aiOffTag2 = (task as any).ai_comment === false ? ` · ${i18nService.t('wzFunnelAiOffTag')}` : '';
                         const rwOffTag2 = (task as any).funnel_rewrite === false ? ` · ${i18nService.t('wzFunnelRewriteOffTag')}` : '';
+                        const rwPerTag2 = anyPerAccountRaw(fba2) ? ` · ${i18nService.t('wzFunnelRewriteOffTag')}` : '';
                         if (fba2 && Object.keys(fba2).length) {
                           return (
                             <div className='text-xs text-gray-500 dark:text-gray-400'>
-                              {i18nService.t('tdFunnelPhrase')}: {i18nService.t('wzFunnelSummaryPer').replace('{done}', String(Object.keys(fba2).length)).replace('{total}', String(((task as any).account_ids || []).length || Object.keys(fba2).length))}{aiOffTag2}
+                              {i18nService.t('tdFunnelPhrase')}: {i18nService.t('wzFunnelSummaryPer').replace('{done}', String(Object.keys(fba2).length)).replace('{total}', String(((task as any).account_ids || []).length || Object.keys(fba2).length))}{rwPerTag2}{aiOffTag2}
                             </div>
                           );
                         }
